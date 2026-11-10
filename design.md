@@ -342,7 +342,7 @@ Her DMZ gateway'inde path'ler üç sınıfa ayrılır. Kimlik kontrolü yalnızc
 ### 5.0b Mobil Token Exchange: Bulgular ve Karar
 
 **Bulgu:** Keycloak 26.6, DPoP'a bağlı (`cnf`) subject token'larının token exchange'de kullanılmasını kabul etmiyor:
-`Sender-constrained tokens (RFC 7800) cannot be used as subject_token in Token Exchange`. Web ve partner token'ları bu kısıtlamadan etkilenmiyor. Mobil token'lar DPoP ile bağlandığı için mobil iç çağrılar şu an başarısız (güvenli taraftan başarısızlık).
+`Sender-constrained tokens (RFC 7800) cannot be used as subject_token in Token Exchange`. Partner token'ları bu kısıtlamadan etkilenmiyor. **Web token'ları:** İlk yapılandırmada `web-app` DPoP bağlı token üretiyordu ve bu token exchange'de 400 ile reddediliyordu (ölçüm: `Sender-constrained tokens are not supported as subject_token`). Karar: web akışı DPoP'suz (PKCE + Bearer), mobil akışı DPoP'lu (SPI). Böylece web token'ları exchange'den geçer. D-10 (web için DPoP) prod'da yeniden değerlendirilmelidir. Mobil token'lar DPoP ile bağlandığı için mobil iç çağrılar şu an başarısız (güvenli taraftan başarısızlık).
 
 **Denenen çözüm (impersonation):** DMZ, DPoP'u kendisi doğrular, sonra mTLS ile kimliği belli `dmz-exchange-mobile` client'ı üzerinden kullanıcı adına impersonation ile iç token alır. Sonuç: başarısız.
 - Standard Token Exchange V2 `requested_subject` parametresini desteklemiyor (`Parameter 'requested_subject' is not supported for standard token exchange`).
@@ -619,7 +619,7 @@ Bu bölüm lab'da gerçekten doğrulanan durumu ve prod'da değişmesi gereken n
 
 | Bileşen | Durum | Doğrulama |
 |---|---|---|
-| DMZ kanal gateway'leri (web, mobile, partner), default deny route'lar | Çalışıyor | `smoke.sh` 4/4, `route-classes.sh` 10/10 |
+| DMZ kanal gateway'leri (web, mobile, partner), default deny route'lar. `/public/*` ve `/realms/*` route'ları iç gateway üzerinden gerçek servislere gider (core, Keycloak); stub yok | Çalışıyor | `smoke.sh` 4/4, `route-classes.sh` 10/10 |
 | Ext-authz: RS256 (JWKS), DPoP proof, token exchange (mTLS, kanal sertifikası) | Çalışıyor | `extauth.sh` 25/25 |
 | Mobil token exchange (DPoP'lu token, Keycloak SPI `dmz-dpop-mobile-exchange`) | Çalışıyor | `extauth.sh` mobil testleri |
 | İç gateway: iç JWT doğrulaması, kanal RBAC, DMZ kimliğine mTLS, default deny | Çalışıyor | `authz.sh` 16/16 |
@@ -658,7 +658,7 @@ Aşağıdaki her satır prod'da değişmesi gereken bir noktayı gösterir. Süt
 | Vault PKI | Yok, sertifikalar elle üretilmiş | Exchange, DMZ ve partner istemci sertifikaları Vault PKI ile kısa ömürlü |
 | Secret dağıtımı | Vault → Kubernetes secret (betik) | External Secrets Operator, namespace bazlı, Vault politikalarıyla |
 | Exchange kimlik doğrulama | Keycloak `client-x509`, sertifikalar elle | Vault PKI, rotasyon, kısa ömür |
-| Test client'ları | `lab-cli`, `mobile-app` üzerinde `directAccessGrants` | Kaldırılır. Prod'da yalnız PKCE ve client credentials |
+| Test client'ları | Lab'da `lab-cli` kaldırıldı; `mobile-app` ve `web-app` üzerinde `directAccessGrants` kapalı. Testler kullanıcı token'ını Authorization Code + PKCE ile alır (`identity-cluster/tests/lib/pkce.sh`) | Prod'da test kullanıcısı ve test client'ı yok; yalnız PKCE ve client credentials |
 | Test kullanıcısı | `alice` | Yok |
 | DPoP | RS256 proof, süreç içi `jti` cache | ES256 desteği, paylaşılan replay store (ör. Redis) |
 | Ext-authz replika | 1 (replay cache tutarlılığı için) | En az 2, paylaşılan store ile |

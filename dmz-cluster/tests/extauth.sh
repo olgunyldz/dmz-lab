@@ -57,19 +57,10 @@ sleep 6
 CURL=(curl)
 if curl -V 2>/dev/null | grep -qi schannel; then CURL=(curl --ssl-no-revoke); fi
 
-token_from() { # <client-id> <secret-or-empty> <user-or-empty>
+# Servis (client credentials) token'ı. Kullanıcı token'ları PKCE ile alınır (aşağıda); şifre grant'i yok.
+token_from() { # <client-id> <secret>
     local body
-    if [[ "$1" == "mobile-app" ]]; then
-        local proof
-        proof=$(dpop_proof POST "$ISSUER_BASE")
-        body=$(curl -s -X POST "$ISSUER_BASE" -H "DPoP: $proof" -d grant_type=password -d client_id="$1" \
-            -d username="$3" --data-urlencode "password=$(secret alice-password)")
-    elif [[ -n "$3" ]]; then
-        body=$(curl -s -X POST "$ISSUER_BASE" -d grant_type=password -d client_id="$1" \
-            ${2:+-d client_secret="$2"} -d username="$3" --data-urlencode "password=$(secret alice-password)")
-    else
-        body=$(curl -s -X POST "$ISSUER_BASE" -d grant_type=client_credentials -d client_id="$1" -d "client_secret=$2")
-    fi
+    body=$(curl -s -X POST "$ISSUER_BASE" -d grant_type=client_credentials -d client_id="$1" -d "client_secret=$2")
     echo "$body" | sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p'
 }
 
@@ -111,8 +102,12 @@ partner_get() { # <token-or-empty> <path>
         -quiet 2>/dev/null
 }
 
-WEB_TOKEN=$(token_from lab-cli "$(secret lab-cli)" alice)
-MOBILE_TOKEN=$(token_from mobile-app "" alice)
+# Kullanıcı token'ları: Authorization Code + PKCE (web: Bearer, mobil: DPoP bağlı)
+source "$ROOT/../identity-cluster/tests/lib/pkce.sh"
+PKCE_BASE=http://127.0.0.1:18080
+WEB_TOKEN=$(pkce_token web-app https://web.lab.local:8443/callback alice "$(secret alice-password)" "$(secret web-app)" "")
+MOBILE_TOKEN=$(pkce_token mobile-app com.bank.app:/callback alice "$(secret alice-password)" "" \
+    "$(dpop_proof POST "$ISSUER_BASE")")
 PARTNER_TOKEN=$(token_from partner-acme "$(secret partner-acme)" "")
 echo "token'lar alındı: web=${#WEB_TOKEN} mobile=${#MOBILE_TOKEN} partner=${#PARTNER_TOKEN}"
 

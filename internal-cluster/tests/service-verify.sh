@@ -31,8 +31,9 @@ trap 'kill "${PF_PIDS[@]}" 2>/dev/null' EXIT
 sleep 6
 
 # Dış token'lar (Keycloak)
-WEB_EXT=$(curl -s -X POST "http://127.0.0.1:18080$TOKEN_PATH" -d grant_type=password -d client_id=lab-cli \
-    -d "client_secret=$(secret lab-cli)" -d username=alice --data-urlencode "password=$(secret alice-password)" | json_token)
+source "$ROOT/../identity-cluster/tests/lib/pkce.sh"
+PKCE_BASE=http://127.0.0.1:18080
+WEB_EXT=$(pkce_token web-app https://web.lab.local:8443/callback alice "$(secret alice-password)" "$(secret web-app)" "")
 PARTNER_EXT=$(curl -s -X POST "http://127.0.0.1:18080$TOKEN_PATH" -d grant_type=client_credentials \
     -d client_id=partner-acme -d "client_secret=$(secret partner-acme)" | json_token)
 

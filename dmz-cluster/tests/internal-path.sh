@@ -34,8 +34,9 @@ sleep 6
 CURL=(curl)
 if curl -V 2>/dev/null | grep -qi schannel; then CURL=(curl --ssl-no-revoke); fi
 
-WEB_TOKEN=$(curl -s -X POST "$ISSUER_BASE" -d grant_type=password -d client_id=lab-cli \
-    -d "client_secret=$(secret lab-cli)" -d username=alice --data-urlencode "password=$(secret alice-password)" | json_token)
+source "$ROOT/../identity-cluster/tests/lib/pkce.sh"
+PKCE_BASE=http://127.0.0.1:18080
+WEB_TOKEN=$(pkce_token web-app https://web.lab.local:8443/callback alice "$(secret alice-password)" "$(secret web-app)" "")
 PARTNER_TOKEN=$(curl -s -X POST "$ISSUER_BASE" -d grant_type=client_credentials -d client_id=partner-acme \
     -d "client_secret=$(secret partner-acme)" | json_token)
 

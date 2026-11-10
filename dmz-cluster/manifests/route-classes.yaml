@@ -20,8 +20,8 @@ spec:
             type: PathPrefix
             value: /public/
       backendRefs:
-        - name: web-stub
-          port: 80
+        - name: internal-gw
+          port: 443
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -37,8 +37,8 @@ spec:
             type: PathPrefix
             value: /realms/
       backendRefs:
-        - name: web-stub
-          port: 80
+        - name: internal-gw
+          port: 443
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -55,8 +55,8 @@ spec:
             type: PathPrefix
             value: /public/
       backendRefs:
-        - name: mobile-stub
-          port: 80
+        - name: internal-gw
+          port: 443
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -72,8 +72,8 @@ spec:
             type: PathPrefix
             value: /realms/
       backendRefs:
-        - name: mobile-stub
-          port: 80
+        - name: internal-gw
+          port: 443
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -87,7 +87,7 @@ spec:
     - matches:
         - path:
             type: PathPrefix
-            value: /realms/partner/
+            value: /realms/
       backendRefs:
-        - name: partner-stub
-          port: 80
+        - name: internal-gw
+          port: 443

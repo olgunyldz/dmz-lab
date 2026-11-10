@@ -53,10 +53,11 @@ KC_LOCAL=http://127.0.0.1:18080$TOKEN_PATH
 json_token() { sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p'; }
 
 # Dış token'lar (Keycloak, identity cluster)
-WEB_EXT=$(curl -s -X POST "$KC_LOCAL" -d grant_type=password -d client_id=lab-cli \
-    -d "client_secret=$(secret lab-cli)" -d username=alice --data-urlencode "password=$(secret alice-password)" | json_token)
-MOBILE_EXT=$(curl -s -X POST "$KC_LOCAL" -H "DPoP: $(dpop_proof POST "$KC_LOCAL")" -d grant_type=password \
-    -d client_id=mobile-app -d username=alice --data-urlencode "password=$(secret alice-password)" | json_token)
+source "$ROOT/../identity-cluster/tests/lib/pkce.sh"
+PKCE_BASE=http://127.0.0.1:18080
+WEB_EXT=$(pkce_token web-app https://web.lab.local:8443/callback alice "$(secret alice-password)" "$(secret web-app)" "")
+MOBILE_EXT=$(pkce_token mobile-app com.bank.app:/callback alice "$(secret alice-password)" "" \
+    "$(dpop_proof POST "$KC_LOCAL")")
 PARTNER_EXT=$(curl -s -X POST "$KC_LOCAL" -d grant_type=client_credentials -d client_id=partner-acme \
     -d "client_secret=$(secret partner-acme)" | json_token)
 

@@ -39,7 +39,7 @@ echo "realm: $REALM ($code)"
 
 # client_id -> secret (secret yoksa üretilir)
 declare -A SECRETS
-for c in web-app mobile-app partner-acme bff core-svc dmz-exchange-web dmz-exchange-mobile dmz-exchange-partner kgateway-internal lab-cli; do
+for c in web-app mobile-app partner-acme bff core-svc dmz-exchange-web dmz-exchange-mobile dmz-exchange-partner kgateway-internal; do
     SECRETS[$c]=$($K -n auth get secret keycloak-client-secrets -o jsonpath="{.data.$c}" 2>/dev/null | base64 -d 2>/dev/null || true)
     [[ -n "${SECRETS[$c]}" ]] || SECRETS[$c]=$(openssl rand -hex 24)
 done
@@ -79,14 +79,29 @@ exch_mapper() { # <client> <exchange-client>
     add_mapper "$1" "{\"name\":\"exch-$2\",\"protocol\":\"openid-connect\",\"protocolMapper\":\"oidc-audience-mapper\",\"config\":{\"included.client.audience\":\"$2\",\"access.token.claim\":\"true\",\"id.token.claim\":\"false\"}}"
 }
 
-PKCE='"attributes":{"pkce.code.challenge.method":"S256","dpop.bound.access.tokens":"true"}'
+PKCE_MOBILE='"attributes":{"pkce.code.challenge.method":"S256","dpop.bound.access.tokens":"true"}'
+PKCE_WEB='"attributes":{"pkce.code.challenge.method":"S256","dpop.bound.access.tokens":"false"}'
 EXCHANGE='"attributes":{"standard.token.exchange.enabled":"true"}'
 
-# 2) Müşteri kanalları (kullanıcı login'i: Authorization Code + PKCE)
-create_client web-app "\"fullScopeAllowed\":false,\"publicClient\":false,\"standardFlowEnabled\":true,\"directAccessGrantsEnabled\":false,\"redirectUris\":[\"https://web.lab.local:8443/*\"],$PKCE"
+# client sil (mapper'ları ile birlikte). Yoksa sessiz geçer.
+delete_client() { # <clientId>
+    local uuid
+    uuid=$(client_uuid "$1")
+    [[ -n "$uuid" ]] || return 0
+    code=$(api DELETE "/admin/realms/$REALM/clients/$uuid")
+    ok "$code" && echo "client silindi: $1 ($code)"
+}
+
+# 2) Müşteri kanalları. Web ve mobil akışları AYRI:
+#    - web-app: Authorization Code + PKCE, confidential, DPoP YOK (Bearer token; sender-constrained token exchange'de kabul edilmiyor)
+#    - mobile-app: Authorization Code + PKCE, public, DPoP ZORUNLU (cihaz anahtarı; SPI dmz-dpop-mobile-exchange)
+#    web-app ve mobile-app yeniden oluşturulur: var olan client'ın attribute'ları 409 ile değişmez.
+delete_client web-app
+create_client web-app "\"fullScopeAllowed\":false,\"publicClient\":false,\"standardFlowEnabled\":true,\"directAccessGrantsEnabled\":false,\"redirectUris\":[\"https://web.lab.local:8443/*\"],$PKCE_WEB"
 aud_mapper web-app channel-web; claim_mapper web-app channel web; exch_mapper web-app dmz-exchange-web
 
-create_client mobile-app "\"fullScopeAllowed\":false,\"publicClient\":true,\"standardFlowEnabled\":true,\"directAccessGrantsEnabled\":true,\"redirectUris\":[\"com.bank.app:/callback\"],$PKCE"
+delete_client mobile-app
+create_client mobile-app "\"fullScopeAllowed\":false,\"publicClient\":true,\"standardFlowEnabled\":true,\"directAccessGrantsEnabled\":false,\"redirectUris\":[\"com.bank.app:/callback\"],$PKCE_MOBILE"
 aud_mapper mobile-app channel-mobile; claim_mapper mobile-app channel mobile; exch_mapper mobile-app dmz-exchange-mobile
 
 # 3) Partner (client credentials; mTLS cnf bağlaması sonraki adım)
@@ -104,9 +119,8 @@ for ch in web mobile partner; do
     create_client "dmz-exchange-$ch" "\"publicClient\":false,\"serviceAccountsEnabled\":true,\"standardFlowEnabled\":false,\"clientAuthenticatorType\":\"client-x509\",\"attributes\":{\"standard.token.exchange.enabled\":\"true\",\"x509.subjectdn\":\"CN=dmz-exchange-$ch\"}"
 done
 
-# 6) Test istemcisi (yalnızca lab: şifre ile token almak için)
-create_client lab-cli "\"fullScopeAllowed\":false,\"publicClient\":false,\"standardFlowEnabled\":false,\"directAccessGrantsEnabled\":true"
-aud_mapper lab-cli channel-web; claim_mapper lab-cli channel web; exch_mapper lab-cli dmz-exchange-web
+# 6) lab-cli (şifre grant'i ile token veren test istemcisi) kaldırıldı. Eski kurulumlardan kalanı sil.
+delete_client lab-cli
 
 # 7) Test kullanıcısı
 USER_PW=$($K -n auth get secret keycloak-client-secrets -o jsonpath='{.data.alice-password}' 2>/dev/null | base64 -d 2>/dev/null || true)

@@ -40,7 +40,7 @@ req() {
 # --- web ---
 body=$(req GET 19443 gw-web /public/branches)
 check "web public GET /public/branches -> 200" "HTTP_CODE=200" "$body"
-check "web public: ext-authz atlandı (token yok)" "channel=web" "$body"
+check "web public: ext-authz atlandı (token yok)" "service=core" "$body"
 
 body=$(req POST 19443 gw-web /public/branches)
 if [[ "$body" == *"HTTP_CODE=200"* ]]; then
@@ -49,7 +49,7 @@ else
     echo "PASS  web public POST reddedildi"; pass=$((pass + 1))
 fi
 
-body=$(req GET 19443 gw-web /realms/customer/protocol/openid-connect/auth)
+body=$(req GET 19443 gw-web /realms/bank/.well-known/openid-configuration)
 check "web login /realms/* token yok -> 200 (ext-authz atlandı)" "HTTP_CODE=200" "$body"
 
 body=$(req GET 19443 gw-web /bff/accounts)
@@ -59,7 +59,7 @@ check "web api token yok -> 401 (ext-authz)" "HTTP_CODE=401" "$body"
 body=$(req GET 19444 gw-mobile /public/rates)
 check "mobile public GET -> 200" "HTTP_CODE=200" "$body"
 
-body=$(req GET 19444 gw-mobile /realms/customer/protocol/openid-connect/token)
+body=$(req GET 19444 gw-mobile /realms/bank/.well-known/openid-configuration)
 check "mobile login /realms/* -> 200" "HTTP_CODE=200" "$body"
 
 body=$(req GET 19444 gw-mobile /bff/accounts)
@@ -72,8 +72,8 @@ partner_raw() {
         -quiet 2>/dev/null
 }
 
-out=$(partner_raw 'GET /realms/partner/protocol/openid-connect/token HTTP/1.1\r\nHost: partner-api.lab.local\r\nConnection: close\r\n\r\n')
-check "partner login /realms/partner/* -> 200" "200 OK" "$out"
+out=$(partner_raw 'GET /realms/bank/.well-known/openid-configuration HTTP/1.1\r\nHost: partner-api.lab.local\r\nConnection: close\r\n\r\n')
+check "partner login /realms/* -> 200" "200 OK" "$out"
 
 out=$(partner_raw 'GET /partner/payments HTTP/1.1\r\nHost: partner-api.lab.local\r\nConnection: close\r\n\r\n')
 check "partner api token yok -> 401" "401" "$out"

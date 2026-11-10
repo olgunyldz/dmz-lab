@@ -6,12 +6,12 @@ source "$(dirname "$0")/lib.sh"
 # 1) web.lab.local -> gw-web
 body=$("${CURL[@]}" -s --max-time 10 --cacert "$CERTS/public-ca.crt" \
     --connect-to "web.lab.local:443:$EDGE:$PORT" "https://web.lab.local/public/branches")
-check "web route -> web (channel=web)" "channel=web" "$body"
+check "web route -> core (public, service=core)" "service=core" "$body"
 
 # 2) mobile-api.lab.local -> gw-mobile
 body=$("${CURL[@]}" -s --max-time 10 --cacert "$CERTS/public-ca.crt" \
     --connect-to "mobile-api.lab.local:443:$EDGE:$PORT" "https://mobile-api.lab.local/public/branches")
-check "mobile route -> mobile (channel=mobile)" "channel=mobile" "$body"
+check "mobile route -> core (public, service=core)" "service=core" "$body"
 
 # 3) Güvenlik başlıkları, sunucu sürümü gizli
 headers=$("${CURL[@]}" -s -D - -o /dev/null --max-time 10 --cacert "$CERTS/public-ca.crt" \
@@ -31,13 +31,13 @@ code=$("${CURL[@]}" -s -k -o /dev/null -w '%{http_code}' --max-time 10 \
     --connect-to "evil.lab.local:443:$EDGE:$PORT" "https://evil.lab.local/")
 check "tanımsız host -> 404" "404" "$code"
 
-# 5) Uçtan uca dağılım: DMZ üzerindeki public route'u besleyen web-stub replikalarının en az ikisi yanıt vermeli.
-#    (Backend node dağılımı lb.sh içinde HAProxy istatistiklerinden ayrıca ölçülür.)
-distinct=$(for i in $(seq 1 10); do
-    "${CURL[@]}" -s --max-time 10 --cacert "$CERTS/public-ca.crt" \
+# 5) Uçtan uca: edge -> DMZ -> iç gateway -> core. 10 istekten 10'u 200 olmalı.
+#    (Backend node dağılımı lb.sh içinde HAProxy istatistiklerinden ölçülür.)
+ok_n=$(for i in $(seq 1 10); do
+    "${CURL[@]}" -s -o /dev/null -w '%{http_code}\n' --max-time 10 --cacert "$CERTS/public-ca.crt" \
         --connect-to "web.lab.local:443:$EDGE:$PORT" "https://web.lab.local/public/branches"
-done | grep -o 'pod=[^ ]*' | sort -u | wc -l | tr -d ' ')
-check "uçtan uca: en az 2 farklı web-stub replikası yanıt veriyor" "2" "$distinct"
+done | grep -c '^200$')
+check "uçtan uca: 10 istekten 10'u 200 (core)" "10" "$ok_n"
 
 # 6) HAProxy istatistik sayfası
 stats=$("${CURL[@]}" -s --max-time 10 "http://127.0.0.1:8404/stats")

@@ -102,7 +102,7 @@ module.exports = [
       { from: "p", to: "ha", label: "1. mTLS 443, SNI partner-api.lab.local (şifre çözülmez)" },
       { from: "ha", to: "gw", label: "2. TCP passthrough → NodePort 30448" },
       { from: "gw", to: "gw", self: true, label: "3. istemci sertifikası doğrula (partner CA)" },
-      { from: "p", to: "ha", label: "4. POST /realms/partner/.../token  client_credentials (mTLS)", gap: 10 },
+      { from: "p", to: "ha", label: "4. POST /realms/bank/.../token  client_credentials (mTLS)", gap: 10 },
       { from: "ha", to: "gw", label: "5. TCP passthrough" },
       { from: "gw", to: "gi", label: "6. /realms/* → iç gateway (mTLS, F2)" },
       { from: "gi", to: "kc", label: "7. client credentials (client-x509)" },
