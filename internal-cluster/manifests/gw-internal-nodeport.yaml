@@ -1,0 +1,15 @@
+# DMZ'den erişim için NodePort (lab). kgateway'in LoadBalancer servisinden bağımsız.
+apiVersion: v1
+kind: Service
+metadata:
+  name: gw-internal-nodeport
+  namespace: gw-internal
+spec:
+  type: NodePort
+  selector:
+    gateway.networking.k8s.io/gateway-name: gw-internal
+  ports:
+    - name: https
+      port: 443
+      targetPort: 443
+      nodePort: 30444

@@ -1,0 +1,93 @@
+# DMZ route sınıfları (design.md 5.0b).
+# Her gateway için üç sınıf:
+#   public : /public/*   -> kimlik yok, yalnızca GET, ext-authz YOK
+#   login  : /realms/*   -> Keycloak login/token uçları, ext-authz YOK
+#   api    : diğer her şey -> channels.yaml'daki HTTPRoute (web, mobile, partner), ext-authz VAR
+# Gateway en uzun path eşleşmesini seçer; /public/ ve /realms/ isteği api route'una düşmez.
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: web-public
+  namespace: gw-web
+spec:
+  parentRefs:
+    - name: gw-web
+  rules:
+    - matches:
+        - method: GET
+          path:
+            type: PathPrefix
+            value: /public/
+      backendRefs:
+        - name: web-stub
+          port: 80
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: web-login
+  namespace: gw-web
+spec:
+  parentRefs:
+    - name: gw-web
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /realms/
+      backendRefs:
+        - name: web-stub
+          port: 80
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: mobile-public
+  namespace: gw-mobile
+spec:
+  parentRefs:
+    - name: gw-mobile
+  rules:
+    - matches:
+        - method: GET
+          path:
+            type: PathPrefix
+            value: /public/
+      backendRefs:
+        - name: mobile-stub
+          port: 80
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: mobile-login
+  namespace: gw-mobile
+spec:
+  parentRefs:
+    - name: gw-mobile
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /realms/
+      backendRefs:
+        - name: mobile-stub
+          port: 80
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: partner-login
+  namespace: gw-partner
+spec:
+  parentRefs:
+    - name: gw-partner
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /realms/partner/
+      backendRefs:
+        - name: partner-stub
+          port: 80

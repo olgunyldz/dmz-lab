@@ -1,0 +1,46 @@
+# Edge (HAProxy) → DMZ gateway erişimi (lab VIP karşılığı). kgateway'in LoadBalancer servisinden bağımsız NodePort'lar.
+# Edge, DMZ node IP'leri üzerinden bu portlara bağlanır (bkz. edge/haproxy/haproxy.cfg).
+apiVersion: v1
+kind: Service
+metadata:
+  name: gw-web-nodeport
+  namespace: gw-web
+spec:
+  type: NodePort
+  selector:
+    gateway.networking.k8s.io/gateway-name: gw-web
+  ports:
+    - name: https
+      port: 443
+      targetPort: 443
+      nodePort: 30446
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gw-mobile-nodeport
+  namespace: gw-mobile
+spec:
+  type: NodePort
+  selector:
+    gateway.networking.k8s.io/gateway-name: gw-mobile
+  ports:
+    - name: https
+      port: 443
+      targetPort: 443
+      nodePort: 30447
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gw-partner-nodeport
+  namespace: gw-partner
+spec:
+  type: NodePort
+  selector:
+    gateway.networking.k8s.io/gateway-name: gw-partner
+  ports:
+    - name: https
+      port: 443
+      targetPort: 443
+      nodePort: 30448

@@ -1,0 +1,125 @@
+# DMZ gateway'lerinden iç kgateway'e (F2) giden backend. design.md 5.1 / 5.2.
+# - internal-gw Service'i cluster dışındaki iç gateway'e (NodePort) Endpoints ile bağlanır.
+# - BackendTLSPolicy: iç CA ile sunucu doğrulaması, SNI/hostname = gw-internal.
+# - İstemci sertifikası (DMZ kimliği) Gateway spec.tls.backend.clientCertificateRef ile verilir (scripts/load-internal-backend.sh).
+# Lab sapması: iç gateway IP'si statik (172.18.0.10:30444), üretimde iç ağ yönlendirmesi.
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: internal-gw
+  namespace: gw-web
+spec:
+  ports:
+    - name: https
+      port: 443
+      targetPort: 30444
+---
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: internal-gw
+  namespace: gw-web
+subsets:
+  - addresses:
+      - ip: 172.18.0.10
+    ports:
+      - name: https
+        port: 30444
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: BackendTLSPolicy
+metadata:
+  name: internal-gw
+  namespace: gw-web
+spec:
+  targetRefs:
+    - group: ""
+      kind: Service
+      name: internal-gw
+  validation:
+    hostname: gw-internal
+    caCertificateRefs:
+      - group: ""
+        kind: ConfigMap
+        name: internal-ca-backend
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: internal-gw
+  namespace: gw-mobile
+spec:
+  ports:
+    - name: https
+      port: 443
+      targetPort: 30444
+---
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: internal-gw
+  namespace: gw-mobile
+subsets:
+  - addresses:
+      - ip: 172.18.0.10
+    ports:
+      - name: https
+        port: 30444
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: BackendTLSPolicy
+metadata:
+  name: internal-gw
+  namespace: gw-mobile
+spec:
+  targetRefs:
+    - group: ""
+      kind: Service
+      name: internal-gw
+  validation:
+    hostname: gw-internal
+    caCertificateRefs:
+      - group: ""
+        kind: ConfigMap
+        name: internal-ca-backend
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: internal-gw
+  namespace: gw-partner
+spec:
+  ports:
+    - name: https
+      port: 443
+      targetPort: 30444
+---
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: internal-gw
+  namespace: gw-partner
+subsets:
+  - addresses:
+      - ip: 172.18.0.10
+    ports:
+      - name: https
+        port: 30444
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: BackendTLSPolicy
+metadata:
+  name: internal-gw
+  namespace: gw-partner
+spec:
+  targetRefs:
+    - group: ""
+      kind: Service
+      name: internal-gw
+  validation:
+    hostname: gw-internal
+    caCertificateRefs:
+      - group: ""
+        kind: ConfigMap
+        name: internal-ca-backend

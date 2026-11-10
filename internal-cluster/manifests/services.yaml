@@ -1,0 +1,176 @@
+# İç servisler (BFF, core): iç JWT'yi kendileri doğrular. Kod: services/svc.py (ConfigMap svc-code).
+# Keycloak JWKS: identity-keycloak Service'i ile identity cluster'daki NodePort'a (lab sapması).
+# Kod ConfigMap'i scripts/load-services.sh ile yüklenir.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bff
+  namespace: app-bff
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: bff }
+  template:
+    metadata:
+      labels: { app: bff }
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: bff
+          image: python:3.12-alpine
+          command: ["python", "/app/svc.py"]
+          env:
+            - name: PYTHONDONTWRITEBYTECODE
+              value: "1"
+            - name: SERVICE_NAME
+              value: bff
+            - name: ALLOWED_CHANNELS
+              value: web,mobile
+            - name: EXPECTED_ISSUER
+              value: https://id.bank.lab.local/realms/bank
+            - name: AUDIENCE
+              value: kgateway-internal
+            - name: JWKS_URL
+              value: http://identity-keycloak.app-bff.svc.cluster.local/realms/bank/protocol/openid-connect/certs
+            - name: PUBLIC_PATHS
+              value: "0"
+            - name: PORT
+              value: "8080"
+          ports:
+            - containerPort: 8080
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65534
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - name: app
+              mountPath: /app
+              readOnly: true
+      volumes:
+        - name: app
+          configMap:
+            name: svc-code
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: bff
+  namespace: app-bff
+spec:
+  selector: { app: bff }
+  ports:
+    - port: 80
+      targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: core
+  namespace: app-core
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: core }
+  template:
+    metadata:
+      labels: { app: core }
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: core
+          image: python:3.12-alpine
+          command: ["python", "/app/svc.py"]
+          env:
+            - name: PYTHONDONTWRITEBYTECODE
+              value: "1"
+            - name: SERVICE_NAME
+              value: core
+            - name: ALLOWED_CHANNELS
+              value: partner
+            - name: EXPECTED_ISSUER
+              value: https://id.bank.lab.local/realms/bank
+            - name: AUDIENCE
+              value: kgateway-internal
+            - name: JWKS_URL
+              value: http://identity-keycloak.app-core.svc.cluster.local/realms/bank/protocol/openid-connect/certs
+            - name: PUBLIC_PATHS
+              value: "1"
+            - name: PORT
+              value: "8080"
+          ports:
+            - containerPort: 8080
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65534
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - name: app
+              mountPath: /app
+              readOnly: true
+      volumes:
+        - name: app
+          configMap:
+            name: svc-code
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: core
+  namespace: app-core
+spec:
+  selector: { app: core }
+  ports:
+    - port: 80
+      targetPort: 8080
+---
+# identity-keycloak: app-bff ve app-core'dan Keycloak JWKS'ine (identity cluster NodePort 30080)
+apiVersion: v1
+kind: Service
+metadata:
+  name: identity-keycloak
+  namespace: app-bff
+spec:
+  ports:
+    - name: http
+      port: 80
+      targetPort: 30080
+---
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: identity-keycloak
+  namespace: app-bff
+subsets:
+  - addresses:
+      - ip: 172.18.0.5
+    ports:
+      - name: http
+        port: 30080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: identity-keycloak
+  namespace: app-core
+spec:
+  ports:
+    - name: http
+      port: 80
+      targetPort: 30080
+---
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: identity-keycloak
+  namespace: app-core
+subsets:
+  - addresses:
+      - ip: 172.18.0.5
+    ports:
+      - name: http
+        port: 30080

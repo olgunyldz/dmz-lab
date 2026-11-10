@@ -1,0 +1,14 @@
+# Vault'a cluster dışından (identity ve internal) erişim: NodePort 30200. Erişim F9 firewall kuralıyla kısıtlanır.
+apiVersion: v1
+kind: Service
+metadata:
+  name: vault-nodeport
+  namespace: secrets
+spec:
+  type: NodePort
+  selector: { app: vault }
+  ports:
+    - name: http
+      port: 8200
+      targetPort: 8200
+      nodePort: 30200

@@ -1,0 +1,25 @@
+# İç gateway: DMZ istemci sertifikasını doğrula ve upstream'e (Keycloak) XFCC ile ilet.
+# SanitizeSet: istemcinin gönderdiği x-forwarded-client-cert başlığı silinir, doğrulanmış sertifika yazılır.
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: ListenerPolicy
+metadata:
+  name: gw-internal-client-cert
+  namespace: gw-internal
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: gw-internal
+  default:
+    clientCertificateValidation:
+      caCertificateRefs:
+        - group: ""
+          kind: ConfigMap
+          name: dmz-client-ca
+      mode: Require
+    httpSettings:
+      forwardClientCertDetails:
+        mode: SanitizeSet
+        details:
+          cert: true
+          subject: true

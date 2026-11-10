@@ -1,0 +1,188 @@
+# İç kgateway: iç JWT doğrulaması ve route bazlı yetkilendirme (design.md 5.4).
+#  - /bff/*      : web ve mobile kanalları, iç JWT zorunlu
+#  - /partner/*  : partner kanalı, iç JWT zorunlu
+#  - /public/*   : JWT yok, yalnızca GET (default deny dışında açık path)
+#  - diğer her şey: route tanımsız -> 404 (default deny)
+# JWT doğrulaması: iç Keycloak JWKS (identity-keycloak Service, gw-internal içinden).
+# claimsToHeaders: channel -> x-channel, sub -> x-user-id (RBAC ve upstream için).
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: app-bff
+  labels:
+    zone: internal
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: app-core
+  labels:
+    zone: internal
+---
+---
+# gw-internal, app-bff ve app-core servislerine route verebilsin
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: allow-gw-internal-bff
+  namespace: app-bff
+spec:
+  from:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      namespace: gw-internal
+  to:
+    - group: ""
+      kind: Service
+      name: bff
+---
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: allow-gw-internal-core
+  namespace: app-core
+spec:
+  from:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      namespace: gw-internal
+  to:
+    - group: ""
+      kind: Service
+      name: core
+# ============================================================================
+# JWT provider: iç Keycloak (bank realm). JWKS, identity-keycloak Service'inden alınır.
+# ============================================================================
+---
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: GatewayExtension
+metadata:
+  name: internal-jwt
+  namespace: gw-internal
+spec:
+  type: JWT
+  jwt:
+    providers:
+      - name: internal
+        issuer: https://id.bank.lab.local/realms/bank
+        # Token upstream'e iletilir: iç servisler (BFF, core) JWT'yi kendileri doğrular (savunma derinliği)
+        forwardToken: true
+        audiences:
+          - kgateway-internal
+        jwks:
+          remote:
+            url: http://identity-keycloak/realms/bank/protocol/openid-connect/certs
+            backendRef:
+              name: identity-keycloak
+              port: 80
+            cacheDuration: 5m
+        claimsToHeaders:
+          - name: channel
+            header: x-channel
+          - name: sub
+            header: x-user-id
+          - name: auth_method
+            header: x-auth-method
+    validationMode: Strict
+# ============================================================================
+# Route'lar
+# ============================================================================
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: bff-api
+  namespace: gw-internal
+spec:
+  parentRefs:
+    - name: gw-internal
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /bff/
+      backendRefs:
+        - name: bff
+          namespace: app-bff
+          port: 80
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: partner-api
+  namespace: gw-internal
+spec:
+  parentRefs:
+    - name: gw-internal
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /partner/
+      backendRefs:
+        - name: core
+          namespace: app-core
+          port: 80
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: public-api
+  namespace: gw-internal
+spec:
+  parentRefs:
+    - name: gw-internal
+  rules:
+    - matches:
+        - method: GET
+          path:
+            type: PathPrefix
+            value: /public/
+      backendRefs:
+        - name: core
+          namespace: app-core
+          port: 80
+# ============================================================================
+# Politikalar: JWT zorunlu + kanal bazlı RBAC
+# ============================================================================
+---
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: TrafficPolicy
+metadata:
+  name: bff-authz
+  namespace: gw-internal
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: bff-api
+  jwtAuth:
+    extensionRef:
+      name: internal-jwt
+  rbac:
+    action: Allow
+    policy:
+      matchExpressions:
+        - "request.headers['x-channel'] == 'web'"
+        - "request.headers['x-channel'] == 'mobile'"
+---
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: TrafficPolicy
+metadata:
+  name: partner-authz
+  namespace: gw-internal
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: partner-api
+  jwtAuth:
+    extensionRef:
+      name: internal-jwt
+  rbac:
+    action: Allow
+    policy:
+      matchExpressions:
+        - "request.headers['x-channel'] == 'partner'"

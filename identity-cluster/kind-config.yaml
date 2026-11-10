@@ -1,0 +1,13 @@
+# Identity cluster (lab). Keycloak, PostgreSQL ve Vault burada.
+# CNI: kind varsayılanı (kindnet). NetworkPolicy uygulamaz; F8 erişim kısıtı host iptables ile (scripts/host-firewall.sh).
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: identity
+nodes:
+  - role: control-plane
+  - role: worker
+    labels:
+      pool: identity
+  - role: worker
+    labels:
+      pool: identity

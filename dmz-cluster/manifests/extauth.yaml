@@ -1,0 +1,276 @@
+# DMZ auth servisi (ext-authz). Token exchange artık iç kgateway üzerinden gerçek iç Keycloak'a gider.
+# Kod ConfigMap'leri, exchange secret'ları ve iç CA scripts/load-extauth.sh ile yüklenir.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: auth
+  labels:
+    zone: dmz
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ext-authz
+  namespace: auth
+spec:
+  replicas: 1   # lab: DPoP jti cache süreç içi; üretimde paylaşılan store ile çoklu replika
+  selector:
+    matchLabels: { app: ext-authz }
+  template:
+    metadata:
+      labels: { app: ext-authz }
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: ext-authz
+          image: python:3.12-alpine
+          command: ["python", "/app/ext_authz.py"]
+          env:
+            - name: PYTHONDONTWRITEBYTECODE
+              value: "1"
+            - name: STS_URL
+              value: https://gw-internal:443/realms/bank/protocol/openid-connect/token
+            - name: INTERNAL_CA_FILE
+              value: /ca/internal-ca.crt
+            - name: CLIENT_CERT_FILE
+              value: /mtls/tls.crt
+            - name: CLIENT_KEY_FILE
+              value: /mtls/tls.key
+            - name: EXPECTED_ISSUER
+              value: https://id.bank.lab.local/realms/bank
+            - name: JWKS_URL
+              value: https://gw-internal:443/realms/bank/protocol/openid-connect/certs
+            # Kanal başına exchange sertifikası (Keycloak client-x509). Secret yok.
+            - name: EXCHANGE_CERT_WEB
+              value: /exch/web.crt
+            - name: EXCHANGE_KEY_WEB
+              value: /exch/web.key
+            - name: EXCHANGE_CERT_MOBILE
+              value: /exch/mobile.crt
+            - name: EXCHANGE_KEY_MOBILE
+              value: /exch/mobile.key
+            - name: EXCHANGE_CERT_PARTNER
+              value: /exch/partner.crt
+            - name: EXCHANGE_KEY_PARTNER
+              value: /exch/partner.key
+          ports:
+            - containerPort: 8080
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65534
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - name: app
+              mountPath: /app
+              readOnly: true
+            - name: internal-ca
+              mountPath: /ca
+              readOnly: true
+            - name: mtls
+              mountPath: /mtls
+              readOnly: true
+            - name: exchange-tls
+              mountPath: /exch
+              readOnly: true
+      volumes:
+        - name: app
+          configMap:
+            name: ext-authz-code
+        - name: internal-ca
+          configMap:
+            name: internal-ca
+        - name: mtls
+          secret:
+            secretName: dmz-gateway-client-tls
+        - name: exchange-tls
+          secret:
+            secretName: dmz-exchange-client-tls
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ext-authz
+  namespace: auth
+spec:
+  selector: { app: ext-authz }
+  ports:
+    - port: 8080
+      targetPort: 8080
+---
+# İç kgateway'e DMZ içinden erişim: cluster dışı endpoint (lab, identity/internal kind ağı).
+# Ad "gw-internal": sertifika SAN'ı ile eşleşir, doğrulama bu adla yapılır.
+apiVersion: v1
+kind: Service
+metadata:
+  name: gw-internal
+  namespace: auth
+spec:
+  ports:
+    - name: https
+      port: 443
+      targetPort: 30444
+---
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: gw-internal
+  namespace: auth
+subsets:
+  - addresses:
+      - ip: 172.18.0.10
+    ports:
+      - name: https
+        port: 30444
+# ============================================================================
+# Kanal başına ext-authz: GatewayExtension (servis + kanal başlığı) ve TrafficPolicy (HTTPRoute'a bağlama)
+# ============================================================================
+---
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: allow-gw-web-extauth
+  namespace: auth
+spec:
+  from:
+    - group: gateway.kgateway.dev
+      kind: GatewayExtension
+      namespace: gw-web
+  to:
+    - group: ""
+      kind: Service
+      name: ext-authz
+---
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: allow-gw-mobile-extauth
+  namespace: auth
+spec:
+  from:
+    - group: gateway.kgateway.dev
+      kind: GatewayExtension
+      namespace: gw-mobile
+  to:
+    - group: ""
+      kind: Service
+      name: ext-authz
+---
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: allow-gw-partner-extauth
+  namespace: auth
+spec:
+  from:
+    - group: gateway.kgateway.dev
+      kind: GatewayExtension
+      namespace: gw-partner
+  to:
+    - group: ""
+      kind: Service
+      name: ext-authz
+---
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: GatewayExtension
+metadata:
+  name: extauth-web
+  namespace: gw-web
+spec:
+  extAuth:
+    failOpen: false
+    headersToForward: ["authorization", "dpop", "host"]
+    httpService:
+      backendRef:
+        name: ext-authz
+        namespace: auth
+        port: 8080
+      authorizationRequest:
+        headersToAdd:
+          X-Dmz-Channel: web
+      authorizationResponse:
+        headersToBackend: ["authorization"]
+---
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: TrafficPolicy
+metadata:
+  name: extauth-web
+  namespace: gw-web
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: web
+  extAuth:
+    extensionRef:
+      name: extauth-web
+---
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: GatewayExtension
+metadata:
+  name: extauth-mobile
+  namespace: gw-mobile
+spec:
+  extAuth:
+    failOpen: false
+    headersToForward: ["authorization", "dpop", "host"]
+    httpService:
+      backendRef:
+        name: ext-authz
+        namespace: auth
+        port: 8080
+      authorizationRequest:
+        headersToAdd:
+          X-Dmz-Channel: mobile
+      authorizationResponse:
+        headersToBackend: ["authorization"]
+---
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: TrafficPolicy
+metadata:
+  name: extauth-mobile
+  namespace: gw-mobile
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: mobile
+  extAuth:
+    extensionRef:
+      name: extauth-mobile
+---
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: GatewayExtension
+metadata:
+  name: extauth-partner
+  namespace: gw-partner
+spec:
+  extAuth:
+    failOpen: false
+    headersToForward: ["authorization", "dpop", "host"]
+    httpService:
+      backendRef:
+        name: ext-authz
+        namespace: auth
+        port: 8080
+      authorizationRequest:
+        headersToAdd:
+          X-Dmz-Channel: partner
+      authorizationResponse:
+        headersToBackend: ["authorization"]
+---
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: TrafficPolicy
+metadata:
+  name: extauth-partner
+  namespace: gw-partner
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: partner
+  extAuth:
+    extensionRef:
+      name: extauth-partner

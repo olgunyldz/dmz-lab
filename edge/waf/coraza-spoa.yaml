@@ -1,0 +1,28 @@
+# coraza-spoa yapılandırması (upstream example/coraza-spoa.yaml, v0.9.1)
+# OWASP CRS kuralları coraza içinde gömülü gelir (@owasp_crs/).
+
+bind: 0.0.0.0:9000
+
+log_level: info
+log_file: /dev/stdout
+log_format: console
+
+default_application: sample_app
+
+applications:
+  - name: sample_app
+    directives: |
+      Include @coraza.conf-recommended
+      Include @crs-setup.conf.example
+      Include @owasp_crs/*.conf
+      SecRuleEngine On
+
+    # HAProxy yalnızca istek gönderiyor, yanıt kontrolü gerekmiyor
+    response_check: false
+
+    # İşlem önbelleği ömrü (ms)
+    transaction_ttl_ms: 60000
+
+    log_level: info
+    log_file: /dev/stdout
+    log_format: console

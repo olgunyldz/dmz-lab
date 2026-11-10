@@ -1,0 +1,13 @@
+# Management / secrets cluster (lab). Vault ve yönetim araçları (Argo CD, Kyverno) burada.
+# design.md 4.6: yalnız yönetim ağından erişilir; identity ve internal cluster'lar Vault'a F9 üzerinden bağlanır.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: mgmt
+nodes:
+  - role: control-plane
+  - role: worker
+    labels:
+      pool: mgmt
+  - role: worker
+    labels:
+      pool: mgmt

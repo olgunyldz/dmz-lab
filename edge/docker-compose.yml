@@ -1,0 +1,40 @@
+# DMZ Edge lab ortamı
+#
+# Katmanlar:
+#   - edge ağı : haproxy (LB, TLS, DDoS, host yönlendirme), coraza-spoa (WAF)
+#   - kind ağı : DMZ cluster'ı (kind-dmz). haproxy, DMZ gateway'lerine NodePort üzerinden bu ağdan bağlanır.
+#                Gateway'ler artık bu compose'da değil, DMZ cluster'ında (dmz-cluster/).
+# Not: Lab'da gerçek firewall yoktur. Ayrımı docker ağları ve NetworkPolicy/firewall kuralları sağlar.
+
+name: dmz-edge-lab
+
+services:
+  haproxy:
+    image: haproxy:3.0-alpine
+    restart: unless-stopped
+    ports:
+      - "8443:443"                 # Public giriş (F1). Host 8443 -> 443
+      - "127.0.0.1:8404:8404"      # HAProxy istatistik sayfası (yalnız localhost)
+    volumes:
+      - ./haproxy:/usr/local/etc/haproxy:ro
+      - ./certs:/certs:ro
+    networks:
+      - edge
+      - kind                       # DMZ cluster NodePort'larına erişim (172.18.0.0/16)
+    depends_on:
+      - coraza-spoa
+
+  coraza-spoa:
+    image: dmz-lab/coraza-spoa:0.9.1   # scripts/build-waf.sh ile yerel olarak derlenir
+    restart: unless-stopped
+    volumes:
+      - ./waf/coraza-spoa.yaml:/config.yaml:ro
+    networks:
+      - edge
+
+networks:
+  edge:
+    name: dmz-edge-lab-edge
+  kind:
+    external: true                 # kind-dmz cluster'ının docker ağı
+    name: kind

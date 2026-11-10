@@ -1,0 +1,74 @@
+# İç kgateway (north-south ingress). DMZ ext-authz buraya TLS ile bağlanır (F2).
+# Identity cluster'daki Keycloak, selector'sız Service + Endpoints ile bağlanır (cluster dışı backend).
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: gw-internal
+  namespace: gw-internal
+spec:
+  gatewayClassName: kgateway
+  listeners:
+    - name: https
+      port: 443
+      protocol: HTTPS
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: gw-internal-tls
+      allowedRoutes:
+        namespaces:
+          from: Same
+  # DMZ kimliği (mTLS, F2): yalnızca iç CA'dan imzalı istemci sertifikası kabul edilir
+  tls:
+    frontend:
+      default:
+        validation:
+          caCertificateRefs:
+            - group: ""
+              kind: ConfigMap
+              name: dmz-client-ca
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: identity-keycloak
+  namespace: gw-internal
+spec:
+  ports:
+    - name: http
+      port: 80
+      targetPort: 30080
+---
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: identity-keycloak
+  namespace: gw-internal
+subsets:
+  - addresses:
+      - ip: 172.18.0.5
+    ports:
+      - name: http
+        port: 30080
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: identity-realms
+  namespace: gw-internal
+spec:
+  parentRefs:
+    - name: gw-internal
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /realms/
+        - path:
+            type: PathPrefix
+            value: /.well-known/
+      backendRefs:
+        - name: identity-keycloak
+          port: 80

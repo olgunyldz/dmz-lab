@@ -1,0 +1,24 @@
+# Özel anahtarlar, CA anahtarları ve sertifika çıktıları (edge/scripts/gen-certs.sh ile yeniden üretilir)
+edge/certs/
+*.key
+*.pem
+*.p12
+*.pfx
+*.jks
+*.srl
+
+# Ortam ve yerel sırlar
+.env
+.env.*
+*.secret.yaml
+
+# Bağımlılıklar ve derleme çıktıları
+node_modules/
+**/target/
+**/__pycache__/
+*.pyc
+
+# Geçici dosyalar
+*.log
+.DS_Store
+Thumbs.db

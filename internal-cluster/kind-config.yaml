@@ -1,0 +1,13 @@
+# İç cluster (lab). kgateway internal, BFF ve normal servis burada.
+# Tasarım 4.3: iç cluster'a yalnızca DMZ'den internal kgateway üzerinden girilir.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: internal
+nodes:
+  - role: control-plane
+  - role: worker
+    labels:
+      pool: internal
+  - role: worker
+    labels:
+      pool: internal

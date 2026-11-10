@@ -1,0 +1,121 @@
+# Identity cluster: PostgreSQL + Keycloak (lab).
+# LAB SAPMASI: Üretimde Keycloak Operator + HA PostgreSQL (design.md 4.4). Burada tek replika.
+# Parolalar scripts/up.sh ile secret olarak üretilir; bu dosyada yoktur.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: auth
+  labels:
+    zone: identity
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: auth
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels: { app: postgres }
+  template:
+    metadata:
+      labels: { app: postgres }
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          env:
+            - name: POSTGRES_DB
+              value: keycloak
+            - name: POSTGRES_USER
+              value: keycloak
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: keycloak-db, key: password }
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          ports:
+            - containerPort: 5432
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+      volumes:
+        - name: data
+          emptyDir: {}   # lab: kalıcı değil
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: auth
+spec:
+  selector: { app: postgres }
+  ports:
+    - port: 5432
+      targetPort: 5432
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: keycloak
+  namespace: auth
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: keycloak }
+  template:
+    metadata:
+      labels: { app: keycloak }
+    spec:
+      containers:
+        - name: keycloak
+          image: dmz-lab/keycloak-dpop:26.6  # DMZ mobil DPoP exchange SPI (keycloak-spi/)
+          args:
+            - start
+            - --http-enabled=true
+            - --hostname-strict=false
+            - --health-enabled=true
+            # DMZ exchange client sertifikaları: iç gateway XFCC ile iletir (SanitizeSet)
+            - --spi-x509cert-lookup--provider=envoy
+            - --spi-x509cert-lookup--envoy--trust-proxy-verification=true
+          env:
+            - name: KC_HOSTNAME
+              value: https://id.bank.lab.local
+            - name: KC_DB
+              value: postgres
+            - name: KC_DB_URL
+              value: jdbc:postgresql://postgres.auth.svc.cluster.local:5432/keycloak
+            - name: KC_DB_USERNAME
+              value: keycloak
+            - name: KC_DB_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: keycloak-db, key: password }
+            - name: KC_BOOTSTRAP_ADMIN_USERNAME
+              value: admin
+            - name: KC_BOOTSTRAP_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: keycloak-admin, key: password }
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /realms/master
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: keycloak
+  namespace: auth
+spec:
+  selector: { app: keycloak }
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080

@@ -1,0 +1,315 @@
+# DMZ cluster: kanal bazlı gateway'ler (design.md 4.2)
+#   gw-web / gw-mobile / gw-partner namespace'leri, her biri kendi kgateway Gateway'i.
+# Backend'ler GEÇİCİDİR: DMZ gateway'leri, tasarım gereği iç kgateway'e (F2) yönlenecek.
+# İç cluster kurulana kadar nginx stub'ları kullanılır.
+# TLS sertifikaları ve partner CA'sı: scripts/load-secrets.sh ile edge/certs'ten yüklenir.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: gw-web
+  labels:
+    channel: web
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: gw-mobile
+  labels:
+    channel: mobile
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: gw-partner
+  labels:
+    channel: partner
+
+# ============================================================================
+# WEB
+# ============================================================================
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: gw-web
+  namespace: gw-web
+spec:
+  gatewayClassName: kgateway
+  listeners:
+    - name: https
+      port: 443
+      protocol: HTTPS
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: gw-web-tls
+      allowedRoutes:
+        namespaces:
+          from: Same
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: web
+  namespace: gw-web
+spec:
+  parentRefs:
+    - name: gw-web
+  rules:
+    # İç BFF'e (mTLS, BackendTLSPolicy) yönlendirme: /bff/* (design 5.1)
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /bff/
+      backendRefs:
+        - name: internal-gw
+          port: 443
+
+# ============================================================================
+# MOBILE
+# ============================================================================
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: gw-mobile
+  namespace: gw-mobile
+spec:
+  gatewayClassName: kgateway
+  listeners:
+    - name: https
+      port: 443
+      protocol: HTTPS
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: gw-mobile-tls
+      allowedRoutes:
+        namespaces:
+          from: Same
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: mobile
+  namespace: gw-mobile
+spec:
+  parentRefs:
+    - name: gw-mobile
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /bff/
+      backendRefs:
+        - name: internal-gw
+          port: 443
+
+# ============================================================================
+# PARTNER: istemci sertifikası (mTLS) gateway'de doğrulanır
+# ============================================================================
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: gw-partner
+  namespace: gw-partner
+spec:
+  gatewayClassName: kgateway
+  tls:
+    frontend:
+      default:
+        validation:
+          caCertificateRefs:
+            - group: ""
+              kind: ConfigMap
+              name: partner-ca
+  listeners:
+    - name: https
+      port: 443
+      protocol: HTTPS
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: gw-partner-tls
+      allowedRoutes:
+        namespaces:
+          from: Same
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: partner
+  namespace: gw-partner
+spec:
+  parentRefs:
+    - name: gw-partner
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /partner/
+      backendRefs:
+        - name: internal-gw
+          port: 443
+
+# ============================================================================
+# STUB BACKEND'LER (geçici): her kanal için nginx, kanal adını ve pod adını döner
+# ============================================================================
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: stub-conf
+  namespace: gw-web
+data:
+  default.conf: |
+    server {
+      listen 80;
+      server_tokens off;
+      location = /healthz { return 200 "ok\n"; }
+      location / { default_type text/plain; return 200 "channel=web pod=$hostname\n"; }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-stub
+  namespace: gw-web
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: web-stub }
+  template:
+    metadata:
+      labels: { app: web-stub }
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:1.27-alpine
+          ports: [{ containerPort: 80 }]
+          volumeMounts:
+            - name: conf
+              mountPath: /etc/nginx/conf.d/default.conf
+              subPath: default.conf
+      volumes:
+        - name: conf
+          configMap:
+            name: stub-conf
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: web-stub
+  namespace: gw-web
+spec:
+  selector: { app: web-stub }
+  ports:
+    - port: 80
+      targetPort: 80
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: stub-conf
+  namespace: gw-mobile
+data:
+  default.conf: |
+    server {
+      listen 80;
+      server_tokens off;
+      location = /healthz { return 200 "ok\n"; }
+      location / { default_type text/plain; return 200 "channel=mobile pod=$hostname\n"; }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mobile-stub
+  namespace: gw-mobile
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: mobile-stub }
+  template:
+    metadata:
+      labels: { app: mobile-stub }
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:1.27-alpine
+          ports: [{ containerPort: 80 }]
+          volumeMounts:
+            - name: conf
+              mountPath: /etc/nginx/conf.d/default.conf
+              subPath: default.conf
+      volumes:
+        - name: conf
+          configMap:
+            name: stub-conf
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mobile-stub
+  namespace: gw-mobile
+spec:
+  selector: { app: mobile-stub }
+  ports:
+    - port: 80
+      targetPort: 80
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: stub-conf
+  namespace: gw-partner
+data:
+  default.conf: |
+    server {
+      listen 80;
+      server_tokens off;
+      location = /healthz { return 200 "ok\n"; }
+      location / { default_type text/plain; return 200 "channel=partner pod=$hostname\n"; }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: partner-stub
+  namespace: gw-partner
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: partner-stub }
+  template:
+    metadata:
+      labels: { app: partner-stub }
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:1.27-alpine
+          ports: [{ containerPort: 80 }]
+          volumeMounts:
+            - name: conf
+              mountPath: /etc/nginx/conf.d/default.conf
+              subPath: default.conf
+      volumes:
+        - name: conf
+          configMap:
+            name: stub-conf
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: partner-stub
+  namespace: gw-partner
+spec:
+  selector: { app: partner-stub }
+  ports:
+    - port: 80
+      targetPort: 80

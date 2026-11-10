@@ -1,0 +1,76 @@
+# Identity cluster: Vault (secrets zone, design.md 4.5).
+# LAB SAPMASI: tek düğüm, dosya storage (emptyDir), TLS kapalı. Üretimde: 3 node raft, HSM/KMS auto-unseal, TLS.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: secrets
+  labels:
+    zone: identity
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vault-config
+  namespace: secrets
+data:
+  vault.hcl: |
+    ui = true
+    disable_mlock = true
+    storage "file" {
+      path = "/vault/data"
+    }
+    listener "tcp" {
+      address     = "0.0.0.0:8200"
+      tls_disable = 1
+    }
+    api_addr = "http://vault.secrets.svc.cluster.local:8200"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vault
+  namespace: secrets
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels: { app: vault }
+  template:
+    metadata:
+      labels: { app: vault }
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: vault
+          image: hashicorp/vault:1.18
+          # Image entrypoint'ini atla: entrypoint salt okunur ConfigMap'te chown dener ve sunucuyu ikinci kez açar
+          command: ["vault", "server", "-config=/vault/config/vault.hcl"]
+          ports:
+            - containerPort: 8200
+          env:
+            - name: VAULT_ADDR
+              value: http://127.0.0.1:8200
+          volumeMounts:
+            - name: config
+              mountPath: /vault/config
+            - name: data
+              mountPath: /vault/data
+      volumes:
+        - name: config
+          configMap:
+            name: vault-config
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vault
+  namespace: secrets
+spec:
+  selector: { app: vault }
+  ports:
+    - port: 8200
+      targetPort: 8200
