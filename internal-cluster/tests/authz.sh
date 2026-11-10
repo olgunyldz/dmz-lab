@@ -68,10 +68,17 @@ gw_raw() { # <method> <path> <content-type-or-empty> <body> [token] -> ham HTTP 
     # Başlık satırları gerçek CRLF ile (\r\n çift tırnakta yorumlanmaz, $'...' kullan)
     [[ -n "$token" ]] && extra="Authorization: Bearer $token"$'\r\n'
     [[ -n "$ctype" ]] && extra="${extra}Content-Type: $ctype"$'\r\n'"Content-Length: ${#data}"$'\r\n'
-    printf "%s %s HTTP/1.1\r\nHost: gw-internal\r\n%sConnection: close\r\n\r\n%s" \
-        "$method" "$path" "$extra" "$data" | timeout 20 openssl s_client -connect 127.0.0.1:19543 \
-        -servername gw-internal -CAfile "$CERTS/internal-ca.crt" \
-        -cert "$CERTS/${GW_CERT:-dmz-client}.crt" -key "$CERTS/${GW_CERT:-dmz-client}.key" -quiet 2>/dev/null
+    # port-forward bazen boş yanıt döndürür (geçici bağlantı hatası): en fazla 4 deneme
+    local raw=""
+    for _ in 1 2 3 4; do
+        raw=$(printf "%s %s HTTP/1.1\r\nHost: gw-internal\r\n%sConnection: close\r\n\r\n%s" \
+            "$method" "$path" "$extra" "$data" | timeout 20 openssl s_client -connect 127.0.0.1:19543 \
+            -servername gw-internal -CAfile "$CERTS/internal-ca.crt" \
+            -cert "$CERTS/${GW_CERT:-dmz-client}.crt" -key "$CERTS/${GW_CERT:-dmz-client}.key" -quiet 2>/dev/null)
+        [[ "$raw" == *"HTTP/1.1"* ]] && break
+        sleep 1
+    done
+    printf '%s' "$raw"
 }
 
 exchange() { # <channel> <external-token> -> iç JWT

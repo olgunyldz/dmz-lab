@@ -10,7 +10,7 @@
 # Idempotent: her çalıştırmada zincir sıfırlanır ve yeniden kurulur.
 set -euo pipefail
 
-NODEPORTS=(30446 30447 30448)                    # gw-web, gw-mobile, gw-partner
+NODEPORTS=(30446 30447 30448 30449)              # gw-web, gw-mobile, gw-partner, gw-branch
 CHAIN="F1-EDGE"
 EDGE_CONTAINER="dmz-edge-lab-haproxy-1"          # edge/docker-compose.yml, kind ağına bağlı
 

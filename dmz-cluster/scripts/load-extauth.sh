@@ -21,6 +21,7 @@ $K -n auth create secret generic dmz-exchange-client-tls \
     --from-file=web.crt="$CERTS/dmz-exchange-web.crt" --from-file=web.key="$CERTS/dmz-exchange-web.key" \
     --from-file=mobile.crt="$CERTS/dmz-exchange-mobile.crt" --from-file=mobile.key="$CERTS/dmz-exchange-mobile.key" \
     --from-file=partner.crt="$CERTS/dmz-exchange-partner.crt" --from-file=partner.key="$CERTS/dmz-exchange-partner.key" \
+    --from-file=branch.crt="$CERTS/dmz-exchange-branch.crt" --from-file=branch.key="$CERTS/dmz-exchange-branch.key" \
     --dry-run=client -o yaml | $K apply -f -
 
 $K -n auth create configmap ext-authz-code --from-file=ext_authz.py="$ROOT/extauth/ext_authz.py" \

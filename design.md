@@ -323,6 +323,28 @@ Admin konsolu, `/admin/*` ve yönetim portu hiçbir zaman DMZ'ye açılmaz.
 
 ---
 
+### 4.7 Şube (Branch) Zone
+
+Şube zone'u, banka şubelerindeki çalışan (veznedar, müşteri temsilcisi) iş istasyonlarının merkez sistemlere eriştiği dördüncü kanaldır. Müşteri kanallarıyla (web, mobil, partner) aynı desenle tasarlanır; yalnızca kimlik modeli farklıdır.
+
+| Bileşen | Konum | Rol |
+|---|---|---|
+| Şube iş istasyonu (cihaz) | Şube ağı | Veznedar arayüzü. Cihaz sertifikası (branch-ca ile imzalı, CN=branch-ws-01) ile mTLS |
+| Şube gateway'i `gw-branch` | DMZ cluster (ns `gw-branch`) | Cihaz sertifikasını doğrular (ConfigMap `branch-ca`), `/bff/*` için ext-authz (X-Dmz-Channel: branch), `/realms/*` login |
+| HAProxy | Edge | `teller.lab.local` SNI passthrough (TLS şifresi çözülmez; mTLS gateway'de) |
+| `ext-authz` (branch profili) | DMZ auth | Bearer token doğrulama (aud `channel-branch`); DPoP yok (çalışan kanalı cihaz sertifikasıyla bağlanır) |
+| Token exchange `dmz-exchange-branch` | Identity (Keycloak client-x509) | İç JWT üretimi: channel=branch, auth_method=branch_cert |
+| `branch-app` (Keycloak client) | Identity | Authorization Code + PKCE, confidential; çalışan girişi (`teller`) |
+
+Güvenlik kuralları:
+- **Çift faktör kanalı:** Çalışan erişimi hem cihaz sertifikası (cihaz kimliği, mTLS) hem de kullanıcı token'ı (çalışan kimliği) gerektirir. Biri eksikse istek reddedilir.
+- **Kanal ayrımı:** Şube token'ı yalnızca `/bff` için geçerlidir (iç RBAC `x-channel == branch`). Web token'ı şube kanalında 403 alır (audience uyuşmazlığı).
+- **Yol kısıtı:** Şube gateway'inde yalnızca `/bff/*` ve `/realms/*` tanımlıdır; `/partner` ve `/public` 404 döner (default deny).
+- **Sertifika zinciri:** Şube CA'sı (branch-ca) yalnızca gw-branch'in istemci doğrulamasında kullanılır; iç ağa güven vermez. Exchange ve gateway sertifikaları İç CA ile imzalıdır.
+- **Trace ve log:** Şube isteklerinde kullanıcı kimliği (sub) iç servise `x-user-id` olarak iletilir; token loglara yazılmaz.
+
+Lab durumu: `dmz-cluster/tests/branch.sh` 9/9, şube arayüzü (`branch/`) gerçek tarayıcıda 7/7. Prod farkları: şube CA'sı HSM/KMS'te, cihaz sertifikaları kısa ömürlü (Vault PKI), çalışan kimliği kurumsal IdP (AD/LDAP federasyonu) üzerinden, şube ağı ile DMZ arasında ayrı firewall (F-B) ve şube başına cihaz kaydı.
+
 ## 5. Trafik Akışları
 
 ### 5.0a Route Sınıfları

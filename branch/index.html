@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Şube – Veznedar Arayüzü</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --ink:#1d2330; --muted:#6b7280; --line:#e3e6ec;
+          --ok:#15803d; --bad:#b91c1c; --accent:#0f766e; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#0f141c; --card:#171e29; --ink:#e6e9ef; --muted:#97a1b2; --line:#263041;
+            --ok:#4ade80; --bad:#f87171; --accent:#2dd4bf; }
+  }
+  body { margin:0; background:var(--bg); color:var(--ink); font:14px/1.45 system-ui, sans-serif; }
+  header { padding:14px 20px; border-bottom:1px solid var(--line); background:var(--card); }
+  header h1 { margin:0; font-size:18px; }
+  header p { margin:2px 0 0; color:var(--muted); font-size:12px; }
+  main { display:grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap:14px; padding:14px; }
+  section { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px; }
+  section h2 { margin:0 0 8px; font-size:15px; }
+  .state { font-size:12px; color:var(--muted); white-space:pre-wrap; min-height:34px; margin-bottom:8px; }
+  .row { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:6px; }
+  input { padding:6px 8px; border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--ink); }
+  button { padding:6px 10px; border:1px solid var(--line); border-radius:6px; background:var(--bg);
+           color:var(--ink); cursor:pointer; font-size:13px; }
+  button:hover { border-color:var(--accent); }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+  button:disabled { opacity:.5; cursor:wait; }
+  .hint { font-size:12px; color:var(--muted); margin:4px 0 8px; }
+  .accounts { font-family: ui-monospace, Consolas, monospace; font-size:12px; white-space:pre-wrap;
+              background:var(--bg); border:1px solid var(--line); border-radius:6px; padding:8px; margin-top:6px; }
+  #log-wrap { padding:0 14px 14px; }
+  #log { width:100%; border-collapse:collapse; background:var(--card); border:1px solid var(--line); border-radius:10px; overflow:hidden; }
+  #log th, #log td { padding:6px 8px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; font-size:12px; }
+  #log th { background:var(--bg); }
+  .pass { color:var(--ok); font-weight:600; } .fail { color:var(--bad); font-weight:600; } .none { color:var(--muted); }
+  @media (max-width: 600px) { main { padding:10px; } #log-wrap { padding:0 10px 10px; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Şube – Veznedar Arayüzü</h1>
+  <p>Yalnız lab. İstekler teller.lab.local üzerinden, şube cihaz sertifikasıyla (mTLS) gider. Token'lar ham gösterilmez.</p>
+</header>
+
+<main>
+  <section>
+    <h2>Veznedar oturumu</h2>
+    <div class="state" id="st">durum: giriş yok</div>
+    <div class="row">
+      <input id="u" placeholder="kullanıcı (teller)" size="10">
+      <input id="p" type="password" placeholder="parola (boş = lab varsayılanı)" size="18">
+    </div>
+    <div class="row">
+      <button class="primary" data-act="login">Giriş yap</button>
+      <button data-act="logout">Çıkış yap</button>
+    </div>
+    <div class="hint">Giriş: Keycloak PKCE (branch-app), çıkış: refresh token iptali.</div>
+  </section>
+
+  <section>
+    <h2>Hesap işlemleri</h2>
+    <div class="state">Token ile iç servis çağrısı (ext-authz → exchange → BFF)</div>
+    <div class="row">
+      <button class="primary" data-act="accounts">Hesapları listele</button>
+    </div>
+    <div class="accounts" id="accounts">henüz sorgulanmadı</div>
+  </section>
+
+  <section>
+    <h2>Güvenlik kontrolleri</h2>
+    <div class="state">Beklenen sonuçlar: her biri PASS olmalı</div>
+    <div class="row">
+      <button data-act="nocert" data-path="/bff/accounts" data-expect="TLS">Cihaz sertifikasız bağlan (TLS red)</button>
+      <button data-act="call" data-path="/bff/accounts" data-auth="none" data-expect="401">Token yok (401)</button>
+    </div>
+    <div class="row">
+      <button data-act="call" data-path="/partner/payments" data-auth="session" data-expect="404">/partner'a yönlendirme (404)</button>
+      <button data-act="call" data-path="/public/branches" data-auth="session" data-expect="404">public yol (404, şubede yok)</button>
+    </div>
+  </section>
+</main>
+
+<div id="log-wrap">
+  <table id="log">
+    <thead><tr><th>Zaman</th><th>İstek</th><th>Auth</th><th>Cert</th><th>Beklenen</th><th>Gerçek</th><th>Sonuç</th><th>Yanıt (kısa)</th></tr></thead>
+    <tbody></tbody>
+  </table>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const tbody = document.querySelector('#log tbody');
+const now = () => new Date().toLocaleTimeString();
+
+function addRow(cols) {
+  const tr = document.createElement('tr');
+  cols.forEach((c) => {
+    const td = document.createElement('td');
+    if (c && c.cls) { td.className = c.cls; td.textContent = c.text; }
+    else td.textContent = c == null ? '' : String(c);
+    tr.appendChild(td);
+  });
+  tbody.insertBefore(tr, tbody.firstChild);
+}
+
+async function post(url, body) {
+  const r = await fetch(url, { method: 'POST', credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
+  return { ok: r.ok, status: r.status, data: await r.json() };
+}
+
+async function refresh() {
+  const r = await fetch('/api/state', { credentials: 'same-origin' });
+  const s = await r.json();
+  if (!s.logged_in) { $('st').textContent = 'durum: giriş yok'; return; }
+  const t = s.token || {};
+  $('st').textContent = [
+    `kullanıcı: ${s.user}`,
+    `iss: ${t.iss || '-'}`,
+    `aud: ${Array.isArray(t.aud) ? t.aud.join(',') : t.aud}  azp: ${t.azp || '-'}`,
+    `channel: ${t.channel || '-'}  sender-constrained: ${t.sender_constrained ? 'evet' : 'hayır'}`,
+    `exp: ${t.exp ? new Date(t.exp * 1000).toLocaleTimeString() : '-'}`
+  ].join('\n');
+}
+
+async function act(btn) {
+  const a = btn.dataset.act;
+  btn.disabled = true;
+  try {
+    if (a === 'login') {
+      const r = await post('/api/login', { username: $('u').value.trim(), password: $('p').value });
+      if (r.ok) addRow([now(), 'giriş (PKCE)', '-', 'evet', '-', 'token alındı', { cls: 'pass', text: 'PASS' }, 'oturum açıldı']);
+      else addRow([now(), 'giriş', '-', 'evet', '-', r.status, { cls: 'fail', text: 'FAIL' }, r.data.error]);
+    } else if (a === 'logout') {
+      const r = await post('/api/logout', {});
+      addRow([now(), 'çıkış', '-', 'evet', '204', r.data.keycloak_status, { cls: r.data.ok ? 'pass' : 'fail', text: r.data.ok ? 'PASS' : 'FAIL' }, 'oturum kapatıldı']);
+    } else if (a === 'accounts') {
+      const r = await post('/api/call', { method: 'GET', path: '/bff/accounts', auth: 'session', cert: true, expect: '200' });
+      const d = r.data;
+      $('accounts').textContent = d.status === 200 ? d.body : `HTTP ${d.status}: ${d.body}`;
+      addRow([now(), 'GET /bff/accounts', 'session', 'evet', '200', d.status,
+        { cls: d.pass ? 'pass' : 'fail', text: d.pass ? 'PASS' : 'FAIL' }, (d.body || '').replace(/\s+/g, ' ').slice(0, 140)]);
+    } else if (a === 'call') {
+      const body = { method: 'GET', path: btn.dataset.path, auth: btn.dataset.auth, cert: true, expect: btn.dataset.expect };
+      const r = await post('/api/call', body);
+      const d = r.data;
+      addRow([now(), `GET ${body.path}`, body.auth, 'evet', body.expect, d.status,
+        { cls: d.pass ? 'pass' : 'fail', text: d.pass ? 'PASS' : 'FAIL' }, (d.body || '').replace(/\s+/g, ' ').slice(0, 140)]);
+    } else if (a === 'nocert') {
+      const body = { method: 'GET', path: btn.dataset.path, auth: 'none', cert: false, expect: 'TLS' };
+      const r = await post('/api/call', body);
+      const d = r.data;
+      const reject = d.status === 'TLS' || d.status === 0;
+      addRow([now(), `GET ${body.path}`, 'none', 'YOK', 'TLS', d.status === 'TLS' ? 'TLS red' : d.status,
+        { cls: reject ? 'pass' : 'fail', text: reject ? 'PASS' : 'FAIL' }, (d.body || '').slice(0, 140)]);
+    }
+    await refresh();
+  } catch (e) {
+    addRow([now(), a, '-', '-', '-', 'hata', { cls: 'fail', text: 'FAIL' }, String(e)]);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+document.querySelectorAll('button[data-act]').forEach((b) => b.addEventListener('click', () => act(b)));
+refresh();
+</script>
+</body>
+</html>

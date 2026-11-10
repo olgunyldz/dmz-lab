@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DMZ Lab – Organizer</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --ink:#1d2330; --muted:#6b7280; --line:#e3e6ec; --accent:#2563eb; --ok:#15803d; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#0f141c; --card:#171e29; --ink:#e6e9ef; --muted:#97a1b2; --line:#263041; --accent:#60a5fa; --ok:#4ade80; }
+  }
+  body { margin:0; background:var(--bg); color:var(--ink); font:14px/1.45 system-ui, sans-serif; }
+  header { padding:14px 20px; border-bottom:1px solid var(--line); background:var(--card); }
+  header h1 { margin:0; font-size:18px; }
+  header p { margin:2px 0 0; color:var(--muted); font-size:12px; }
+  main { display:grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap:14px; padding:16px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; display:flex; flex-direction:column; gap:8px; }
+  .card h2 { margin:0; font-size:16px; }
+  .card p { margin:0; color:var(--muted); font-size:13px; }
+  .state { font-size:12px; color:var(--muted); white-space:pre-wrap; min-height:44px; }
+  .state b { color:var(--ok); font-weight:600; }
+  a.go { display:inline-block; margin-top:auto; padding:8px 12px; border-radius:8px; background:var(--accent);
+         color:#fff; text-decoration:none; font-weight:600; align-self:flex-start; }
+  a.go:hover { opacity:.9; }
+  .links { font-size:12px; }
+  .links a { color:var(--accent); margin-right:10px; }
+  footer { padding:10px 20px 20px; color:var(--muted); font-size:12px; }
+  @media (max-width: 600px) { main { padding:10px; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>DMZ Lab – Organizer</h1>
+  <p>Yalnız lab. Her kanal ayrı bir sayfa: giriş, çıkış ve kanala özel çağrılar. Oturum durumu aşağıda.</p>
+</header>
+
+<main id="cards"></main>
+
+<footer>
+  Sunucu 127.0.0.1:9000 · edge 127.0.0.1:8443 · şube cihaz sertifikası: branch-device · token'lar ham gösterilmez.
+</footer>
+
+<script>
+const DESCRIPTIONS = {
+  web: 'Kullanıcı girişi (PKCE, Bearer token). Iç servis: /bff/web/… (kanal: web).',
+  mobile: 'Kullanıcı girişi (PKCE + ES256 DPoP). Iç servis: /bff/mobile/… (kanal: mobile).',
+  partner: 'Client credentials + mTLS partner sertifikası. Iç servis: /partner/… (kanal: partner).',
+  branch: 'Çalışan (veznedar) girişi: cihaz sertifikası + PKCE. Iç servis: /bff/branch/… (kanal: branch).',
+  public: 'Token gerektirmeyen yollar. Oturum yok; yalnız GET ve default-deny kontrolleri.'
+};
+
+async function render() {
+  const [chans, state] = await Promise.all([
+    fetch('/api/channels').then(r => r.json()),
+    fetch('/api/state').then(r => r.json())
+  ]);
+  const box = document.getElementById('cards');
+  box.innerHTML = '';
+  for (const [key, c] of Object.entries(chans)) {
+    const s = state[key];
+    const card = document.createElement('div');
+    card.className = 'card';
+    const h = document.createElement('h2'); h.textContent = c.title;
+    const p = document.createElement('p'); p.textContent = DESCRIPTIONS[key] || '';
+    const st = document.createElement('div'); st.className = 'state';
+    if (!c.login) st.textContent = 'oturum: yok (public kanal)';
+    else if (s) st.innerHTML = `oturum: <b>açık</b>\nkullanıcı: ${s.user || '-'}\nchannel: ${s.token.channel || '-'}  aud: ${Array.isArray(s.token.aud) ? s.token.aud.join(',') : s.token.aud}`;
+    else st.textContent = 'oturum: kapalı';
+    const links = document.createElement('div'); links.className = 'links';
+    links.innerHTML = `<a href="/ch/${key}">Giriş</a><a href="/ch/${key}#logout">Çıkış</a>`;
+    const go = document.createElement('a'); go.className = 'go'; go.href = `/ch/${key}`;
+    go.textContent = 'Kanal sayfasını aç →';
+    card.append(h, p, st, links, go);
+    box.append(card);
+  }
+}
+render();
+</script>
+</body>
+</html>

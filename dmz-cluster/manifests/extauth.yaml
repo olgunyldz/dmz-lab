@@ -54,6 +54,10 @@ spec:
               value: /exch/partner.crt
             - name: EXCHANGE_KEY_PARTNER
               value: /exch/partner.key
+            - name: EXCHANGE_CERT_BRANCH
+              value: /exch/branch.crt
+            - name: EXCHANGE_KEY_BRANCH
+              value: /exch/branch.key
           ports:
             - containerPort: 8080
           securityContext:
@@ -274,3 +278,53 @@ spec:
   extAuth:
     extensionRef:
       name: extauth-partner
+---
+# Şube (branch) çalışan kanalı: bearer token, DPoP yok. Sertifika kanalı belirler (X-Dmz-Channel: branch).
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: allow-gw-branch-extauth
+  namespace: auth
+spec:
+  from:
+    - group: gateway.kgateway.dev
+      kind: GatewayExtension
+      namespace: gw-branch
+  to:
+    - group: ""
+      kind: Service
+      name: ext-authz
+---
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: GatewayExtension
+metadata:
+  name: extauth-branch
+  namespace: gw-branch
+spec:
+  extAuth:
+    failOpen: false
+    headersToForward: ["authorization", "dpop", "host"]
+    httpService:
+      backendRef:
+        name: ext-authz
+        namespace: auth
+        port: 8080
+      authorizationRequest:
+        headersToAdd:
+          X-Dmz-Channel: branch
+      authorizationResponse:
+        headersToBackend: ["authorization"]
+---
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: TrafficPolicy
+metadata:
+  name: extauth-branch
+  namespace: gw-branch
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: branch
+  extAuth:
+    extensionRef:
+      name: extauth-branch

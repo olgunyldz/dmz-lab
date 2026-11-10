@@ -41,9 +41,14 @@ PARTNER_EXT=$(curl -s -X POST "http://127.0.0.1:18080$TOKEN_PATH" -d grant_type=
 exchange() { # <channel> <external-token> -> iç JWT
     local form raw
     form="grant_type=urn:ietf:params:oauth:grant-type:token-exchange&client_id=dmz-exchange-$1&subject_token=$2&subject_token_type=urn:ietf:params:oauth:token-type:access_token&requested_token_type=urn:ietf:params:oauth:token-type:access_token&audience=kgateway-internal"
-    raw=$(printf "POST $TOKEN_PATH HTTP/1.1\r\nHost: gw-internal\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: ${#form}\r\nConnection: close\r\n\r\n%s" "$form" | \
-        timeout 20 openssl s_client -connect 127.0.0.1:19543 -servername gw-internal -CAfile "$CERTS/internal-ca.crt" \
-        -cert "$CERTS/dmz-exchange-$1.crt" -key "$CERTS/dmz-exchange-$1.key" -quiet 2>/dev/null)
+    # port-forward bazen boş yanıt döndürür (geçici bağlantı hatası): en fazla 4 deneme
+    for _ in 1 2 3 4; do
+        raw=$(printf "POST $TOKEN_PATH HTTP/1.1\r\nHost: gw-internal\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: ${#form}\r\nConnection: close\r\n\r\n%s" "$form" | \
+            timeout 20 openssl s_client -connect 127.0.0.1:19543 -servername gw-internal -CAfile "$CERTS/internal-ca.crt" \
+            -cert "$CERTS/dmz-exchange-$1.crt" -key "$CERTS/dmz-exchange-$1.key" -quiet 2>/dev/null)
+        [[ "$raw" == *"HTTP/1.1"* ]] && break
+        sleep 1
+    done
     echo "$raw" | json_token
 }
 WEB_INT=$(exchange web "$WEB_EXT")

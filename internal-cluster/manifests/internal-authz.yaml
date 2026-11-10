@@ -167,6 +167,125 @@ spec:
       matchExpressions:
         - "request.headers['x-channel'] == 'web'"
         - "request.headers['x-channel'] == 'mobile'"
+        - "request.headers['x-channel'] == 'branch'"
+---
+# ----------------------------------------------------------------------------
+# Kanala özel iç endpoint'ler (aynı BFF, ayrı yol ve ayrı RBAC):
+#   /bff/web/*     yalnız x-channel=web
+#   /bff/mobile/*  yalnız x-channel=mobile
+#   /bff/branch/*  yalnız x-channel=branch
+# Daha uzun yol önceliklidir; genel /bff/ route'u geriye dönük uyumluluk için kalır.
+# ----------------------------------------------------------------------------
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: bff-web-api
+  namespace: gw-internal
+spec:
+  parentRefs:
+    - name: gw-internal
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /bff/web/
+      backendRefs:
+        - name: bff
+          namespace: app-bff
+          port: 80
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: bff-mobile-api
+  namespace: gw-internal
+spec:
+  parentRefs:
+    - name: gw-internal
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /bff/mobile/
+      backendRefs:
+        - name: bff
+          namespace: app-bff
+          port: 80
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: bff-branch-api
+  namespace: gw-internal
+spec:
+  parentRefs:
+    - name: gw-internal
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /bff/branch/
+      backendRefs:
+        - name: bff
+          namespace: app-bff
+          port: 80
+---
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: TrafficPolicy
+metadata:
+  name: bff-web-authz
+  namespace: gw-internal
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: bff-web-api
+  jwtAuth:
+    extensionRef:
+      name: internal-jwt
+  rbac:
+    action: Allow
+    policy:
+      matchExpressions:
+        - "request.headers['x-channel'] == 'web'"
+---
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: TrafficPolicy
+metadata:
+  name: bff-mobile-authz
+  namespace: gw-internal
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: bff-mobile-api
+  jwtAuth:
+    extensionRef:
+      name: internal-jwt
+  rbac:
+    action: Allow
+    policy:
+      matchExpressions:
+        - "request.headers['x-channel'] == 'mobile'"
+---
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: TrafficPolicy
+metadata:
+  name: bff-branch-authz
+  namespace: gw-internal
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: bff-branch-api
+  jwtAuth:
+    extensionRef:
+      name: internal-jwt
+  rbac:
+    action: Allow
+    policy:
+      matchExpressions:
+        - "request.headers['x-channel'] == 'branch'"
 ---
 apiVersion: gateway.kgateway.dev/v1alpha1
 kind: TrafficPolicy

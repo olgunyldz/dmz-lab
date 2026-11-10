@@ -1,0 +1,131 @@
+# Şube (branch) zone DMZ tarafı: gw-branch gateway'i. Çalışan (veznedar) arayüzü buraya bağlanır.
+#   - İstemci: şube iş istasyonu, branch-ca ile imzalı cihaz sertifikası (mTLS, gateway doğrular)
+#   - HAProxy SNI passthrough (teller.lab.local): TLS şifresi çözülmez; mTLS gateway'de yapılır (partner ile aynı desen)
+#   - /bff/* ve /realms/*: iç gateway'e (F2 mTLS). /bff/* ext-authz'den geçer (extauth-branch, X-Dmz-Channel: branch)
+# Secret ve ConfigMap'ler: scripts/load-branch.sh. Gateway backend istemci sertifikası: aynı script (patch).
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: gw-branch
+  labels:
+    channel: branch
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: gw-branch
+  namespace: gw-branch
+spec:
+  gatewayClassName: kgateway
+  tls:
+    frontend:
+      default:
+        validation:
+          caCertificateRefs:
+            - group: ""
+              kind: ConfigMap
+              name: branch-ca
+  listeners:
+    - name: https
+      port: 443
+      protocol: HTTPS
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: gw-branch-tls
+      allowedRoutes:
+        namespaces:
+          from: Same
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gw-branch-nodeport
+  namespace: gw-branch
+spec:
+  type: NodePort
+  selector:
+    gateway.networking.k8s.io/gateway-name: gw-branch
+  ports:
+    - name: https
+      port: 443
+      targetPort: 443
+      nodePort: 30449
+---
+# İç gateway'e (F2) bağlantı: internal-backend.yaml ile aynı desen, gw-branch namespace'inde
+apiVersion: v1
+kind: Service
+metadata:
+  name: internal-gw
+  namespace: gw-branch
+spec:
+  ports:
+    - name: https
+      port: 443
+      targetPort: 30444
+---
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: internal-gw
+  namespace: gw-branch
+subsets:
+  - addresses:
+      - ip: 172.18.0.10
+    ports:
+      - name: https
+        port: 30444
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: BackendTLSPolicy
+metadata:
+  name: internal-gw
+  namespace: gw-branch
+spec:
+  targetRefs:
+    - group: ""
+      kind: Service
+      name: internal-gw
+  validation:
+    hostname: gw-internal
+    caCertificateRefs:
+      - group: ""
+        kind: ConfigMap
+        name: internal-ca-backend
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: branch
+  namespace: gw-branch
+spec:
+  parentRefs:
+    - name: gw-branch
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /bff/
+      backendRefs:
+        - name: internal-gw
+          port: 443
+---
+# Çalışan girişi (Keycloak): ext-authz yok, yalnız iç gateway'e yönlendirilir
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: branch-login
+  namespace: gw-branch
+spec:
+  parentRefs:
+    - name: gw-branch
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /realms/
+      backendRefs:
+        - name: internal-gw
+          port: 443

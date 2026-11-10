@@ -12,6 +12,7 @@ SUITES=(
     "dmz-cluster/tests/extauth.sh"
     "dmz-cluster/tests/internal-path.sh"
     "dmz-cluster/tests/firewall.sh"
+    "dmz-cluster/tests/branch.sh"
     "internal-cluster/tests/authz.sh"
     "internal-cluster/tests/service-verify.sh"
     "edge/tests/run-all.sh"

@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DMZ Lab – Kanal</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --ink:#1d2330; --muted:#6b7280; --line:#e3e6ec; --accent:#2563eb;
+          --ok:#15803d; --bad:#b91c1c; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#0f141c; --card:#171e29; --ink:#e6e9ef; --muted:#97a1b2; --line:#263041; --accent:#60a5fa;
+            --ok:#4ade80; --bad:#f87171; }
+  }
+  body { margin:0; background:var(--bg); color:var(--ink); font:14px/1.45 system-ui, sans-serif; }
+  header { padding:12px 20px; border-bottom:1px solid var(--line); background:var(--card);
+           display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+  header h1 { margin:0; font-size:17px; }
+  nav a { color:var(--accent); text-decoration:none; margin-left:12px; font-size:13px; }
+  nav a:hover { text-decoration:underline; }
+  main { display:grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap:14px; padding:14px; }
+  section { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px; }
+  section h2 { margin:0 0 8px; font-size:15px; }
+  .state { font-size:12px; color:var(--muted); white-space:pre-wrap; min-height:44px; margin-bottom:8px; }
+  .row { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:6px; }
+  input { padding:6px 8px; border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--ink); }
+  button { padding:7px 12px; border:1px solid var(--line); border-radius:6px; background:var(--bg);
+           color:var(--ink); cursor:pointer; font-size:13px; }
+  button:hover { border-color:var(--accent); }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+  button:disabled { opacity:.5; cursor:wait; }
+  .hint { font-size:12px; color:var(--muted); margin:4px 0 8px; }
+  #log-wrap { padding:0 14px 14px; }
+  #log { width:100%; border-collapse:collapse; background:var(--card); border:1px solid var(--line); border-radius:10px; overflow:hidden; }
+  #log th, #log td { padding:6px 8px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; font-size:12px; }
+  #log th { background:var(--bg); }
+  .pass { color:var(--ok); font-weight:600; } .fail { color:var(--bad); font-weight:600; } .none { color:var(--muted); }
+  .flag { color:var(--muted); font-size:12px; }
+  @media (max-width: 600px) { main { padding:10px; } #log-wrap { padding:0 10px 10px; } }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="title">Kanal</h1>
+  <nav><a href="/">← Organizer</a></nav>
+</header>
+
+<main>
+  <section id="login-sec">
+    <h2>Giriş ve çıkış</h2>
+    <div class="state" id="st">durum: yükleniyor…</div>
+    <div class="row" id="login-fields">
+      <input id="u" placeholder="kullanıcı (varsayılan)" size="12">
+      <input id="p" type="password" placeholder="parola (boş = lab varsayılanı)" size="18">
+    </div>
+    <div class="row">
+      <button class="primary" id="btn-login">Giriş yap</button>
+      <button id="btn-logout">Çıkış yap</button>
+    </div>
+    <div class="hint" id="hint"></div>
+  </section>
+
+  <section>
+    <h2>Kanal çağrıları</h2>
+    <div class="state">Beklenen sonuç her satırda; PASS/FAIL günlükte.</div>
+    <div class="row" id="checks"></div>
+    <div class="hint" id="check-hint"></div>
+  </section>
+</main>
+
+<div id="log-wrap">
+  <table id="log">
+    <thead><tr><th>Zaman</th><th>Kanal</th><th>İstek</th><th>Auth</th><th>Beklenen</th><th>Gerçek</th><th>Sonuç</th><th>Yanıt (kısa)</th></tr></thead>
+    <tbody></tbody>
+  </table>
+</div>
+
+<script>
+// Kanal sayfasının kontrolleri. Yollar iç cluster'daki kanala özel endpoint'lere gider.
+// cert:false -> cihaz/partner sertifikası sunulmaz (beklenen: TLS red). token_from: başka kanalın oturumu.
+const CHECKS = {
+  web: [
+    { label: 'BFF hesaplar (web)', channel: 'web', method: 'GET', path: '/bff/web/accounts', auth: 'session', expect: '200' },
+    { label: 'Token yok (401)', channel: 'web', method: 'GET', path: '/bff/web/accounts', auth: 'none', expect: '401' },
+    { label: 'Web token → partner (403)', channel: 'partner', method: 'GET', path: '/partner/payments', auth: 'session', token_from: 'web', expect: '403', hint: 'Önce web girişi yapın' },
+    { label: 'Web token → şube endpoint (403)', channel: 'branch', method: 'GET', path: '/bff/branch/accounts', auth: 'session', token_from: 'web', expect: '403', hint: 'Önce web girişi yapın' },
+  ],
+  mobile: [
+    { label: 'BFF hesaplar, DPoP ile (200)', channel: 'mobile', method: 'GET', path: '/bff/mobile/accounts', auth: 'session', dpop: true, expect: '200' },
+    { label: 'BFF, DPoP yok (401)', channel: 'mobile', method: 'GET', path: '/bff/mobile/accounts', auth: 'session', dpop: false, expect: '401' },
+    { label: 'Token yok (401)', channel: 'mobile', method: 'GET', path: '/bff/mobile/accounts', auth: 'none', expect: '401' },
+  ],
+  partner: [
+    { label: 'Partner payments (200)', channel: 'partner', method: 'GET', path: '/partner/payments', auth: 'session', expect: '200' },
+    { label: 'Token yok (401)', channel: 'partner', method: 'GET', path: '/partner/payments', auth: 'none', expect: '401' },
+    { label: 'Sertifikasız (TLS red)', channel: 'partner', method: 'GET', path: '/partner/payments', auth: 'none', cert: false, expect: 'TLS' },
+  ],
+  branch: [
+    { label: 'Hesaplar (200)', channel: 'branch', method: 'GET', path: '/bff/branch/accounts', auth: 'session', expect: '200' },
+    { label: 'Token yok (401)', channel: 'branch', method: 'GET', path: '/bff/branch/accounts', auth: 'none', expect: '401' },
+    { label: 'Cihaz sertifikasız (TLS red)', channel: 'branch', method: 'GET', path: '/bff/branch/accounts', auth: 'none', cert: false, expect: 'TLS' },
+    { label: '/partner şubede yok (404)', channel: 'branch', method: 'GET', path: '/partner/payments', auth: 'session', expect: '404' },
+  ],
+  public: [
+    { label: 'GET /public (200)', channel: 'public', method: 'GET', path: '/public/branches', auth: 'none', expect: '200' },
+    { label: 'POST /public (404)', channel: 'public', method: 'POST', path: '/public/branches', auth: 'none', expect: '404' },
+    { label: '/bff token yok (401)', channel: 'public', method: 'GET', path: '/bff/web/accounts', auth: 'none', expect: '401' },
+  ],
+};
+
+const KEY = location.pathname.split('/').pop();
+const $ = (id) => document.getElementById(id);
+const now = () => new Date().toLocaleTimeString();
+const tbody = document.querySelector('#log tbody');
+
+function addRow(cols) {
+  const tr = document.createElement('tr');
+  cols.forEach((c) => {
+    const td = document.createElement('td');
+    if (c && c.cls) { td.className = c.cls; td.textContent = c.text; } else td.textContent = c == null ? '' : String(c);
+    tr.appendChild(td);
+  });
+  tbody.insertBefore(tr, tbody.firstChild);
+}
+
+async function post(url, body) {
+  const r = await fetch(url, { method: 'POST', credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
+  return { ok: r.ok, status: r.status, data: await r.json() };
+}
+
+async function refreshState() {
+  const s = await (await fetch('/api/state', { credentials: 'same-origin' })).json();
+  const e = s[KEY];
+  if (KEY === 'public') { $('st').textContent = 'public kanal: oturum yok'; return; }
+  if (!e) { $('st').textContent = 'durum: oturum kapalı'; return; }
+  const t = e.token;
+  $('st').textContent = [
+    `durum: oturum açık (kullanıcı: ${e.user || '-'})`,
+    `channel: ${t.channel || '-'}  auth_method: ${t.auth_method || '-'}`,
+    `aud: ${Array.isArray(t.aud) ? t.aud.join(',') : t.aud}  azp: ${t.azp || '-'}`,
+    `sender-constrained: ${t.sender_constrained ? 'evet' : 'hayır'}`
+  ].join('\n');
+}
+
+function setupPage(channels) {
+  $('title').textContent = channels[KEY] ? channels[KEY].title : 'Kanal';
+  if (KEY === 'public') {
+    $('login-fields').style.display = 'none';
+    $('btn-login').disabled = true;
+    $('btn-logout').disabled = true;
+    $('hint').textContent = 'Public kanalda giriş ve çıkış yok (token gerekmez). Çağrılar aşağıda.';
+  }
+  if (KEY === 'partner') $('hint').textContent = 'Partner girişi client credentials ile (mTLS). Çıkış yerel token siler.';
+  if (KEY === 'branch') $('hint').textContent = 'Şube girişi cihaz sertifikasıyla (teller.lab.local). Giriş: teller kullanıcısı.';
+  if (KEY === 'mobile') $('hint').textContent = 'Mobil girişte DPoP anahtarı üretilir; çıkış refresh token\'ı iptal eder.';
+  if (KEY === 'web') $('hint').textContent = 'Web girişi PKCE ile. Çıkış Keycloak oturumunu kapatır.';
+
+  const box = $('checks');
+  (CHECKS[KEY] || []).forEach((c) => {
+    const b = document.createElement('button');
+    b.textContent = c.label;
+    b.title = c.hint || '';
+    b.addEventListener('click', () => runCheck(b, c));
+    box.appendChild(b);
+  });
+}
+
+async function runCheck(btn, c) {
+  btn.disabled = true;
+  try {
+    const body = { channel: c.channel, method: c.method, path: c.path, auth: c.auth,
+      dpop: !!c.dpop, cert: c.cert !== false, token_from: c.token_from || null, expect: c.expect };
+    const r = await post('/api/call', body);
+    const d = r.data;
+    const ok = !!d.pass;
+    addRow([now(), c.channel, `${c.method} ${c.path}${c.dpop ? ' (DPoP)' : ''}`, c.auth + (c.token_from ? ` (${c.token_from})` : ''),
+      c.expect, d.status, { cls: ok ? 'pass' : 'fail', text: ok ? 'PASS' : 'FAIL' },
+      (d.body || d.error || '').replace(/\s+/g, ' ').slice(0, 140)]);
+  } catch (e) {
+    addRow([now(), c.channel, c.label, '-', c.expect, 'hata', { cls: 'fail', text: 'FAIL' }, String(e)]);
+  } finally { btn.disabled = false; }
+}
+
+async function login() {
+  const btn = $('btn-login'); btn.disabled = true;
+  try {
+    const r = await post('/api/login', { channel: KEY, username: $('u').value.trim(), password: $('p').value });
+    if (r.ok) addRow([now(), KEY, 'giriş', '-', '-', 'token alındı', { cls: 'pass', text: 'PASS' }, 'oturum açıldı']);
+    else addRow([now(), KEY, 'giriş', '-', '-', r.status, { cls: 'fail', text: 'FAIL' }, r.data.error]);
+  } catch (e) { addRow([now(), KEY, 'giriş', '-', '-', 'hata', { cls: 'fail', text: 'FAIL' }, String(e)]); }
+  finally { btn.disabled = false; await refreshState(); }
+}
+
+async function logout() {
+  const btn = $('btn-logout'); btn.disabled = true;
+  try {
+    const r = await post('/api/logout', { channel: KEY });
+    const note = r.data.note || '';
+    addRow([now(), KEY, 'çıkış', '-', '200/204', r.data.keycloak_status ?? '-',
+      { cls: r.data.ok ? 'pass' : 'fail', text: r.data.ok ? 'PASS' : 'FAIL' }, note || 'oturum kapatıldı']);
+  } catch (e) { addRow([now(), KEY, 'çıkış', '-', '-', 'hata', { cls: 'fail', text: 'FAIL' }, String(e)]); }
+  finally { btn.disabled = false; await refreshState(); }
+}
+
+$('btn-login').addEventListener('click', login);
+$('btn-logout').addEventListener('click', logout);
+
+(async () => {
+  const channels = await (await fetch('/api/channels')).json();
+  setupPage(channels);
+  await refreshState();
+  if (location.hash === '#logout') $('btn-logout').scrollIntoView();
+})();
+</script>
+</body>
+</html>

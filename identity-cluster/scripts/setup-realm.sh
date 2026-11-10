@@ -39,7 +39,7 @@ echo "realm: $REALM ($code)"
 
 # client_id -> secret (secret yoksa üretilir)
 declare -A SECRETS
-for c in web-app mobile-app partner-acme bff core-svc dmz-exchange-web dmz-exchange-mobile dmz-exchange-partner kgateway-internal; do
+for c in web-app mobile-app branch-app partner-acme bff core-svc dmz-exchange-web dmz-exchange-mobile dmz-exchange-partner dmz-exchange-branch kgateway-internal; do
     SECRETS[$c]=$($K -n auth get secret keycloak-client-secrets -o jsonpath="{.data.$c}" 2>/dev/null | base64 -d 2>/dev/null || true)
     [[ -n "${SECRETS[$c]}" ]] || SECRETS[$c]=$(openssl rand -hex 24)
 done
@@ -104,6 +104,12 @@ delete_client mobile-app
 create_client mobile-app "\"fullScopeAllowed\":false,\"publicClient\":true,\"standardFlowEnabled\":true,\"directAccessGrantsEnabled\":false,\"redirectUris\":[\"com.bank.app:/callback\"],$PKCE_MOBILE"
 aud_mapper mobile-app channel-mobile; claim_mapper mobile-app channel mobile; exch_mapper mobile-app dmz-exchange-mobile
 
+# 2b) Şube (branch) çalışan kanalı: Authorization Code + PKCE, confidential, DPoP YOK.
+#     Girişler teller.lab.local üzerinden (gw-branch, mTLS cihaz sertifikası).
+delete_client branch-app
+create_client branch-app "\"fullScopeAllowed\":false,\"publicClient\":false,\"standardFlowEnabled\":true,\"directAccessGrantsEnabled\":false,\"redirectUris\":[\"https://teller.lab.local/*\"],$PKCE_WEB"
+aud_mapper branch-app channel-branch; claim_mapper branch-app channel branch; exch_mapper branch-app dmz-exchange-branch
+
 # 3) Partner (client credentials; mTLS cnf bağlaması sonraki adım)
 create_client partner-acme "\"fullScopeAllowed\":false,\"publicClient\":false,\"serviceAccountsEnabled\":true,\"standardFlowEnabled\":false"
 aud_mapper partner-acme channel-partner; claim_mapper partner-acme channel partner; claim_mapper partner-acme partner_id acme-001; exch_mapper partner-acme dmz-exchange-partner
@@ -114,7 +120,7 @@ create_client core-svc "\"publicClient\":false,\"serviceAccountsEnabled\":true,\
 
 # 5) Token exchange istemcileri (kanal başına) ve hedef audience
 create_client kgateway-internal "\"publicClient\":false,\"standardFlowEnabled\":false,\"serviceAccountsEnabled\":false,$EXCHANGE"
-for ch in web mobile partner; do
+for ch in web mobile partner branch; do
     # Exchange istemcisi mTLS (client-x509): kimlik, sertifika subject'i CN=dmz-exchange-<kanal> ile eşleşir
     create_client "dmz-exchange-$ch" "\"publicClient\":false,\"serviceAccountsEnabled\":true,\"standardFlowEnabled\":false,\"clientAuthenticatorType\":\"client-x509\",\"attributes\":{\"standard.token.exchange.enabled\":\"true\",\"x509.subjectdn\":\"CN=dmz-exchange-$ch\"}"
 done
@@ -129,6 +135,13 @@ code=$(api POST "/admin/realms/$REALM/users" "{\"username\":\"alice\",\"firstNam
 ok "$code" && echo "kullanıcı: alice ($code)"
 SECRETS[alice-password]=$USER_PW
 
+# 7c) Şube çalışanı (veznedar): branch-app ile girer
+TELLER_PW=$($K -n auth get secret keycloak-client-secrets -o jsonpath='{.data.teller-password}' 2>/dev/null | base64 -d 2>/dev/null || true)
+[[ -n "$TELLER_PW" ]] || TELLER_PW=$(openssl rand -hex 16)
+code=$(api POST "/admin/realms/$REALM/users" "{\"username\":\"teller\",\"firstName\":\"Teller\",\"lastName\":\"Lab\",\"email\":\"teller@lab.local\",\"enabled\":true,\"emailVerified\":true,\"requiredActions\":[],\"credentials\":[{\"type\":\"password\",\"value\":\"$TELLER_PW\",\"temporary\":false}]}")
+ok "$code" && echo "kullanıcı: teller ($code)"
+SECRETS[teller-password]=$TELLER_PW
+
 # 7b) Token exchange yetkileri:
 #     - kgateway-internal client'ında "access" rolü; default role'e eklenir (tüm kullanıcılar hedef audience'ı alabilir)
 #     - her exchange client'ı bu rolü scope olarak alır (audience çözümlemesi için)
@@ -139,7 +152,7 @@ if [[ -n "$KG" ]]; then
     RID=$(api GET "/admin/realms/$REALM/clients/$KG/roles/access" >/dev/null; sed -n 's/.*"id":"\([^"]*\)".*/\1/p' /tmp/kc-body | head -1)
     DEF=$(api GET "/admin/realms/$REALM/roles/default-roles-$REALM" >/dev/null; sed -n 's/.*"id":"\([^"]*\)".*/\1/p' /tmp/kc-body | head -1)
     api POST "/admin/realms/$REALM/roles-by-id/$DEF/composites" "[{\"id\":\"$RID\",\"name\":\"access\",\"clientRole\":true,\"containerId\":\"$KG\"}]" >/dev/null
-    for ch in web mobile partner; do
+    for ch in web mobile partner branch; do
         DX=$(client_uuid "dmz-exchange-$ch")
         api POST "/admin/realms/$REALM/clients/$DX/scope-mappings/clients/$KG" "[{\"id\":\"$RID\",\"name\":\"access\"}]" >/dev/null
     done
@@ -147,6 +160,7 @@ fi
 claim_mapper dmz-exchange-web channel web;         claim_mapper dmz-exchange-web auth_method pwd_otp
 claim_mapper dmz-exchange-mobile channel mobile;   claim_mapper dmz-exchange-mobile auth_method dpop_device
 claim_mapper dmz-exchange-partner channel partner; claim_mapper dmz-exchange-partner auth_method mtls_partner
+claim_mapper dmz-exchange-branch channel branch;   claim_mapper dmz-exchange-branch auth_method branch_cert
 # Lab sınırı: partner_id sabit (acme-001). Üretimde partner kimliği subject token'dan taşınmalı.
 claim_mapper dmz-exchange-partner partner_id acme-001
 echo "token exchange yetkileri ayarlandı."

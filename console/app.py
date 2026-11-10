@@ -1,0 +1,403 @@
+#!/usr/bin/env python3
+"""DMZ lab organizer ve kanal sayfaları (YALNIZ LAB).
+
+Çalıştırma (repo kökünden):  PYTHONIOENCODING=utf-8 python console/app.py  ->  http://127.0.0.1:9000
+  /              organizer: tüm kanallara linkler, oturum durumu
+  /ch/<kanal>    kanal sayfası: giriş ve çıkış (her zaman görünür), kanala özel çağrılar
+Kanallar: web, mobile, partner, branch (şube), public.
+
+Ön koşullar: edge ayakta (docker compose), gw-branch kurulu (load-branch.sh), identity kurulu (setup-realm.sh),
+kubectl erişimi. Sunucu identity Keycloak'a port-forward açar (mobil login için).
+
+Güvenlik notları (lab): client secret ve parolalar yalnız bellekte; tarayıcıya gönderilmez. Token'lar
+tarayıcıya ham gitmez, yalnız claim özeti. Token imzası burada doğrulanmaz.
+"""
+import atexit
+import base64
+import hashlib
+import html
+import http.client
+import http.server
+import json
+import os
+import re
+import secrets
+import socket
+import ssl
+import subprocess
+import tempfile
+import threading
+import time
+import urllib.parse
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+HERE = Path(__file__).resolve().parent
+CERTS = ROOT / "edge" / "certs"
+EDGE = ("127.0.0.1", 8443)
+PUBLIC_CA = str(CERTS / "public-ca.crt")
+INTERNAL_CA = str(CERTS / "internal-ca.crt")
+PORT = 9000
+IDENTITY_PORT = 18080
+REALM = "/realms/bank/protocol/openid-connect"
+IDENTITY_TOKEN_URL = f"http://127.0.0.1:{IDENTITY_PORT}{REALM}/token"
+
+# Kanal yapılandırması. host: edge'e SNI/Host; cert: istemci sertifikası (mTLS); login: giriş yöntemi.
+CHANNELS = {
+    "web": {"title": "Web kanalı", "host": "web.lab.local", "ca": PUBLIC_CA, "cert": None,
+            "login": "pkce", "client": "web-app", "secret": "web-app", "redirect": "https://web.lab.local:8443/callback",
+            "user": "alice", "password": "alice-password", "dpop": False},
+    "mobile": {"title": "Mobil kanal", "host": "mobile-api.lab.local", "ca": PUBLIC_CA, "cert": None,
+               "login": "pkce_dpop", "client": "mobile-app", "secret": None, "redirect": "com.bank.app:/callback",
+               "user": "alice", "password": "alice-password", "dpop": True},
+    "partner": {"title": "Partner kanalı", "host": "partner-api.lab.local", "ca": INTERNAL_CA,
+                "cert": (str(CERTS / "partner-client.crt"), str(CERTS / "partner-client.key")),
+                "login": "client_credentials", "client": "partner-acme", "secret": "partner-acme", "redirect": None,
+                "user": None, "password": None, "dpop": False},
+    "branch": {"title": "Şube (çalışan) kanalı", "host": "teller.lab.local", "ca": INTERNAL_CA,
+               "cert": (str(CERTS / "branch-device.crt"), str(CERTS / "branch-device.key")),
+               "login": "pkce", "client": "branch-app", "secret": "branch-app", "redirect": "https://teller.lab.local/callback",
+               "user": "teller", "password": "teller-password", "dpop": False},
+    "public": {"title": "Public (oturumsuz)", "host": "web.lab.local", "ca": PUBLIC_CA, "cert": None,
+               "login": None, "dpop": False},
+}
+
+SECRETS = {}
+SESSIONS = {}
+LOCK = threading.Lock()
+
+
+# ---------------------------------------------------------------------------
+# Yardımcılar
+# ---------------------------------------------------------------------------
+def b64u(raw):
+    return base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
+
+
+def b64u_dec(s):
+    return base64.urlsafe_b64decode(s + "=" * (-len(s) % 4))
+
+
+def load_secrets():
+    out = subprocess.run(["kubectl", "--context", "kind-identity", "-n", "auth", "get", "secret",
+                          "keycloak-client-secrets", "-o", "json"], capture_output=True, text=True, check=True).stdout
+    data = json.loads(out)["data"]
+    for key in ("web-app", "partner-acme", "branch-app", "alice-password", "teller-password"):
+        if key in data:
+            SECRETS[key] = base64.b64decode(data[key]).decode()
+
+
+def start_identity_forward():
+    proc = subprocess.Popen(["kubectl", "--context", "kind-identity", "-n", "auth", "port-forward",
+                             "svc/keycloak", f"{IDENTITY_PORT}:8080"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    atexit.register(proc.terminate)
+    time.sleep(3)
+    return proc
+
+
+def decode_claims(token):
+    try:
+        return json.loads(b64u_dec(token.split(".")[1]))
+    except Exception:
+        return {}
+
+
+def summarize(token):
+    c = decode_claims(token)
+    return {"iss": c.get("iss"), "aud": c.get("aud"), "azp": c.get("azp"), "channel": c.get("channel"),
+            "auth_method": c.get("auth_method"), "sub": c.get("sub"),
+            "sender_constrained": "cnf" in c, "exp": c.get("exp")}
+
+
+def sni_request(host, cafile, method, path, headers=None, body=None, client_cert=None):
+    ctx = ssl.create_default_context(cafile=cafile)
+    if client_cert:
+        ctx.load_cert_chain(client_cert[0], client_cert[1])
+
+    class SNIConnection(http.client.HTTPSConnection):
+        def connect(self):
+            sock = socket.create_connection(EDGE, timeout=20)
+            self.sock = self._context.wrap_socket(sock, server_hostname=host)
+
+    conn = SNIConnection(EDGE[0], EDGE[1], context=ctx, timeout=20)
+    h = {"Host": host, "Connection": "close"}
+    h.update(headers or {})
+    conn.request(method, path, body=body, headers=h)
+    resp = conn.getresponse()
+    data = resp.read().decode("utf-8", "replace")
+    hdrs = resp.getheaders()
+    conn.close()
+    return resp.status, hdrs, data
+
+
+def identity_req(method, path, headers=None, body=None):
+    conn = http.client.HTTPConnection("127.0.0.1", IDENTITY_PORT, timeout=20)
+    conn.request(method, path, body=body, headers=headers or {})
+    resp = conn.getresponse()
+    data = resp.read().decode("utf-8", "replace")
+    hdrs = resp.getheaders()
+    conn.close()
+    return resp.status, hdrs, data
+
+
+def cookies_from(hdrs, jar):
+    for k, v in hdrs:
+        if k.lower() == "set-cookie":
+            pair = v.split(";", 1)[0]
+            if "=" in pair:
+                a, b = pair.split("=", 1)
+                jar[a.strip()] = b.strip()
+    return jar
+
+
+def ec_new_key(tmpdir):
+    key = os.path.join(tmpdir, "dpop-ec.pem")
+    subprocess.run(["openssl", "ecparam", "-name", "prime256v1", "-genkey", "-noout", "-out", key],
+                   check=True, capture_output=True)
+    der = subprocess.run(["openssl", "ec", "-in", key, "-pubout", "-outform", "DER"],
+                         check=True, capture_output=True).stdout
+    pub = der[-65:]
+    return key, b64u(pub[1:33]), b64u(pub[33:65])
+
+
+def der_to_raw(der):
+    i = 2
+    if der[1] & 0x80:
+        i = 2 + (der[1] & 0x7F)
+    out = b""
+    for _ in range(2):
+        ln = der[i + 1]
+        out += der[i + 2:i + 2 + ln].lstrip(b"\x00").rjust(32, b"\x00")
+        i += 2 + ln
+    return out
+
+
+def dpop_proof(key_path, x, y, htm, htu, access_token=None):
+    header = {"typ": "dpop+jwt", "alg": "ES256", "jwk": {"kty": "EC", "crv": "P-256", "x": x, "y": y}}
+    payload = {"htm": htm, "htu": htu, "iat": int(time.time()), "jti": secrets.token_hex(8)}
+    if access_token:
+        payload["ath"] = b64u(hashlib.sha256(access_token.encode()).digest())
+    h = b64u(json.dumps(header, separators=(",", ":")).encode())
+    p = b64u(json.dumps(payload, separators=(",", ":")).encode())
+    with tempfile.TemporaryDirectory() as td:
+        inp, sig = os.path.join(td, "in"), os.path.join(td, "sig.der")
+        open(inp, "wb").write(f"{h}.{p}".encode())
+        subprocess.run(["openssl", "dgst", "-sha256", "-sign", key_path, "-out", sig, inp],
+                       check=True, capture_output=True)
+        raw = der_to_raw(open(sig, "rb").read())
+    return f"{h}.{p}.{b64u(raw)}"
+
+
+def pkce_pair():
+    verifier = secrets.token_urlsafe(48)
+    return verifier, b64u(hashlib.sha256(verifier.encode()).digest())
+
+
+def request_for(cfg):
+    """Kanal isteği fonksiyonu: edge veya identity (mobil login)."""
+    return lambda m, p, h=None, b=None: sni_request(cfg["host"], cfg["ca"], m, p, headers=h, body=b,
+                                                    client_cert=cfg["cert"])
+
+
+def keycloak_pkce(req, cfg, username, password, client_secret=None, dpop_for_token=None):
+    verifier, challenge = pkce_pair()
+    jar = {}
+    params = urllib.parse.urlencode({"client_id": cfg["client"], "redirect_uri": cfg["redirect"],
+                                     "response_type": "code", "scope": "openid", "state": secrets.token_hex(4),
+                                     "code_challenge": challenge, "code_challenge_method": "S256"})
+    st, hdrs, page = req("GET", f"{REALM}/auth?{params}")
+    cookies_from(hdrs, jar)
+    m = re.search(r'action="([^"]*login-actions[^"]*)"', page)
+    if not m:
+        raise RuntimeError(f"login formu alınamadı (HTTP {st})")
+    act = urllib.parse.urlparse(html.unescape(m.group(1)))
+    st, hdrs, _ = req("POST", act.path + ("?" + act.query if act.query else ""),
+                      {"Cookie": "; ".join(f"{k}={v}" for k, v in jar.items()),
+                       "Content-Type": "application/x-www-form-urlencoded"},
+                      urllib.parse.urlencode({"username": username, "password": password, "credentialId": ""}))
+    loc = next((v for k, v in hdrs if k.lower() == "location"), "")
+    code = urllib.parse.parse_qs(urllib.parse.urlparse(loc).query).get("code", [None])[0]
+    if not code:
+        raise RuntimeError(f"giriş başarısız (HTTP {st}); kullanıcı veya parola hatalı olabilir")
+    form = {"grant_type": "authorization_code", "client_id": cfg["client"], "code": code,
+            "redirect_uri": cfg["redirect"], "code_verifier": verifier}
+    if client_secret:
+        form["client_secret"] = client_secret
+    headers = {"Content-Type": "application/x-www-form-urlencoded"}
+    if dpop_for_token:
+        headers["DPoP"] = dpop_for_token
+    st, _, body = req("POST", f"{REALM}/token", headers, urllib.parse.urlencode(form))
+    tok = json.loads(body)
+    if "access_token" not in tok:
+        raise RuntimeError(f"token alınamadı (HTTP {st}): {tok.get('error_description', tok.get('error'))}")
+    return tok
+
+
+# ---------------------------------------------------------------------------
+# Kanal işlemleri
+# ---------------------------------------------------------------------------
+def session_for(sid):
+    with LOCK:
+        return SESSIONS.setdefault(sid, {"channels": {}, "tmp": tempfile.mkdtemp()})
+
+
+def do_login(sess, ch, username, password):
+    cfg = CHANNELS[ch]
+    if not cfg.get("login"):
+        raise RuntimeError("bu kanalda giriş yok (public)")
+    user = username or cfg["user"]
+    pw = password or (SECRETS.get(cfg["password"]) if cfg["password"] else "")
+    if cfg["login"] == "client_credentials":
+        st, _, body = sni_request(cfg["host"], cfg["ca"], "POST", f"{REALM}/token",
+                                  headers={"Content-Type": "application/x-www-form-urlencoded"},
+                                  body=urllib.parse.urlencode({"grant_type": "client_credentials",
+                                                               "client_id": cfg["client"],
+                                                               "client_secret": SECRETS[cfg["secret"]]}),
+                                  client_cert=cfg["cert"])
+        tok = json.loads(body)
+        if "access_token" not in tok:
+            raise RuntimeError(f"token alınamadı (HTTP {st})")
+        sess["channels"][ch] = {"access": tok["access_token"], "user": None}
+        return summarize(tok["access_token"])
+    if cfg["login"] == "pkce_dpop":
+        key, x, y = ec_new_key(sess["tmp"])
+        proof = dpop_proof(key, x, y, "POST", IDENTITY_TOKEN_URL)
+        tok = keycloak_pkce(identity_req_fn, cfg, user, pw, None, proof)
+        sess["channels"][ch] = {"access": tok["access_token"], "refresh": tok.get("refresh_token"), "user": user,
+                                "key": key, "x": x, "y": y}
+        return summarize(tok["access_token"])
+    # pkce (confidential)
+    secret = SECRETS.get(cfg["secret"]) if cfg["secret"] else None
+    tok = keycloak_pkce(request_for(cfg), cfg, user, pw, secret)
+    sess["channels"][ch] = {"access": tok["access_token"], "refresh": tok.get("refresh_token"), "user": user}
+    return summarize(tok["access_token"])
+
+
+def identity_req_fn(method, path, headers=None, body=None):
+    return identity_req(method, path, headers, body)
+
+
+def do_logout(sess, ch):
+    cfg = CHANNELS[ch]
+    entry = sess["channels"].get(ch)
+    status = None
+    if entry and cfg.get("login") == "pkce_dpop":
+        proof = dpop_proof(entry["key"], entry["x"], entry["y"], "POST", f"{IDENTITY_TOKEN_URL[:-6]}/revoke")
+        status, _, _ = identity_req("POST", f"{REALM}/revoke",
+                                    headers={"Content-Type": "application/x-www-form-urlencoded", "DPoP": proof},
+                                    body=urllib.parse.urlencode({"client_id": cfg["client"],
+                                                                 "token": entry.get("refresh") or "",
+                                                                 "token_type_hint": "refresh_token"}))
+    elif entry and cfg.get("login") == "pkce":
+        form = {"client_id": cfg["client"], "refresh_token": entry.get("refresh") or ""}
+        if cfg.get("secret"):
+            form["client_secret"] = SECRETS[cfg["secret"]]
+        status, _, _ = sni_request(cfg["host"], cfg["ca"], "POST", f"{REALM}/logout",
+                                   headers={"Content-Type": "application/x-www-form-urlencoded"},
+                                   body=urllib.parse.urlencode(form), client_cert=cfg["cert"])
+    sess["channels"][ch] = None
+    return status
+
+
+def do_call(sess, ch, method, path, auth, dpop, cert, token_from=None):
+    cfg = CHANNELS[ch]
+    headers = {}
+    src = token_from or ch
+    entry = sess["channels"].get(src) or {}
+    token = entry.get("access") if auth == "session" else None
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    if dpop and cfg["dpop"] and token and entry.get("key"):
+        headers["DPoP"] = dpop_proof(entry["key"], entry["x"], entry["y"], method,
+                                     f"https://{cfg['host']}{path}", token)
+    st, _, body = sni_request(cfg["host"], cfg["ca"], method, path, headers=headers,
+                              client_cert=cfg["cert"] if cert else None)
+    return {"status": st, "body": body[:600]}
+
+
+def state_of(sess):
+    out = {}
+    for ch in CHANNELS:
+        e = sess["channels"].get(ch)
+        out[ch] = ({"user": e.get("user"), "token": summarize(e["access"])} if e else None)
+    return out
+
+
+# ---------------------------------------------------------------------------
+# HTTP
+# ---------------------------------------------------------------------------
+class Handler(http.server.BaseHTTPRequestHandler):
+    def _sid(self):
+        m = re.search(r"console_sid=([^;]+)", self.headers.get("Cookie", ""))
+        return (m.group(1), False) if m else (secrets.token_hex(16), True)
+
+    def _send(self, status, body, ctype, sid, new):
+        self.send_response(status)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        if new:
+            self.send_header("Set-Cookie", f"console_sid={sid}; HttpOnly; SameSite=Strict; Path=/")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _json(self, status, obj, sid, new):
+        self._send(status, json.dumps(obj, ensure_ascii=False).encode(), "application/json; charset=utf-8", sid, new)
+
+    def do_GET(self):
+        sid, new = self._sid()
+        path = urllib.parse.urlparse(self.path).path
+        if path == "/":
+            return self._send(200, (HERE / "organizer.html").read_bytes(), "text/html; charset=utf-8", sid, new)
+        m = re.fullmatch(r"/ch/([a-z]+)", path)
+        if m and m.group(1) in CHANNELS:
+            return self._send(200, (HERE / "channel.html").read_bytes(), "text/html; charset=utf-8", sid, new)
+        if path == "/api/state":
+            return self._json(200, state_of(session_for(sid)), sid, new)
+        if path == "/api/channels":
+            return self._json(200, {k: {"title": v["title"], "login": bool(v.get("login"))}
+                                    for k, v in CHANNELS.items()}, sid, new)
+        self._json(404, {"error": "not found"}, sid, new)
+
+    def do_POST(self):
+        sid, new = self._sid()
+        sess = session_for(sid)
+        n = int(self.headers.get("Content-Length", "0") or 0)
+        try:
+            req = json.loads(self.rfile.read(n) or b"{}")
+        except json.JSONDecodeError:
+            return self._json(400, {"error": "geçersiz JSON"}, sid, new)
+        try:
+            if self.path == "/api/login":
+                ch = req.get("channel")
+                info = do_login(sess, ch, req.get("username"), req.get("password"))
+                return self._json(200, {"ok": True, "token": info}, sid, new)
+            if self.path == "/api/logout":
+                ch = req.get("channel")
+                if not sess["channels"].get(ch):
+                    return self._json(200, {"ok": True, "keycloak_status": None, "note": "oturum yoktu"}, sid, new)
+                kc = do_logout(sess, ch)
+                return self._json(200, {"ok": kc in (200, 204, None), "keycloak_status": kc}, sid, new)
+            if self.path == "/api/call":
+                res = do_call(sess, req.get("channel"), req.get("method", "GET"), req.get("path", "/"),
+                              req.get("auth", "session"), bool(req.get("dpop")), req.get("cert", True),
+                              req.get("token_from"))
+                expect = req.get("expect")
+                res["expect"] = expect
+                res["pass"] = None if expect is None else str(res["status"]) == str(expect)
+                return self._json(200, res, sid, new)
+            self._json(404, {"error": "not found"}, sid, new)
+        except ssl.SSLError as e:
+            self._json(200, {"status": "TLS", "body": str(e)[:200], "expect": req.get("expect"),
+                             "pass": req.get("expect") == "TLS"}, sid, new)
+        except Exception as exc:
+            self._json(500, {"error": str(exc)}, sid, new)
+
+    def log_message(self, fmt, *args):
+        print("console", self.command, self.path, fmt % args, flush=True)
+
+
+if __name__ == "__main__":
+    load_secrets()
+    start_identity_forward()
+    print(f"DMZ lab organizer: http://127.0.0.1:{PORT}  (yalniz lab)", flush=True)
+    http.server.ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()

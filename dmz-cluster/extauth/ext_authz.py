@@ -43,7 +43,7 @@ TLS_CTX = _tls_ctx(os.environ["CLIENT_CERT_FILE"], os.environ["CLIENT_KEY_FILE"]
 # Token exchange: her kanal kendi sertifikasıyla bağlanır (Keycloak client-x509, CN=dmz-exchange-<kanal>)
 EXCHANGE_CTX = {
     c: _tls_ctx(os.environ[f"EXCHANGE_CERT_{c.upper()}"], os.environ[f"EXCHANGE_KEY_{c.upper()}"])
-    for c in ("web", "mobile", "partner")
+    for c in ("web", "mobile", "partner", "branch")
 }
 
 # Kanal profilleri: beklenen audience
@@ -51,6 +51,7 @@ PROFILES = {
     "web":     {"aud": "channel-web"},
     "mobile":  {"aud": "channel-mobile"},
     "partner": {"aud": "channel-partner"},
+    "branch":  {"aud": "channel-branch"},
 }
 
 # SHA-256 DigestInfo öneki (RFC 8017)

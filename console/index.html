@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DMZ Lab Konsolu</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --ink:#1d2330; --muted:#6b7280; --line:#e3e6ec;
+          --ok:#15803d; --bad:#b91c1c; --warn:#b45309; --accent:#2563eb; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#0f141c; --card:#171e29; --ink:#e6e9ef; --muted:#97a1b2; --line:#263041;
+            --ok:#4ade80; --bad:#f87171; --warn:#fbbf24; --accent:#60a5fa; }
+  }
+  body { margin:0; background:var(--bg); color:var(--ink); font:14px/1.45 system-ui, sans-serif; }
+  header { padding:14px 20px; border-bottom:1px solid var(--line); background:var(--card); }
+  header h1 { margin:0; font-size:18px; }
+  header p { margin:2px 0 0; color:var(--muted); font-size:12px; }
+  main { display:grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap:14px; padding:14px; }
+  section { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px; }
+  section h2 { margin:0 0 8px; font-size:15px; }
+  .state { font-size:12px; color:var(--muted); min-height:34px; margin-bottom:8px; white-space:pre-wrap; }
+  .row { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:6px; }
+  input { padding:6px 8px; border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--ink); }
+  button { padding:6px 10px; border:1px solid var(--line); border-radius:6px; background:var(--bg);
+           color:var(--ink); cursor:pointer; font-size:13px; }
+  button:hover { border-color:var(--accent); }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+  button:disabled { opacity:.5; cursor:wait; }
+  .hint { font-size:12px; color:var(--muted); margin:4px 0 8px; }
+  #log-wrap { padding:0 14px 14px; }
+  #log { width:100%; border-collapse:collapse; background:var(--card); border:1px solid var(--line); border-radius:10px; overflow:hidden; }
+  #log th, #log td { padding:6px 8px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; font-size:12px; }
+  #log th { background:var(--bg); }
+  .pass { color:var(--ok); font-weight:600; } .fail { color:var(--bad); font-weight:600; }
+  .none { color:var(--muted); }
+  code { font-family: ui-monospace, Consolas, monospace; font-size:11px; word-break:break-all; }
+  @media (max-width: 600px) { main { padding:10px; } #log-wrap { padding:0 10px 10px; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>DMZ Lab Konsolu</h1>
+  <p>Yalnız lab. Sunucu 127.0.0.1:9000, edge 127.0.0.1:8443. Token'lar tarayıcıya ham olarak gelmez; yalnız özet gösterilir.</p>
+</header>
+
+<main>
+  <section>
+    <h2>Web kanalı (PKCE, Bearer)</h2>
+    <div class="state" id="st-web">durum: giriş yok</div>
+    <div class="row">
+      <input id="u-web" placeholder="kullanıcı (alice)" size="10">
+      <input id="p-web" type="password" placeholder="parola (boş = lab varsayılanı)" size="18">
+    </div>
+    <div class="row">
+      <button class="primary" data-act="login" data-ch="web">Giriş yap</button>
+      <button data-act="logout" data-ch="web">Çıkış yap</button>
+    </div>
+    <div class="row">
+      <button data-act="call" data-ch="web" data-method="GET" data-path="/bff/accounts" data-auth="session" data-expect="200">BFF çağrısı (200)</button>
+      <button data-act="call" data-ch="partner" data-method="GET" data-path="/partner/payments" data-auth="web-token" data-expect="403">Partner rotası, web token (403)</button>
+    </div>
+    <div class="hint">Web token'ı /bff için geçerli; /partner için kanal kuralı 403 verir.</div>
+  </section>
+
+  <section>
+    <h2>Mobil kanal (PKCE + DPoP, ES256)</h2>
+    <div class="state" id="st-mobile">durum: giriş yok</div>
+    <div class="row">
+      <input id="u-mobile" placeholder="kullanıcı (alice)" size="10">
+      <input id="p-mobile" type="password" placeholder="parola (boş = lab varsayılanı)" size="18">
+    </div>
+    <div class="row">
+      <button class="primary" data-act="login" data-ch="mobile">Giriş yap (DPoP)</button>
+      <button data-act="logout" data-ch="mobile">Çıkış yap</button>
+    </div>
+    <div class="row">
+      <button data-act="call" data-ch="mobile" data-method="GET" data-path="/bff/accounts" data-auth="session" data-dpop="1" data-expect="200">BFF, DPoP ile (200)</button>
+      <button data-act="call" data-ch="mobile" data-method="GET" data-path="/bff/accounts" data-auth="session" data-dpop="0" data-expect="401">BFF, DPoP yok (401)</button>
+    </div>
+    <div class="hint">Mobil token cnf.jkt ile bağlıdır; DPoP proof olmadan kabul edilmez.</div>
+  </section>
+
+  <section>
+    <h2>Partner kanalı (mTLS + client credentials)</h2>
+    <div class="state" id="st-partner">durum: token yok</div>
+    <div class="row">
+      <button class="primary" data-act="login" data-ch="partner">Token al (mTLS)</button>
+      <button data-act="logout" data-ch="partner">Yerel token sil</button>
+    </div>
+    <div class="row">
+      <button data-act="call" data-ch="partner" data-method="GET" data-path="/partner/payments" data-auth="session" data-expect="200">/partner/payments (200)</button>
+      <button data-act="call" data-ch="partner" data-method="GET" data-path="/partner/payments" data-auth="none" data-expect="401">Token yok (401)</button>
+    </div>
+    <div class="hint">Partner istemci sertifikası olmadan TLS seviyesinde reddedilir (bkz. smoke testi).</div>
+  </section>
+
+  <section>
+    <h2>Public ve güvenlik kontrolleri</h2>
+    <div class="state">token gerekmez; default deny ve ext-authz atlama davranışı</div>
+    <div class="row">
+      <button data-act="call" data-ch="web" data-method="GET" data-path="/public/branches" data-auth="none" data-expect="200">GET /public (web, 200)</button>
+      <button data-act="call" data-ch="mobile" data-method="GET" data-path="/public/branches" data-auth="none" data-expect="200">GET /public (mobil, 200)</button>
+    </div>
+    <div class="row">
+      <button data-act="call" data-ch="web" data-method="POST" data-path="/public/branches" data-auth="none" data-expect="404">POST /public (404)</button>
+      <button data-act="call" data-ch="web" data-method="GET" data-path="/bff/accounts" data-auth="none" data-expect="401">/bff token yok (401)</button>
+    </div>
+    <div class="row">
+      <button data-act="call" data-ch="web" data-method="GET" data-path="/api/accounts" data-auth="session" data-expect="404">Tanımsız yol (404)</button>
+    </div>
+  </section>
+</main>
+
+<div id="log-wrap">
+  <table id="log">
+    <thead><tr><th>Zaman</th><th>Kanal</th><th>İstek</th><th>Auth</th><th>Beklenen</th><th>Gerçek</th><th>Sonuç</th><th>Yanıt (kısa)</th></tr></thead>
+    <tbody></tbody>
+  </table>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const tbody = document.querySelector('#log tbody');
+
+function fmtState(t) {
+  if (!t) return 'durum: giriş yok';
+  const exp = t.exp ? new Date(t.exp * 1000).toLocaleTimeString() : '-';
+  return [
+    `kullanıcı: ${t.user || '-'}`,
+    `iss: ${t.iss || '-'}`,
+    `aud: ${Array.isArray(t.aud) ? t.aud.join(',') : (t.aud || '-')}  azp: ${t.azp || '-'}`,
+    `channel: ${t.channel || '-'}  auth_method: ${t.auth_method || '-'}`,
+    `sender-constrained (cnf): ${t.sender_constrained ? 'evet' : 'hayır'}`,
+    `exp: ${exp}  (token ${t.length} karakter)`
+  ].join('\n');
+}
+
+async function refreshState() {
+  const r = await fetch('/api/state', { credentials: 'same-origin' });
+  const s = await r.json();
+  $('st-web').textContent = fmtState(s.web);
+  $('st-mobile').textContent = fmtState(s.mobile);
+  $('st-partner').textContent = s.partner
+    ? `token var (aud: ${s.partner.aud}, channel: ${s.partner.channel})`
+    : 'durum: token yok';
+}
+
+function addRow(cols) {
+  const tr = document.createElement('tr');
+  cols.forEach((c, i) => {
+    const td = document.createElement('td');
+    if (c && c.cls) { td.className = c.cls; td.textContent = c.text; }
+    else td.textContent = c == null ? '' : String(c);
+    tr.appendChild(td);
+  });
+  tbody.insertBefore(tr, tbody.firstChild);
+}
+
+function now() { return new Date().toLocaleTimeString(); }
+
+async function post(url, body) {
+  const r = await fetch(url, {
+    method: 'POST', credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {})
+  });
+  return { ok: r.ok, status: r.status, data: await r.json() };
+}
+
+async function runAction(btn) {
+  const act = btn.dataset.act, ch = btn.dataset.ch;
+  btn.disabled = true;
+  try {
+    if (act === 'login') {
+      const user = $(`u-${ch}`) ? $(`u-${ch}`).value.trim() : '';
+      const pass = $(`p-${ch}`) ? $(`p-${ch}`).value : '';
+      const res = await post('/api/login', { channel: ch, username: user, password: pass });
+      if (res.ok) {
+        addRow([now(), ch, 'giriş (PKCE)', '-', '-', 'token alındı', { cls: 'pass', text: 'PASS' }, 'token özeti güncellendi']);
+      } else {
+        addRow([now(), ch, 'giriş', '-', '-', res.status, { cls: 'fail', text: 'FAIL' }, res.data.error]);
+      }
+    } else if (act === 'logout') {
+      const res = await post('/api/logout', { channel: ch });
+      addRow([now(), ch, 'çıkış', '-', '-', res.status, { cls: res.ok ? 'pass' : 'fail', text: res.ok ? 'PASS' : 'FAIL' }, 'oturum temizlendi']);
+    } else if (act === 'call') {
+      const body = {
+        channel: ch, method: btn.dataset.method, path: btn.dataset.path, auth: btn.dataset.auth,
+        dpop: btn.dataset.dpop === '1', expect: btn.dataset.expect
+      };
+      const res = await post('/api/call', body);
+      const d = res.data;
+      if (!res.ok) {
+        addRow([now(), ch, `${body.method} ${body.path}`, body.auth, body.expect, res.status,
+                { cls: 'fail', text: 'FAIL' }, d.error || '']);
+      } else {
+        const label = d.pass === null ? 'bilgi' : (d.pass ? 'PASS' : 'FAIL');
+        const cls = d.pass === null ? 'none' : (d.pass ? 'pass' : 'fail');
+        const reqLabel = `${body.method} ${body.path}` + (body.dpop ? ' (DPoP)' : '');
+        addRow([now(), ch, reqLabel, body.auth, body.expect, d.status, { cls, text: label },
+                (d.body || '').replace(/\s+/g, ' ').slice(0, 160)]);
+      }
+    }
+    await refreshState();
+  } catch (e) {
+    addRow([now(), ch, act, '-', '-', 'hata', { cls: 'fail', text: 'FAIL' }, String(e)]);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+document.querySelectorAll('button[data-act]').forEach((b) => b.addEventListener('click', () => runAction(b)));
+refreshState();
+</script>
+</body>
+</html>
