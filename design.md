@@ -175,6 +175,8 @@ flowchart LR
 - **Normal servis**, iş mantığı ve veri erişimini barındırır. Yalnızca BFF ve kgateway internal'dan çağrılabilir (NetworkPolicy ile).
 - **Savunma derinliği:** BFF ve normal servis, iç JWT'yi JWKS ile kendileri de doğrular (`iss`, `aud` = kgateway-internal, `exp`, kanal kuralı). Gateway'in doğrulamasına tek başına güvenilmez. Gateway token'ı upstream'e iletir (`forwardToken`). Servisler kanal bilgisini gateway başlıklarından değil, token claim'lerinden alır.
 
+**Dummy iş API'si (lab):** BFF kanal yollarını (`/bff/web/*`, `/bff/mobile/*`, `/bff/branch/*`) karşılar, kanalı token'dan doğrular ve core'a iç token ile iletir. Core `/api/v1/accounts`, `/api/v1/accounts/{id}`, `/api/v1/accounts/{id}/transactions` ve `POST /api/v1/transfers` uçlarını sunar. Hesaplar ve işlemler kullanıcının `sub` değerine göre deterministik üretilir ve bellekte tutulur (veritabanı yok). Transfer kuralları: `Idempotency-Key` zorunlu (aynı anahtar aynı sonucu döner), kanal başına tek işlem limiti (mobil 10.000, web 100.000, şube 50.000 TRY), bakiye ve para birimi kontrolü, partner salt okunur. Testler: `internal-cluster/tests/api.sh` (16 kontrol). Prod farkı: kalıcı çekirdek bankacılık servisi, mTLS (bff→core), idempotency kaydının kalıcı tutulması.
+
 ### 4.4 Auth Server (Keycloak)
 
 **Karar (D-4):** Auth server olarak ayrı bir **identity cluster**'da (bkz. 4.5) çalışan **Keycloak** kullanılır. Keycloak, tüm access token'ların ve refresh token'ların tek issuer'ıdır.

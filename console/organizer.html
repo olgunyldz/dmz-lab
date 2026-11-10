@@ -25,6 +25,10 @@
   .links { font-size:12px; }
   .links a { color:var(--accent); margin-right:10px; }
   footer { padding:10px 20px 20px; color:var(--muted); font-size:12px; }
+  .pass { color:var(--ok); font-weight:600; text-align:center; cursor:help; }
+  .fail { color:#b91c1c; font-weight:600; text-align:center; cursor:help; }
+  #matrix th, #matrix td { padding:6px 8px; border-bottom:1px solid var(--line); text-align:left; }
+  #matrix th { background:var(--bg); }
   @media (max-width: 600px) { main { padding:10px; } }
 </style>
 </head>
@@ -36,10 +40,20 @@
 
 <main id="cards"></main>
 
+<section style="margin:0 16px 16px; background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px; overflow-x:auto;">
+  <h2 style="margin:0 0 8px; font-size:16px;">Operasyon matrisi: yapılabilir (✓) / yapılamaz (✗)</h2>
+  <div style="font-size:12px; color:var(--muted); margin-bottom:8px;">Gerekçe için hücre üzerine gelin. Kanal sayfasındaki menü aynı tabloyu kullanır.</div>
+  <table id="matrix" style="width:100%; border-collapse:collapse; font-size:13px;">
+    <thead></thead>
+    <tbody></tbody>
+  </table>
+</section>
+
 <footer>
   Sunucu 127.0.0.1:9000 · edge 127.0.0.1:8443 · şube cihaz sertifikası: branch-device · token'lar ham gösterilmez.
 </footer>
 
+<script src="/ops.js"></script>
 <script>
 const DESCRIPTIONS = {
   web: 'Kullanıcı girişi (PKCE, Bearer token). Iç servis: /bff/web/… (kanal: web).',
@@ -75,6 +89,7 @@ async function render() {
   }
 }
 render();
+renderMatrix(document.getElementById('matrix'));
 </script>
 </body>
 </html>

@@ -25,6 +25,8 @@ spec:
               value: "1"
             - name: SERVICE_NAME
               value: bff
+            - name: CORE_URL
+              value: http://core.app-core.svc.cluster.local
             - name: ALLOWED_CHANNELS
               value: web,mobile,branch
             - name: EXPECTED_ISSUER

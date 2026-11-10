@@ -60,6 +60,12 @@
   </section>
 
   <section>
+    <h2>Menü: yapılabilen ve yapılamayan işlemler</h2>
+    <div class="state">Yapılabilenler çalıştırılabilir; yapılamayanların gerekçesi listelenir.</div>
+    <div id="menu"></div>
+  </section>
+
+  <section>
     <h2>Kanal çağrıları</h2>
     <div class="state">Beklenen sonuç her satırda; PASS/FAIL günlükte.</div>
     <div class="row" id="checks"></div>
@@ -74,6 +80,7 @@
   </table>
 </div>
 
+<script src="/ops.js"></script>
 <script>
 // Kanal sayfasının kontrolleri. Yollar iç cluster'daki kanala özel endpoint'lere gider.
 // cert:false -> cihaz/partner sertifikası sunulmaz (beklenen: TLS red). token_from: başka kanalın oturumu.
@@ -154,6 +161,12 @@ function setupPage(channels) {
   if (KEY === 'branch') $('hint').textContent = 'Şube girişi cihaz sertifikasıyla (teller.lab.local). Giriş: teller kullanıcısı.';
   if (KEY === 'mobile') $('hint').textContent = 'Mobil girişte DPoP anahtarı üretilir; çıkış refresh token\'ı iptal eder.';
   if (KEY === 'web') $('hint').textContent = 'Web girişi PKCE ile. Çıkış Keycloak oturumunu kapatır.';
+
+  renderMenu($('menu'), KEY, (op, cfg, res) => {
+    const ok = res.pass === true || String(res.status) === String(cfg.expect || '200');
+    addRow([now(), KEY, `menü: ${op.label}`, cfg.auth || '-', cfg.expect || '200', res.status,
+      { cls: ok ? 'pass' : 'fail', text: ok ? 'PASS' : 'FAIL' }, String(res.body || '').replace(/\s+/g, ' ').slice(0, 140)]);
+  });
 
   const box = $('checks');
   (CHECKS[KEY] || []).forEach((c) => {

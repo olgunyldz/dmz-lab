@@ -299,9 +299,15 @@ def do_logout(sess, ch):
     return status
 
 
-def do_call(sess, ch, method, path, auth, dpop, cert, token_from=None):
+def do_call(sess, ch, method, path, auth, dpop, cert, token_from=None, body=None, idem=None):
     cfg = CHANNELS[ch]
     headers = {}
+    payload = None
+    if body is not None:
+        payload = json.dumps(body).encode()
+        headers["Content-Type"] = "application/json"
+    if idem:
+        headers["Idempotency-Key"] = idem
     src = token_from or ch
     entry = sess["channels"].get(src) or {}
     token = entry.get("access") if auth == "session" else None
@@ -310,9 +316,9 @@ def do_call(sess, ch, method, path, auth, dpop, cert, token_from=None):
     if dpop and cfg["dpop"] and token and entry.get("key"):
         headers["DPoP"] = dpop_proof(entry["key"], entry["x"], entry["y"], method,
                                      f"https://{cfg['host']}{path}", token)
-    st, _, body = sni_request(cfg["host"], cfg["ca"], method, path, headers=headers,
-                              client_cert=cfg["cert"] if cert else None)
-    return {"status": st, "body": body[:600]}
+    st, _, resp_body = sni_request(cfg["host"], cfg["ca"], method, path, headers=headers,
+                                   body=payload, client_cert=cfg["cert"] if cert else None)
+    return {"status": st, "body": resp_body[:600]}
 
 
 def state_of(sess):
@@ -348,6 +354,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         path = urllib.parse.urlparse(self.path).path
         if path == "/":
             return self._send(200, (HERE / "organizer.html").read_bytes(), "text/html; charset=utf-8", sid, new)
+        if path == "/ops.js":
+            return self._send(200, (HERE / "ops.js").read_bytes(), "application/javascript; charset=utf-8", sid, new)
         m = re.fullmatch(r"/ch/([a-z]+)", path)
         if m and m.group(1) in CHANNELS:
             return self._send(200, (HERE / "channel.html").read_bytes(), "text/html; charset=utf-8", sid, new)
@@ -380,7 +388,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if self.path == "/api/call":
                 res = do_call(sess, req.get("channel"), req.get("method", "GET"), req.get("path", "/"),
                               req.get("auth", "session"), bool(req.get("dpop")), req.get("cert", True),
-                              req.get("token_from"))
+                              req.get("token_from"), req.get("body"), req.get("idem"))
                 expect = req.get("expect")
                 res["expect"] = expect
                 res["pass"] = None if expect is None else str(res["status"]) == str(expect)

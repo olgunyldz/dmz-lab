@@ -15,6 +15,7 @@ SUITES=(
     "dmz-cluster/tests/branch.sh"
     "internal-cluster/tests/authz.sh"
     "internal-cluster/tests/service-verify.sh"
+    "internal-cluster/tests/api.sh"
     "edge/tests/run-all.sh"
 )
 
