@@ -184,6 +184,44 @@ check "partner /partner: token yok -> 401" "401" "$(partner_get "" /partner/paym
 # 10) Partner gateway'e web token -> 403
 check "partner /partner: web token -> 403" "403" "$(partner_get "$WEB_TOKEN" /partner/payments)"
 
+# 11) ES256 DPoP (P-256): mobil token EC anahtarına bağlı; proof ES256 imzalı
+EC_KEY="$DPOP_DIR/ec.pem"
+openssl ecparam -name prime256v1 -genkey -noout -out "$EC_KEY" 2>/dev/null
+EC_HEX=$(openssl ec -in "$EC_KEY" -noout -text 2>/dev/null | sed -n '/pub:/,/ASN1/p' | grep -v "pub:\|ASN1" | tr -d ' :\n')
+EC_X=$(echo "$EC_HEX" | cut -c3-66 | xxd -r -p | b64u)
+EC_Y=$(echo "$EC_HEX" | cut -c67-130 | xxd -r -p | b64u)
+
+der_to_raw_hex() { # ECDSA DER imzası -> r || s (hex, 128 karakter)
+    local ints r s
+    ints=$(openssl asn1parse -inform DER -in "$1" | sed -n 's/.*INTEGER *: *//p')
+    r=$(echo "$ints" | sed -n 1p); s=$(echo "$ints" | sed -n 2p)
+    pad() { local h=$1; while [[ ${#h} -gt 64 ]]; do h=${h:2}; done; printf '%064s' "$h" | tr ' ' 0; }
+    echo "$(pad "$r")$(pad "$s")"
+}
+
+ec_proof() { # <htm> <htu> <token-or-empty> -> ES256 DPoP proof
+    local htm=$1 htu=$2 tok=$3 h p ath="" raw
+    local jti=${4:-$(openssl rand -hex 8)} iat=${5:-$(date +%s)}
+    h=$(printf '%s' "{\"typ\":\"dpop+jwt\",\"alg\":\"ES256\",\"jwk\":{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"$EC_X\",\"y\":\"$EC_Y\"}}" | b64u)
+    if [[ -n "$tok" ]]; then ath=",\"ath\":\"$(printf '%s' "$tok" | openssl dgst -sha256 -binary | b64u)\""; fi
+    p=$(printf '%s' "{\"htm\":\"$htm\",\"htu\":\"$htu\",\"iat\":$iat,\"jti\":\"$jti\"$ath}" | b64u)
+    printf '%s.%s' "$h" "$p" > "$DPOP_DIR/ec-in"
+    openssl dgst -sha256 -sign "$EC_KEY" -out "$DPOP_DIR/ec-sig.der" "$DPOP_DIR/ec-in"
+    raw=$(der_to_raw_hex "$DPOP_DIR/ec-sig.der" | xxd -r -p | b64u)
+    printf '%s.%s.%s' "$h" "$p" "$raw"
+}
+
+EC_TOKEN=$(pkce_token mobile-app com.bank.app:/callback alice "$(secret alice-password)" "" "$(ec_proof POST "$ISSUER_BASE" "")")
+check "ES256: EC anahtarına bağlı mobil token alındı" "ey" "$EC_TOKEN"
+EC_GOOD=$(ec_proof GET "$MOBILE_HTU" "$EC_TOKEN")
+body=$(mobile_get "$EC_TOKEN" /bff/accounts "$EC_GOOD")
+check "ES256 DPoP geçerli -> 200" "HTTP_CODE=200" "$body"
+check "ES256: upstream auth_method=dpop_device" "auth_method=dpop_device" "$body"
+# Bozuk imza: başlık+yük iyi, imza başka bir proof'tan
+EC_OTHER=$(ec_proof GET "$MOBILE_HTU" "$EC_TOKEN")
+body=$(mobile_get "$EC_TOKEN" /bff/accounts "${EC_GOOD%.*}.${EC_OTHER##*.}")
+check "ES256: bozuk imza -> 401" "bad signature" "$body"
+
 echo
 echo "Sonuç: $pass geçti, $fail kaldı (toplam $((pass + fail)))"
 [[ $fail -eq 0 ]]

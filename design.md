@@ -660,7 +660,7 @@ Aşağıdaki her satır prod'da değişmesi gereken bir noktayı gösterir. Süt
 | Exchange kimlik doğrulama | Keycloak `client-x509`, sertifikalar elle | Vault PKI, rotasyon, kısa ömür |
 | Test client'ları | Lab'da `lab-cli` kaldırıldı; `mobile-app` ve `web-app` üzerinde `directAccessGrants` kapalı. Testler kullanıcı token'ını Authorization Code + PKCE ile alır (`identity-cluster/tests/lib/pkce.sh`) | Prod'da test kullanıcısı ve test client'ı yok; yalnız PKCE ve client credentials |
 | Test kullanıcısı | `alice` | Yok |
-| DPoP | RS256 proof, süreç içi `jti` cache | ES256 desteği, paylaşılan replay store (ör. Redis) |
+| DPoP | RS256 ve ES256 (P-256) proof, stdlib ile doğrulanır (ES256: `ec_p256_verify`, Keycloak ES256 proof'unu kabul eder, `extauth.sh` 29/29). `jti` cache süreç içi | Paylaşılan replay store (ör. Redis), kütüphane tabanlı doğrulama |
 | Ext-authz replika | 1 (replay cache tutarlılığı için) | En az 2, paylaşılan store ile |
 | İç servis JWT doğrulaması | Stdlib RS256 (`svc.py`) | Olgun JWT kütüphanesi, JWKS önbellek ve rotasyon politikası |
 | NetworkPolicy | Cilium (lab'da çalışmıyor, 15.3) | Cilium veya Calico, default deny, egress FQDN allowlist (MFA) |
@@ -678,6 +678,8 @@ Aşağıdaki her satır prod'da değişmesi gereken bir noktayı gösterir. Süt
 - **Edge testlerinde düzeltilen hata:** Testler `--resolve` ile `Host: web.lab.local:8443` gönderiyordu; HAProxy host ACL'i tam host adını beklediği için istekler WAF'a hiç ulaşmadan 404 dönüyordu. Testler `--connect-to` ile port'suz Host gönderecek şekilde değiştirildi (gerçek istemci davranışı). Bu değişiklikten sonra WAF'ın gerçekten engellediği doğrulandı.
 - **Failover (lab):** `lb.sh` bir DMZ node'unda yalnız gw-web NodePort'unu (30446) geçici olarak düşürüyor. Backend DOWN oluyor, 10/10 istek ikinci node'dan 200 dönüyor, kural kaldırılınca UP oluyor. Node ve cluster ayakta kalır.
 - **WAF 500 gözlemi:** Yüksek eşzamanlılıkta bir SPOE çağrısı 688 ms sürdü, `timeout processing` (500 ms) aşıldı (`st=1`) ve HAProxy isteği fail-closed olarak 500 ile reddetti. Zaman aşımı 2 s'ye çıkarıldı; sonrasında üç burst'te (1200 istek) 500 görülmedi. Örnek sayı küçük; prod'da SPOE gecikme metriği ile izlenmeli.
+
+- **Partner sertifikası iptali (CRL/OCSP) platform kısıtı:** kgateway v2.5 `ListenerPolicy.clientCertificateValidation` yalnızca `caCertificateRefs` alır; Gateway API `frontend.validation` alanında da CRL/OCSP yok. Lab'da iptal kontrolü yapılmıyor. Prod'da riski sınırlamanın yolu kısa ömürlü partner sertifikaları (Vault PKI, bkz. 15.4). Envoy bootstrap üzerinden CRL zorlamak mümkün olabilir, ama doğrulanmadı ve GatewayParameters ile yönetilmesi gerekir.
 
 ### 15.4 Karar bekleyen konular
 

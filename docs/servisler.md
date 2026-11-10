@@ -32,7 +32,7 @@ Son güncelleme: 2026-11-10. Durum sütunu lab'daki son doğrulamayı gösterir.
 |---|---|---|---|
 | `Gateway gw-web` / `gw-mobile` / `gw-partner` | Kanal başına TLS sonlandırma. Partner gateway'de istemci sertifikası doğrulaması (ConfigMap `partner-ca`) | `manifests/channels.yaml`, secret'lar `gw-*-tls` | Çalışıyor |
 | `HTTPRoute web`, `mobile`, `partner` | `/bff/*` ve `/partner/*` iç gateway'e (`internal-gw`), diğer yollar yok (default deny) | `manifests/channels.yaml`, `manifests/internal-backend.yaml` | Çalışıyor |
-| `HTTPRoute *-public`, `*-login` | `/public/*` ve `/realms/*` route'ları (ext-authz yok) | `manifests/route-classes.yaml` | Stub backend'li (gerçek servis değil) |
+| `HTTPRoute *-public`, `*-login` | `/public/*` (yalnız GET) ve `/realms/*` route'ları, ext-authz yok. İç gateway'e (`internal-gw`) gider; yanıtı core (public) ve Keycloak (login) verir | `manifests/route-classes.yaml` | Çalışıyor |
 | `Service/Endpoints internal-gw` + `BackendTLSPolicy` | İç gateway'e mTLS ile bağlantı, sunucu doğrulaması `gw-internal` adıyla | `manifests/internal-backend.yaml` | Çalışıyor |
 | `Gateway spec.tls.backend.clientCertificateRef` | DMZ kimliğini (`dmz-gateway-client-tls`) iç gateway'e sunar | `scripts/load-internal-backend.sh` | Çalışıyor |
 | `gw-*-nodeport` | Edge'den erişim için NodePort (30446, 30447, 30448) | `manifests/gateway-nodeports.yaml` | Çalışıyor |
@@ -47,10 +47,8 @@ Son güncelleme: 2026-11-10. Durum sütunu lab'daki son doğrulamayı gösterir.
 | Secret `dmz-exchange-client-tls` | Kanal başına exchange sertifikaları (`web`, `mobile`, `partner`) | `scripts/load-extauth.sh` | Çalışıyor |
 | ConfigMap `internal-ca` | İç CA (sunucu doğrulaması) | `scripts/load-extauth.sh` | Çalışıyor |
 
-### 2.4 Lab stub'ları (gerçek servis değil)
-| Servis | Ne yapar | Durum |
-|---|---|---|
-| `web-stub`, `mobile-stub`, `partner-stub` | Yalnız login ve public route'ların hedefi (nginx, sabit yanıt). İç token içermez | Lab için; prod'da gerçek servis |
+### 2.4 Stub'lar
+Eskiden login ve public route'ları nginx stub'larına gidiyordu (`web-stub`, `mobile-stub`, `partner-stub`). Stub'lar kaldırıldı; bu route'lar artık iç gateway üzerinden gerçek servislere gider (bkz. 2.2).
 
 **DMZ test suite'leri:** `tests/smoke.sh` (TLS, route, default deny), `tests/route-classes.sh` (public/login/api sınıfları), `tests/extauth.sh` (dış token, DPoP, exchange, sızıntı), `tests/internal-path.sh` (DMZ → iç uçtan uca).
 

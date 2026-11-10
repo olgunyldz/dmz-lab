@@ -8,9 +8,9 @@ Her istek için:
   4. Token exchange: kanal sertifikasıyla (mTLS, Keycloak client-x509) iç JWT.
   5. 200 + Authorization: Bearer <iç JWT>. İç token istemciye dönmez.
 
-LAB SINIRI: RSA (RS256) imzaları stdlib ile doğrulanır. ES256 DPoP proof'ları için
-bir kriptografi kütüphanesi gerekir (üretimde önerilir). DPoP jti tekrar kontrolü
-süreç içi bellektedir; çoklu replikada paylaşılan bir store gerekir.
+DPoP proof imzaları: RS256 (RSA-2048+) ve ES256 (P-256). İkisi de stdlib ile doğrulanır
+(ECDSA için aşağıda P-256 aritmetiği). Üretimde kütüphane tabanlı doğrulama önerilir.
+DPoP jti tekrar kontrolü süreç içi bellektedir; çoklu replikada paylaşılan bir store gerekir.
 """
 import base64
 import hashlib
@@ -92,6 +92,61 @@ def rsa_verify(n, e, signing_input, sig):
     return hmac.compare_digest(recovered, expected)
 
 
+# P-256 (secp256r1) parametreleri (SEC 2 / FIPS 186-4)
+P256_P = 0xffffffff00000001000000000000000000000000ffffffffffffffffffffffff
+P256_A = P256_P - 3
+P256_B = 0x5ac635d8aa3a93e7b3ebbd55769886bc651d06b0cc53b0f63bce3c3e27d2604b
+P256_N = 0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551
+P256_G = (0x6b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c296,
+          0x4fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f5)
+
+
+def _ec_add(p1, p2):
+    """Affin nokta toplama (None = sonsuz nokta)."""
+    if p1 is None:
+        return p2
+    if p2 is None:
+        return p1
+    x1, y1 = p1
+    x2, y2 = p2
+    if x1 == x2 and (y1 + y2) % P256_P == 0:
+        return None
+    if p1 == p2:
+        lam = (3 * x1 * x1 + P256_A) * pow(2 * y1, -1, P256_P) % P256_P
+    else:
+        lam = (y2 - y1) * pow(x2 - x1, -1, P256_P) % P256_P
+    x3 = (lam * lam - x1 - x2) % P256_P
+    y3 = (lam * (x1 - x3) - y1) % P256_P
+    return (x3, y3)
+
+
+def _ec_mul(k, point):
+    result, addend = None, point
+    while k:
+        if k & 1:
+            result = _ec_add(result, addend)
+        addend = _ec_add(addend, addend)
+        k >>= 1
+    return result
+
+
+def ec_p256_verify(qx, qy, signing_input, raw_sig):
+    """ECDSA P-256 + SHA-256 (JWS ES256, RFC 7518 §3.4: imza = r || s, her biri 32 bayt)."""
+    if len(raw_sig) != 64:
+        return False
+    r = int.from_bytes(raw_sig[:32], "big")
+    s = int.from_bytes(raw_sig[32:], "big")
+    if not (1 <= r < P256_N and 1 <= s < P256_N):
+        return False
+    # Genel anahtar eğri üzerinde olmalı
+    if (qy * qy - (qx * qx * qx + P256_A * qx + P256_B)) % P256_P != 0:
+        return False
+    z = int.from_bytes(hashlib.sha256(signing_input).digest(), "big")
+    w = pow(s, -1, P256_N)
+    point = _ec_add(_ec_mul(z * w % P256_N, P256_G), _ec_mul(r * w % P256_N, (qx, qy)))
+    return point is not None and point[0] % P256_N == r
+
+
 def load_jwks():
     global _jwks, _jwks_at
     with urllib.request.urlopen(JWKS_URL, timeout=5, context=TLS_CTX) as resp:
@@ -144,8 +199,12 @@ def check_claims(claims, channel):
 
 
 def jwk_thumbprint(jwk):
-    """RFC 7638: RSA public key thumbprint (SHA-256, kanonik JSON)."""
-    canon = json.dumps({"e": jwk["e"], "kty": "RSA", "n": jwk["n"]}, separators=(",", ":"), sort_keys=True)
+    """RFC 7638: RSA veya EC public key thumbprint (SHA-256, kanonik JSON)."""
+    if jwk.get("kty") == "EC":
+        members = {"crv": jwk["crv"], "kty": "EC", "x": jwk["x"], "y": jwk["y"]}
+    else:
+        members = {"e": jwk["e"], "kty": "RSA", "n": jwk["n"]}
+    canon = json.dumps(members, separators=(",", ":"), sort_keys=True)
     return b64url_encode(hashlib.sha256(canon.encode()).digest())
 
 
@@ -161,15 +220,27 @@ def verify_dpop(proof, method, htu, access_token, expected_jkt):
 
     if header.get("typ") != "dpop+jwt":
         raise Denied(401, "dpop: wrong typ")
-    if header.get("alg") != "RS256":
-        raise Denied(401, "dpop: unsupported alg (lab: RS256)")
     jwk = header.get("jwk") or {}
-    if jwk.get("kty") != "RSA" or "d" in jwk:
+    if "d" in jwk:
+        raise Denied(401, "dpop: private key in proof")
+    alg = header.get("alg")
+    signing_input = f"{h_b64}.{p_b64}".encode()
+    try:
+        if alg == "RS256" and jwk.get("kty") == "RSA":
+            n = int.from_bytes(b64url_decode(jwk["n"]), "big")
+            e = int.from_bytes(b64url_decode(jwk["e"]), "big")
+            ok = rsa_verify(n, e, signing_input, sig)
+        elif alg == "ES256" and jwk.get("kty") == "EC" and jwk.get("crv") == "P-256":
+            qx = b64url_decode(jwk["x"])
+            qy = b64url_decode(jwk["y"])
+            if len(qx) != 32 or len(qy) != 32:
+                raise Denied(401, "dpop: invalid EC point size")
+            ok = ec_p256_verify(int.from_bytes(qx, "big"), int.from_bytes(qy, "big"), signing_input, sig)
+        else:
+            raise Denied(401, "dpop: unsupported alg/kty (RS256+RSA, ES256+P-256)")
+    except (KeyError, ValueError):
         raise Denied(401, "dpop: invalid public jwk")
-
-    n = int.from_bytes(b64url_decode(jwk["n"]), "big")
-    e = int.from_bytes(b64url_decode(jwk["e"]), "big")
-    if not rsa_verify(n, e, f"{h_b64}.{p_b64}".encode(), sig):
+    if not ok:
         raise Denied(401, "dpop: bad signature")
 
     if payload.get("htm") != method:
