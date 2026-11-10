@@ -38,7 +38,7 @@ EDGE = ("127.0.0.1", 8443)
 PUBLIC_CA = str(CERTS / "public-ca.crt")
 INTERNAL_CA = str(CERTS / "internal-ca.crt")
 PORT = 9000
-IDENTITY_PORT = 18080
+IDENTITY_PORT = 18081  # 18080 test süitlerine ayrılmış; organizer kendi port-forward'ını bu porta açar
 REALM = "/realms/bank/protocol/openid-connect"
 IDENTITY_TOKEN_URL = f"http://127.0.0.1:{IDENTITY_PORT}{REALM}/token"
 

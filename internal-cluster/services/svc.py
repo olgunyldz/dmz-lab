@@ -95,12 +95,26 @@ def verify(token):
     return claims
 
 
+ERROR_CODES = {400: "invalid_request", 401: "unauthorized", 403: "forbidden", 404: "not_found", 500: "server_error"}
+
+
 class Handler(BaseHTTPRequestHandler):
     def _send(self, status, body):
-        data = body.encode()
+        if status >= 400:
+            # Hata gövdesi yapılandırılmış JSON: iç servis reddi nedeniyle birlikte döner
+            message = body.strip()
+            data = json.dumps({"error": ERROR_CODES.get(status, "error"), "error_description": message,
+                               "layer": f"internal-service:{SERVICE}", "status": status},
+                              ensure_ascii=False).encode()
+            ctype = "application/json; charset=utf-8"
+        else:
+            data = body.encode()
+            ctype = "text/plain"
         self.send_response(status)
-        self.send_header("Content-Type", "text/plain")
+        self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(data)))
+        if status == 401:
+            self.send_header("WWW-Authenticate", f'Bearer error="invalid_token", error_description="{message if status >= 400 else ""}"')
         self.end_headers()
         self.wfile.write(data)
 

@@ -61,6 +61,10 @@ DIGEST_INFO_SHA256 = bytes.fromhex("3031300d060960864801650304020105000420")
 DPOP_MAX_AGE = 300
 DPOP_MAX_FUTURE = 60
 
+# HTTP durumu -> OAuth benzeri hata kodu (hata gövdesi için)
+ERROR_CODES = {400: "invalid_request", 401: "unauthorized", 403: "forbidden", 404: "not_found",
+               500: "server_error", 503: "service_unavailable"}
+
 _jwks = {}
 _jwks_at = 0.0
 _replay = {}  # jti -> son geçerlilik zamanı
@@ -326,10 +330,20 @@ class Handler(BaseHTTPRequestHandler):
         self._send(200, "ok", internal)
 
     def _send(self, status, message, internal):
-        body = message.encode()
+        if status >= 400:
+            # Hata gövdesi yapılandırılmış JSON: neden reddedildiği istemciye ve konsola döner.
+            # Mesaj metni error_description'da aynen kalır (testler ve loglar için).
+            body = json.dumps({"error": ERROR_CODES.get(status, "error"), "error_description": message,
+                               "layer": "dmz-ext-authz", "status": status}, ensure_ascii=False).encode()
+            ctype = "application/json; charset=utf-8"
+        else:
+            body = message.encode()
+            ctype = "text/plain"
         self.send_response(status)
-        self.send_header("Content-Type", "text/plain")
+        self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
+        if status == 401:
+            self.send_header("WWW-Authenticate", f'Bearer error="invalid_token", error_description="{message}"')
         if internal:
             self.send_header("Authorization", f"Bearer {internal}")
         self.end_headers()
