@@ -626,7 +626,7 @@ Bu bölüm lab'da gerçekten doğrulanan durumu ve prod'da değişmesi gereken n
 | BFF ve core: iç JWT'yi kendileri doğrular, gateway'i atlayan çağrılar reddedilir | Çalışıyor | `service-verify.sh` 9/9 |
 | DMZ → iç uçtan uca yol (`/bff/*`, `/partner/*`) | Çalışıyor | `internal-path.sh` 8/8 |
 | Edge HAProxy → DMZ NodePort'ları (F1) | Çalışıyor. DMZ node'larında host firewall: NodePort'lara yalnız edge IP'si, diğerleri DROP (`dmz-cluster/scripts/host-firewall.sh`) | `dmz-cluster/tests/firewall.sh` 4/4 |
-| Edge WAF (Coraza v0.9.1 + OWASP CRS) ve edge uçtan uca testleri | Çalışıyor. SQLi, XSS ve path traversal 403 (`waf-block`), L7 rate limit 429, L4 bağlantı sınırı, slowloris 408, be_gw_web iki backend UP | `edge/tests/run-all.sh` 22/22 |
+| Edge WAF (Coraza v0.9.1 + OWASP CRS) ve edge uçtan uca testleri | Çalışıyor. SQLi, XSS ve path traversal 403 (`waf-block`), L7 rate limit 429, L4 bağlantı sınırı, slowloris 408, be_gw_web iki backend UP | `edge/tests/run-all.sh` 25/25 (failover dahil) |
 | Management cluster: Vault 1.18 (init/unseal, KV v2, Keycloak parolaları), NodePort 30200, F9 firewall | Çalışıyor | `identity-cluster/scripts/load-vault.sh` |
 | Identity cluster: Keycloak 26.6 + SPI, PostgreSQL 16 (kindnet üzerinde) | Çalışıyor | `extauth.sh` 25/25 ve `internal-path.sh` 8/8 üzerinden dolaylı |
 | Identity cluster: erişim kısıtı (F8, host iptables) | Çalışıyor. Cilium bırakıldı, kısıt host firewall ile sağlandı | `identity-cluster/tests/firewall.sh` 3/3 |
@@ -676,8 +676,8 @@ Aşağıdaki her satır prod'da değişmesi gereken bir noktayı gösterir. Süt
 - **Alternatif F8 uygulaması (uygulandı):** identity cluster kindnet ile yeniden kuruldu. NetworkPolicy yerine identity node'larında host iptables kuralları ile Keycloak NodePort'una yalnız iç node IP'lerinden erişim izin veriliyor (`filter` tablosu, `mangle` gerekmez). Lab'da F8 kuralının karşılığı budur.
 - **WAF imajı:** `edge/scripts/build-waf.sh` ile yerel olarak derlendi (`dmz-lab/coraza-spoa:0.9.1`). Otomatik izin sistemi ilk denemede bu derlemeyi engellemişti; kullanıcı tarafından çalıştırıldıktan sonra edge testleri geçti.
 - **Edge testlerinde düzeltilen hata:** Testler `--resolve` ile `Host: web.lab.local:8443` gönderiyordu; HAProxy host ACL'i tam host adını beklediği için istekler WAF'a hiç ulaşmadan 404 dönüyordu. Testler `--connect-to` ile port'suz Host gönderecek şekilde değiştirildi (gerçek istemci davranışı). Bu değişiklikten sonra WAF'ın gerçekten engellediği doğrulandı.
-- **Kapsam dışı (lab):** Backend failover (bir DMZ node'unu durdurma) testi yapılmadı; bu, kubernetes cluster'ını da etkiler. Prod'da ayrı kaos testi olarak yapılmalı.
-- **Gözlem:** Yüksek eşzamanlılık altında (200 paralel) az sayıda 500 görüldü. Bu, `timeout processing 500ms` aşıldığında SPOE hatasının `deny 500` ile fail-closed davranması olabilir; prod'da WAF zaman aşımı ve ölçek ayarı gözden geçirilmeli.
+- **Failover (lab):** `lb.sh` bir DMZ node'unda yalnız gw-web NodePort'unu (30446) geçici olarak düşürüyor. Backend DOWN oluyor, 10/10 istek ikinci node'dan 200 dönüyor, kural kaldırılınca UP oluyor. Node ve cluster ayakta kalır.
+- **WAF 500 gözlemi:** Yüksek eşzamanlılıkta bir SPOE çağrısı 688 ms sürdü, `timeout processing` (500 ms) aşıldı (`st=1`) ve HAProxy isteği fail-closed olarak 500 ile reddetti. Zaman aşımı 2 s'ye çıkarıldı; sonrasında üç burst'te (1200 istek) 500 görülmedi. Örnek sayı küçük; prod'da SPOE gecikme metriği ile izlenmeli.
 
 ### 15.4 Karar bekleyen konular
 

@@ -13,7 +13,7 @@ Son güncelleme: 2026-11-10. Durum sütunu lab'daki son doğrulamayı gösterir.
 |---|---|---|---|
 | **HAProxy 3.0** | Dış giriş (public 443). SNI'ye göre partner passthrough, TLS sonlandırma, host yönlendirme (`web.lab.local`, `mobile-api.lab.local`), re-encrypt, L4 bağlantı ve L7 istek hızı sınırı (IP başına), WAF'a SPOE ile yönlendirme | `haproxy/haproxy.cfg`: `fe_public` (L4, `req.ssl_sni`), `fe_https` (L7, `stick-table`, `http-request`), `be_gw_web` / `be_gw_mobile` / `be_partner_pt` (DMZ NodePort 30446–30448, `check-ssl`) | Yapılandırıldı, `haproxy -c` geçerli. Uçtan uca test WAF imajı bekliyor |
 | **Coraza WAF (coraza-spoa v0.9.1)** | Uygulama katmanı saldırıları (SQLi, XSS, path traversal), OWASP CRS ile | `waf/coraza-spoa.yaml`, `haproxy/coraza.cfg`. İmaj `scripts/build-waf.sh` ile derlenir | Çalışıyor: imaj yerel derlendi, SQLi/XSS/traversal 403 |
-| Edge test suite | HAProxy, WAF, DDoS, LB, slowloris | `tests/smoke.sh`, `lb.sh`, `waf.sh`, `ddos.sh`, `run-all.sh` | 22/22 (smoke 12, lb 3, waf 5, ddos 2) |
+| Edge test suite | HAProxy, WAF, DDoS, LB, slowloris | `tests/smoke.sh`, `lb.sh`, `waf.sh`, `ddos.sh`, `run-all.sh` | 25/25 (smoke 12, lb 6 dahil failover, waf 5, ddos 2) |
 
 **Edge ↔ DMZ firewall (F1):** Henüz uygulanmadı. Önerilen: DMZ node'larında host iptables ile yalnız HAProxy kaynağından 30446–30448 portlarına izin. Bkz. `design.md` 6.2 F1.
 

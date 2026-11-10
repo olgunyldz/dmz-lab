@@ -38,4 +38,31 @@ echo "      (dağılım: dmz-worker=$d1 dmz-worker2=$d2)"
 up=$(echo "$after" | awk '$3 ~ /^UP/ {n++} END {print n+0}')
 check "be_gw_web: iki backend de UP (check-ssl)" "2" "$up"
 
+# Failover: dmz-worker'daki gw-web NodePort'u (30446) geçici olarak düşürülür. Node ve cluster ayakta kalır;
+# yalnız bu port DROP edilir. Kural, betik nasıl biterse bitsin (trap) kaldırılır.
+FAIL_NODE=dmz-worker
+FAIL_RULE="-p tcp -m conntrack --ctdir ORIGINAL --ctorigdstport 30446 -j DROP"
+restore_rule() {
+    docker exec "$FAIL_NODE" sh -c "iptables -D FORWARD $FAIL_RULE 2>/dev/null; iptables -D INPUT $FAIL_RULE 2>/dev/null; true"
+}
+trap restore_rule EXIT
+
+docker exec "$FAIL_NODE" sh -c "iptables -I FORWARD 1 $FAIL_RULE && iptables -I INPUT 1 $FAIL_RULE"
+sleep 15   # check-ssl: inter 2s, fall 2 -> DOWN
+
+down=$(backend_stats | awk '$1=="dmz-worker" {print $3}')
+check "failover: dmz-worker DOWN olur" "DOWN" "$down"
+
+ok_count=$(for i in $(seq 1 10); do
+    "${CURL[@]}" -s -o /dev/null -w '%{http_code}\n' --max-time 10 --cacert "$CERTS/public-ca.crt" \
+        --connect-to "web.lab.local:443:$EDGE:$PORT" "https://web.lab.local/public/branches"
+done | grep -c '^200$')
+check "failover: 10 istekten 10'u 200 (dmz-worker2 üzerinden)" "10" "$ok_count"
+
+restore_rule
+sleep 15   # rise 2 -> UP
+
+up_again=$(backend_stats | awk '$1=="dmz-worker" {print $3}')
+check "failover: kural kalkınca dmz-worker tekrar UP" "UP" "$up_again"
+
 summary
