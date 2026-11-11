@@ -9,7 +9,7 @@
 # Idempotent: her çalıştırmada zincir sıfırlanır ve yeniden kurulur.
 set -euo pipefail
 
-INTERNAL_NODE_IPS=("172.18.0.8" "172.18.0.9" "172.18.0.10")  # internal cluster node'ları (kind-internal)
+INTERNAL_NODE_IPS=($(for n in $(kind get nodes --name internal); do docker inspect "$n" -f '{{ .NetworkSettings.Networks.kind.IPAddress }}'; done))  # internal cluster node IP'leri (kind-internal)
 POD_CIDR="10.244.0.0/16"
 CHAIN="F8-KEYCLOAK"
 

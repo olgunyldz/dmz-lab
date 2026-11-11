@@ -3,6 +3,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+source "$ROOT/../scripts/lab-ips.sh"
 K="kubectl --context kind-internal"
 
 for ns in app-bff app-core; do
@@ -13,7 +14,7 @@ for ns in app-bff app-core; do
         --dry-run=client -o yaml | $K apply -f -
 done
 
-$K apply -f "$ROOT/manifests/services.yaml"
+render "$ROOT/manifests/services.yaml" | $K apply -f -
 $K -n app-bff rollout restart deploy/bff >/dev/null
 $K -n app-core rollout restart deploy/core >/dev/null
 $K -n app-bff rollout status deploy/bff --timeout=180s

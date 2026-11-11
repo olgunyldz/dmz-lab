@@ -26,7 +26,7 @@ spec:
             - name: SERVICE_NAME
               value: bff
             - name: OTLP_ENDPOINT
-              value: http://172.18.0.12:30318
+              value: http://__MGMT_NODE_IP__:30318
             - name: CORE_URL
               value: http://core.app-core.svc.cluster.local
             - name: ALLOWED_CHANNELS
@@ -93,7 +93,7 @@ spec:
             - name: SERVICE_NAME
               value: core
             - name: OTLP_ENDPOINT
-              value: http://172.18.0.12:30318
+              value: http://__MGMT_NODE_IP__:30318
             - name: ALLOWED_CHANNELS
               value: partner
             - name: EXPECTED_ISSUER
@@ -153,7 +153,7 @@ metadata:
   namespace: app-bff
 subsets:
   - addresses:
-      - ip: 172.18.0.5
+      - ip: __IDENTITY_NODE_IP__
     ports:
       - name: http
         port: 30080
@@ -176,7 +176,7 @@ metadata:
   namespace: app-core
 subsets:
   - addresses:
-      - ip: 172.18.0.5
+      - ip: __IDENTITY_NODE_IP__
     ports:
       - name: http
         port: 30080

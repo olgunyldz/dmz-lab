@@ -24,22 +24,22 @@ data:
 
       - job_name: bff
         static_configs:
-          - targets: ["172.18.0.8:30901"]
+          - targets: ["__INTERNAL_NODE_IP__:30901"]
             labels: { cluster: internal, namespace: app-bff }
 
       - job_name: core
         static_configs:
-          - targets: ["172.18.0.8:30902"]
+          - targets: ["__INTERNAL_NODE_IP__:30902"]
             labels: { cluster: internal, namespace: app-core }
 
       - job_name: ext-authz
         static_configs:
-          - targets: ["172.18.0.2:30903"]
+          - targets: ["__DMZ_NODE_IP__:30903"]
             labels: { cluster: dmz, namespace: auth }
 
       - job_name: kube-state-metrics
         static_configs:
-          - targets: ["172.18.0.8:30904"]
+          - targets: ["__INTERNAL_NODE_IP__:30904"]
             labels: { cluster: internal, namespace: kube-system }
 ---
 apiVersion: apps/v1

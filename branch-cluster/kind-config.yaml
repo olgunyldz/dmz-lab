@@ -1,0 +1,13 @@
+# Şube (branch) cluster'ı: tek node. Şube iş istasyonu bu cluster'da çalışır (şube UI pod'u).
+# Şube trafiği HAProxy'den geçmez; WAN üzerinden doğrudan DMZ gw-branch'e (NodePort 30449) gider (F10).
+# Host erişimi: şube UI http://127.0.0.1:9100 (containerPort 30900 -> hostPort 9100, yalnız loopback).
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: branch
+nodes:
+  - role: control-plane
+    extraPortMappings:
+      - containerPort: 30900
+        hostPort: 9100
+        listenAddress: "127.0.0.1"
+        protocol: TCP

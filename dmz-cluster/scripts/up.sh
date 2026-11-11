@@ -27,6 +27,8 @@ helm upgrade -i -n kgateway-system --version "$KGATEWAY" --kube-context "$CTX" \
 $K -n kgateway-system wait --for=condition=available deploy --all --timeout=300s
 
 $K apply -f "$ROOT/manifests/channels.yaml"
+# Kanal gateway NodePort servisleri (HAProxy -> 30446/30447/30448; F1 bu portları korur)
+$K apply -f "$ROOT/manifests/gateway-nodeports.yaml"
 bash "$ROOT/scripts/load-secrets.sh"
 
 for ns in gw-web gw-mobile gw-partner; do

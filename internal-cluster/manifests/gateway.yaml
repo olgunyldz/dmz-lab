@@ -48,7 +48,7 @@ metadata:
   namespace: gw-internal
 subsets:
   - addresses:
-      - ip: 172.18.0.5
+      - ip: __IDENTITY_NODE_IP__
     ports:
       - name: http
         port: 30080

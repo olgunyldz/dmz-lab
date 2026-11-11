@@ -1,3 +1,5 @@
+# ŞABLON: kurulum sırasında edge/scripts/render-haproxy.sh __DMZ_NODE_IP__ ve __DMZ_WORKER2_IP__ yerine
+# DMZ node IP'lerini yazar ve haproxy.cfg üretir. Doğrudan düzenlemeyin; haproxy.cfg üretilen dosyadır.
 # DMZ Edge — HAProxy (lab)
 #
 # Akış:
@@ -45,7 +47,7 @@ frontend fe_public
     tcp-request content accept if { req.ssl_hello_type 1 }
 
     use_backend be_partner_pt if { req.ssl_sni -i partner-api.lab.local }
-    use_backend be_branch_pt if { req.ssl_sni -i teller.lab.local }
+    # Şube (teller.lab.local) HAProxy'den GEÇMEZ: şube cluster'ı gw-branch'e doğrudan (WAN, F10) bağlanır.
     default_backend be_edge_tls
 
 backend be_edge_tls
@@ -55,14 +57,8 @@ backend be_edge_tls
 backend be_partner_pt
     mode tcp
     # DMZ gw-partner NodePort (dmz-worker, dmz-worker2). TLS passthrough: mTLS gateway'de doğrulanır.
-    server dmz-worker 172.18.0.2:30448 check
-    server dmz-worker2 172.18.0.4:30448 check
-
-# Şube (teller.lab.local): mTLS cihaz sertifikası gw-branch'te doğrulanır (passthrough, partner ile aynı desen)
-backend be_branch_pt
-    mode tcp
-    server dmz-worker 172.18.0.2:30449 check
-    server dmz-worker2 172.18.0.4:30449 check
+    server dmz-worker __DMZ_NODE_IP__:30448 check
+    server dmz-worker2 __DMZ_WORKER2_IP__:30448 check
 
 # ---------------------------------------------------------------------------
 # L7: TLS sonlandırma, DDoS/rate limit, WAF, host yönlendirme, re-encrypt
@@ -112,8 +108,8 @@ backend be_gw_web
     option httpchk
     http-check send meth GET uri /public/branches ver HTTP/1.1 hdr host web.lab.local
     http-check expect status 200
-    server dmz-worker 172.18.0.2:30446
-    server dmz-worker2 172.18.0.4:30446
+    server dmz-worker __DMZ_NODE_IP__:30446
+    server dmz-worker2 __DMZ_WORKER2_IP__:30446
 
 backend be_gw_mobile
     mode http
@@ -122,8 +118,8 @@ backend be_gw_mobile
     option httpchk
     http-check send meth GET uri /public/branches ver HTTP/1.1 hdr host mobile-api.lab.local
     http-check expect status 200
-    server dmz-worker 172.18.0.2:30447
-    server dmz-worker2 172.18.0.4:30447
+    server dmz-worker __DMZ_NODE_IP__:30447
+    server dmz-worker2 __DMZ_WORKER2_IP__:30447
 
 # ---------------------------------------------------------------------------
 # WAF servisi (coraza-spoa)

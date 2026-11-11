@@ -1,0 +1,79 @@
+# Şube UI (veznedar arayüzü) pod'u. Kod: ConfigMap branch-code (scripts/up.sh oluşturur).
+# Sertifikalar: Secret branch-device-tls (cihaz sertifikası, internal-ca). Secret'lar: Secret branch-app-secrets.
+# BRANCH_GW_HOST: scripts/up.sh tarafından DMZ node IP'sine ayarlanır (kubectl set env).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: branch
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: branch-ui
+  namespace: branch
+  labels:
+    app: branch-ui
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: branch-ui
+  template:
+    metadata:
+      labels:
+        app: branch-ui
+    spec:
+      containers:
+        - name: branch-ui
+          image: python:3.12-alpine
+          imagePullPolicy: IfNotPresent
+          command: ["python3", "/app/server.py"]
+          env:
+            - name: BRANCH_GW_PORT
+              value: "30449"
+            - name: BRANCH_LISTEN
+              value: "0.0.0.0"
+            - name: BRANCH_CERT_DIR
+              value: "/certs"
+            - name: PYTHONIOENCODING
+              value: "utf-8"
+          envFrom:
+            - secretRef:
+                name: branch-app-secrets
+          ports:
+            - containerPort: 9100
+              name: http
+          readinessProbe:
+            tcpSocket:
+              port: 9100
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          volumeMounts:
+            - name: code
+              mountPath: /app
+              readOnly: true
+            - name: certs
+              mountPath: /certs
+              readOnly: true
+      volumes:
+        - name: code
+          configMap:
+            name: branch-code
+        - name: certs
+          secret:
+            secretName: branch-device-tls
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: branch-ui
+  namespace: branch
+spec:
+  type: NodePort
+  selector:
+    app: branch-ui
+  ports:
+    - name: http
+      port: 9100
+      targetPort: 9100
+      nodePort: 30900

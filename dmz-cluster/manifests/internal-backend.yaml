@@ -2,7 +2,7 @@
 # - internal-gw Service'i cluster dışındaki iç gateway'e (NodePort) Endpoints ile bağlanır.
 # - BackendTLSPolicy: iç CA ile sunucu doğrulaması, SNI/hostname = gw-internal.
 # - İstemci sertifikası (DMZ kimliği) Gateway spec.tls.backend.clientCertificateRef ile verilir (scripts/load-internal-backend.sh).
-# Lab sapması: iç gateway IP'si statik (172.18.0.10:30444), üretimde iç ağ yönlendirmesi.
+# Lab sapması: iç gateway IP'si statik (__INTERNAL_NODE_IP__:30444), üretimde iç ağ yönlendirmesi.
 ---
 apiVersion: v1
 kind: Service
@@ -22,7 +22,7 @@ metadata:
   namespace: gw-web
 subsets:
   - addresses:
-      - ip: 172.18.0.10
+      - ip: __INTERNAL_NODE_IP__
     ports:
       - name: https
         port: 30444
@@ -62,7 +62,7 @@ metadata:
   namespace: gw-mobile
 subsets:
   - addresses:
-      - ip: 172.18.0.10
+      - ip: __INTERNAL_NODE_IP__
     ports:
       - name: https
         port: 30444
@@ -102,7 +102,7 @@ metadata:
   namespace: gw-partner
 subsets:
   - addresses:
-      - ip: 172.18.0.10
+      - ip: __INTERNAL_NODE_IP__
     ports:
       - name: https
         port: 30444

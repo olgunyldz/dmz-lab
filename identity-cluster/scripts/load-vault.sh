@@ -29,10 +29,12 @@ fi
 
 # 1) Init (yalnızca bir kez)
 if ! $MGMT -n secrets get secret vault-bootstrap >/dev/null 2>&1; then
-    init_json=$(vexec vault operator init -key-shares=1 -key-threshold=1 -format=json | tr -d '\n')
-    unseal=$(echo "$init_json" | sed -n 's/.*"unseal_keys_b64": *\[ *"\([^"]*\)".*/\1/p')
-    root=$(echo "$init_json" | sed -n 's/.*"root_token": *"\([^"]*\)".*/\1/p')
+    # CR/LF temizliği: Windows (Git Bash + kubectl) çıktısında CR kalabilir; anahtara karışırsa unseal reddedilir
+    init_json=$(vexec vault operator init -key-shares=1 -key-threshold=1 -format=json | tr -d '\r\n')
+    unseal=$(echo "$init_json" | sed -n 's/.*"unseal_keys_b64": *\[ *"\([^"]*\)".*/\1/p' | tr -d '\r\n ')
+    root=$(echo "$init_json" | sed -n 's/.*"root_token": *"\([^"]*\)".*/\1/p' | tr -d '\r\n ')
     [[ -n "$unseal" && -n "$root" ]] || { echo "init çıktısı okunamadı"; exit 1; }
+    [[ "$unseal" =~ ^[A-Za-z0-9+/=]+$ ]] || { echo "unseal anahtarı base64 biçiminde değil"; exit 1; }
     $MGMT -n secrets create secret generic vault-bootstrap --from-literal=unseal_key="$unseal" --from-literal=root_token="$root" >/dev/null
     echo "Vault başlatıldı (vault-bootstrap secret'ı mgmt cluster'da)."
 fi

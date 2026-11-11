@@ -329,11 +329,13 @@ Admin konsolu, `/admin/*` ve yönetim portu hiçbir zaman DMZ'ye açılmaz.
 
 Şube zone'u, banka şubelerindeki çalışan (veznedar, müşteri temsilcisi) iş istasyonlarının merkez sistemlere eriştiği dördüncü kanaldır. Müşteri kanallarıyla (web, mobil, partner) aynı desenle tasarlanır; yalnızca kimlik modeli farklıdır.
 
+Şube trafiği HAProxy'den **geçmez**. Şube cluster'ı (`kind-branch`, prod: şube ağındaki cihaz/edge düğümü) WAN üzerinden gw-branch'e doğrudan, cihaz sertifikasıyla mTLS bağlanır. Şube UI bu cluster'da bir pod olarak çalışır. Bu bağlantı F10 ile korunur (yalnız şube ağı kaynağı ve yalnız gw-branch NodePort'u). Token exchange'i her zaman auth servisi (ext-authz, ns `auth`) yapar; gw-branch dış token'ı iç ağa taşımaz.
+
 | Bileşen | Konum | Rol |
 |---|---|---|
 | Şube iş istasyonu (cihaz) | Şube ağı | Veznedar arayüzü. Cihaz sertifikası (branch-ca ile imzalı, CN=branch-ws-01) ile mTLS |
 | Şube gateway'i `gw-branch` | DMZ cluster (ns `gw-branch`) | Cihaz sertifikasını doğrular (ConfigMap `branch-ca`), `/bff/*` için ext-authz (X-Dmz-Channel: branch), `/realms/*` login |
-| HAProxy | Edge | `teller.lab.local` SNI passthrough (TLS şifresi çözülmez; mTLS gateway'de) |
+| Şube cluster'ı (`kind-branch`) | Şube ağı | Şube UI pod'u ve cihaz sertifiği. gw-branch'e doğrudan bağlanır (HAProxy yok, F10) |
 | `ext-authz` (branch profili) | DMZ auth | Bearer token doğrulama (aud `channel-branch`); DPoP yok (çalışan kanalı cihaz sertifikasıyla bağlanır) |
 | Token exchange `dmz-exchange-branch` | Identity (Keycloak client-x509) | İç JWT üretimi: channel=branch, auth_method=branch_cert |
 | `branch-app` (Keycloak client) | Identity | Authorization Code + PKCE, confidential; çalışan girişi (`teller`) |
@@ -345,7 +347,7 @@ Güvenlik kuralları:
 - **Sertifika zinciri:** Şube CA'sı (branch-ca) yalnızca gw-branch'in istemci doğrulamasında kullanılır; iç ağa güven vermez. Exchange ve gateway sertifikaları İç CA ile imzalıdır.
 - **Trace ve log:** Şube isteklerinde kullanıcı kimliği (sub) iç servise `x-user-id` olarak iletilir; token loglara yazılmaz.
 
-Lab durumu: `dmz-cluster/tests/branch.sh` 9/9, şube arayüzü (`branch/`) gerçek tarayıcıda 7/7. Prod farkları: şube CA'sı HSM/KMS'te, cihaz sertifikaları kısa ömürlü (Vault PKI), çalışan kimliği kurumsal IdP (AD/LDAP federasyonu) üzerinden, şube ağı ile DMZ arasında ayrı firewall (F-B) ve şube başına cihaz kaydı.
+Lab durumu: şube cluster'ı (`kind-branch`) ve F10 eklendi; `branch.sh` 9 kontrol, uçtan uca doğrulama bekliyor. Önceki sürümde (host'ta şube UI, HAProxy passthrough) 9/9 geçmişti. Prod farkları: şube CA'sı HSM/KMS'te, cihaz sertifikaları kısa ömürlü (Vault PKI), çalışan kimliği kurumsal IdP (AD/LDAP federasyonu) üzerinden, şube ağı ile DMZ arasında ayrı firewall (F-B) ve şube başına cihaz kaydı.
 
 ## 5. Trafik Akışları
 
@@ -510,6 +512,7 @@ Her kanalın kimlik doğrulama ve token bağlama modeli farklıdır. Bu farklar 
 | F7 | Tüm cluster'lar | Log/SIEM | Syslog/TLS | Gözlem | Tek yönlü |
 | F8 | kgateway internal (iç cluster) | Identity cluster (Keycloak) | TCP 443 (mTLS) | `/realms/*`, `/.well-known/*`, JWKS, token exchange | İç → Identity |
 | F9 | Identity ve iç cluster'lar | Management cluster (Vault API) | TCP 8200 (mTLS, prod) | Secret okuma, PKI sertifika üretimi (Kubernetes auth ile) | Identity/İç → Mgmt |
+| F10 | Şube cluster'ı (`kind-branch`) | DMZ gw-branch (NodePort 30449) | TCP 443 (mTLS, cihaz sertifikası) | Şube iş istasyonundan gw-branch'e doğrudan erişim; HAProxy yok | Şube → DMZ |
 
 Not: F4 ve F5 kuralları "yasak" olarak firewall'da açıkça tanımlanır (default deny). F3, F2 içinde yönlendirilebilir; ayrı port gerekmez.
 
@@ -643,7 +646,7 @@ Aşağıdaki maddeler onay bekler. Varsayılan öneri her madde için verilmişt
 
 Bu bölüm lab'da gerçekten doğrulanan durumu ve prod'da değişmesi gereken noktaları listeler. Hedef durum bölümleri (4–11) prod'u tanımlar.
 
-### 15.1 Lab durumu (2026-11-10)
+### 15.1 Lab durumu (2026-11-11)
 
 | Bileşen | Durum | Doğrulama |
 |---|---|---|
@@ -653,13 +656,14 @@ Bu bölüm lab'da gerçekten doğrulanan durumu ve prod'da değişmesi gereken n
 | İç gateway: iç JWT doğrulaması, kanal RBAC, DMZ kimliğine mTLS, default deny | Çalışıyor | `authz.sh` 16/16 |
 | BFF ve core: iç JWT'yi kendileri doğrular, gateway'i atlayan çağrılar reddedilir | Çalışıyor | `service-verify.sh` 9/9 |
 | DMZ → iç uçtan uca yol (`/bff/*`, `/partner/*`) | Çalışıyor | `internal-path.sh` 8/8 |
-| Edge HAProxy → DMZ NodePort'ları (F1) | Çalışıyor. DMZ node'larında host firewall: NodePort'lara yalnız edge IP'si, diğerleri DROP (`dmz-cluster/scripts/host-firewall.sh`) | `dmz-cluster/tests/firewall.sh` 4/4 |
+| Edge HAProxy → DMZ NodePort'ları (F1) | Çalışıyor. DMZ node'larında host firewall: 30446–30448 yalnız edge IP'si ve DMZ node'ları; 30449 (şube) F10 ile yalnız şube cluster'ının node'ları, diğerleri DROP (`dmz-cluster/scripts/host-firewall.sh`) | `dmz-cluster/tests/firewall.sh` 4/4 (F10 eklendikten sonra yeniden çalıştırılmalı) |
 | Edge WAF (Coraza v0.9.1 + OWASP CRS) ve edge uçtan uca testleri | Çalışıyor. SQLi, XSS ve path traversal 403 (`waf-block`), L7 rate limit 429, L4 bağlantı sınırı, slowloris 408, be_gw_web iki backend UP | `edge/tests/run-all.sh` 25/25 (failover dahil) |
 | Management cluster: Vault 1.18 (init/unseal, KV v2, Keycloak parolaları), NodePort 30200, F9 firewall | Çalışıyor | `identity-cluster/scripts/load-vault.sh` |
 | Identity cluster: Keycloak 26.6 + SPI, PostgreSQL 16 (kindnet üzerinde) | Çalışıyor | `extauth.sh` 25/25 ve `internal-path.sh` 8/8 üzerinden dolaylı |
 | Identity cluster: erişim kısıtı (F8, host iptables) | Çalışıyor. Cilium bırakıldı, kısıt host firewall ile sağlandı | `identity-cluster/tests/firewall.sh` 3/3 |
 | Realm, client ve exchange kurulumu (`setup-realm.sh`) | Çalıştırıldı | `setup-realm.sh` tamamlandı, token exchange yetkileri ayarlandı |
-| Sequence diagram seti ve mimari genel bakış (`docs/sequences.drawio`) | Üretildi, XML geçerli; görsel render draw.io'da kontrol edilmeli | `docs/gen-sequence.js` |
+| Şube cluster'ı (`kind-branch`), şube UI pod'u, F10 (WAN benzeri doğrudan bağlantı, HAProxy yok) | Kuruldu (`up.sh` adım 6), uçtan uca doğrulama bekliyor | `dmz-cluster/tests/branch.sh` 9 kontrol |
+| Tek draw.io dosyası (`docs/dmz-lab.drawio`): genel mimari, I/O ve araçlar, cluster ve namespace/pod görünümleri, pod içi detay, sequence diyagramları (tab'lar) | Üretildi, XML ve referanslar geçerli; görsel render draw.io'da kontrol edilmeli | `node docs/drawio/gen-all.js` |
 
 ### 15.2 Lab ↔ Prod farkları
 
@@ -670,6 +674,7 @@ Aşağıdaki her satır prod'da değişmesi gereken bir noktayı gösterir. Süt
 | Cluster boyutu | kind, 1 control-plane + 2 worker | Her cluster en az 3+3, ayrı VLAN (bkz. 11) |
 | Cluster dağıtımı | kind | RKE2 veya OpenShift (D-5) |
 | Cluster arası bağlantı | Statik node IP ve NodePort (`172.18.0.x:300xx`) | Kurumsal iç ağ yönlendirmesi, firewall kuralları F2/F3/F7/F8 |
+| Şube bağlantısı | Şube cluster'ı (`kind-branch`) kind ağı üzerinden gw-branch:30449'a bağlanır (WAN simülasyonu, F10) | Gerçek WAN/SD-WAN, şube edge cihazı, şube-DMZ ayrı firewall (F10), şube başına cihaz kaydı |
 | Edge LB | HAProxy, tek instance, Docker | HAProxy HA çifti (keepalived/VRRP), sanal IP; ya da F5/cloud WAF (D-3) |
 | WAF | Coraza `v0.9.1`, yerel derleme | Pinli imaj, kurumsal registry, cosign imzası; CRS PL1 ile başla, DetectionOnly, sonra blok |
 | DDoS | HAProxy stick-table (IP başına limit) | Upstream temizleme (ISP/bulut, BGP), DDoS runbook'u |
@@ -707,6 +712,8 @@ Aşağıdaki her satır prod'da değişmesi gereken bir noktayı gösterir. Süt
 - **Failover (lab):** `lb.sh` bir DMZ node'unda yalnız gw-web NodePort'unu (30446) geçici olarak düşürüyor. Backend DOWN oluyor, 10/10 istek ikinci node'dan 200 dönüyor, kural kaldırılınca UP oluyor. Node ve cluster ayakta kalır.
 - **WAF 500 gözlemi:** Yüksek eşzamanlılıkta bir SPOE çağrısı 688 ms sürdü, `timeout processing` (500 ms) aşıldı (`st=1`) ve HAProxy isteği fail-closed olarak 500 ile reddetti. Zaman aşımı 2 s'ye çıkarıldı; sonrasında üç burst'te (1200 istek) 500 görülmedi. Örnek sayı küçük; prod'da SPOE gecikme metriği ile izlenmeli.
 
+- **Konsol şube kanalı:** `console/app.py` şube kanalını hâlâ `teller.lab.local` (HAProxy) üzerinden çağırıyor. Şube artık HAProxy'den geçmediği için bu kanal çalışmaz. Düzeltme: şube kanalını şube cluster'ındaki pod üzerinden çağırmak.
+- **Şube kurulumu doğrulaması:** `up.sh` adım 6, `branch.sh` ve F10 uçtan uca henüz çalıştırılmadı.
 - **Partner sertifikası iptali (CRL/OCSP) platform kısıtı:** kgateway v2.5 `ListenerPolicy.clientCertificateValidation` yalnızca `caCertificateRefs` alır; Gateway API `frontend.validation` alanında da CRL/OCSP yok. Lab'da iptal kontrolü yapılmıyor. Prod'da riski sınırlamanın yolu kısa ömürlü partner sertifikaları (Vault PKI, bkz. 15.4). Envoy bootstrap üzerinden CRL zorlamak mümkün olabilir, ama doğrulanmadı ve GatewayParameters ile yönetilmesi gerekir.
 
 ### 15.4 Karar bekleyen konular

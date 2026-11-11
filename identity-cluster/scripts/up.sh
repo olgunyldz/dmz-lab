@@ -7,6 +7,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+source "$ROOT/../scripts/lab-ips.sh"
 CTX="kind-identity"
 K="kubectl --context $CTX"
 KEYCLOAK_IMAGE="dmz-lab/keycloak-dpop:26.6"   # keycloak-spi/ ile derlenir (docker build)
@@ -20,7 +21,7 @@ kind load docker-image "$KEYCLOAK_IMAGE" --name identity >/dev/null
 
 bash "$ROOT/scripts/load-vault.sh"
 
-$K apply -f "$ROOT/manifests/keycloak.yaml"
+render "$ROOT/manifests/keycloak.yaml" | $K apply -f -
 $K apply -f "$ROOT/manifests/keycloak-nodeport.yaml"
 bash "$ROOT/scripts/host-firewall.sh"
 

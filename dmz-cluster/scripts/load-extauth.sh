@@ -7,11 +7,12 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+source "$ROOT/../scripts/lab-ips.sh"
 K="kubectl --context kind-dmz"
 KI="kubectl --context kind-identity"
 CERTS="$ROOT/../edge/certs"
 
-$K apply -f "$ROOT/manifests/extauth.yaml"
+render "$ROOT/manifests/extauth.yaml" | $K apply -f -
 
 # Eski stub kaldır (artık kullanılmıyor)
 $K delete namespace sts-internal --ignore-not-found >/dev/null 2>&1 || true

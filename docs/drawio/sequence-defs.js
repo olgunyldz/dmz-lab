@@ -2,7 +2,7 @@
 // Renkler: dış (gri), edge (sarı), DMZ (turuncu), iç (mavi), identity (mor), mgmt (yeşil).
 // Her diyagramın altında: kontrol listesi (K1..Kn) ve lab/prod farkı.
 // Kırmızı kalın ok = iç JWT. Kesikli ok = yanıt veya planlanmış bileşen.
-const EDGE = "#fff2cc", DMZ = "#ffe6cc", INT = "#dae8fc", ID = "#e1d5e7", MGMT = "#d5e8d4", EXT = "#f5f5f5";
+const EDGE = "#FEF3C7", DMZ = "#FFEDD5", INT = "#DBEAFE", ID = "#EDE9FE", MGMT = "#DCFCE7", EXT = "#FFFFFF";
 
 module.exports = [
   // ------------------------------------------------------------------

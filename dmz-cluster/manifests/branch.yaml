@@ -73,7 +73,7 @@ metadata:
   namespace: gw-branch
 subsets:
   - addresses:
-      - ip: 172.18.0.10
+      - ip: __INTERNAL_NODE_IP__
     ports:
       - name: https
         port: 30444

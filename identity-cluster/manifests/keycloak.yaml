@@ -87,7 +87,7 @@ spec:
             # Tracing çalışma zamanındaki yeniden derlemede de açık olmalı (aksi halde endpoint seçenekleri devre dışı kalır)
             - --features=opentelemetry
             - --tracing-enabled=true
-            - --tracing-endpoint=http://172.18.0.12:30318
+            - --tracing-endpoint=http://__MGMT_NODE_IP__:30318
             - --tracing-protocol=http/protobuf
             - --tracing-sampler-type=parentbased_always_on
             - --tracing-jdbc-enabled=false

@@ -31,6 +31,10 @@ pkce_token() {
         -d response_type=code -d scope=openid -d state=lab \
         -d code_challenge="$challenge" -d code_challenge_method=S256)
 
+    # Keycloak çerezleri Secure işaretler (KC_HOSTNAME https), oysa test port-forward ile http konuşur.
+    # Lab testinde çerez dosyasındaki Secure alanı kapatılır; curl bunları http üzerinden geri gönderir.
+    awk 'BEGIN{FS=OFS="	"} { if ($0 ~ /^#HttpOnly_/) sub(/^#HttpOnly_/, "", $1); if (NF >= 7) $4="FALSE"; print }' "$jar" > "$jar.t" && mv "$jar.t" "$jar"
+
     # 2) Form action: KC_HOSTNAME (https://id.bank.lab.local) yerine port-forward adresine çevrilir
     action=$(echo "$page" | grep -o 'action="[^"]*"' | head -1 | sed 's/action="//;s/"$//;s/&amp;/\&/g')
     action=${action/$PKCE_PUBLIC_HOST/$PKCE_BASE}

@@ -62,7 +62,7 @@ spec:
             - name: SERVICE_NAME
               value: ext-authz
             - name: OTLP_ENDPOINT
-              value: http://172.18.0.12:30318
+              value: http://__MGMT_NODE_IP__:30318
           ports:
             - containerPort: 8080
           securityContext:
@@ -129,7 +129,7 @@ metadata:
   namespace: auth
 subsets:
   - addresses:
-      - ip: 172.18.0.10
+      - ip: __INTERNAL_NODE_IP__
     ports:
       - name: https
         port: 30444

@@ -7,6 +7,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+source "$ROOT/../scripts/lab-ips.sh"
 K="kubectl --context kind-dmz"
 CERTS="$ROOT/../edge/certs"
 
@@ -17,8 +18,10 @@ for ns in gw-web gw-mobile gw-partner; do
         --dry-run=client -o yaml | $K apply -f -
 done
 
-$K apply -f "$ROOT/manifests/internal-backend.yaml"
+render "$ROOT/manifests/internal-backend.yaml" | $K apply -f -
 $K apply -f "$ROOT/manifests/channels.yaml"
+# Public ve login route'ları (/public, /realms -> iç gateway); bunlar olmadan sağlık kontrolü 404 alır
+$K apply -f "$ROOT/manifests/route-classes.yaml"
 
 for gw in gw-web:gw-web gw-mobile:gw-mobile gw-partner:gw-partner; do
     ns=${gw%%:*}

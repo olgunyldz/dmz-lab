@@ -22,3 +22,4 @@ node_modules/
 *.log
 .DS_Store
 Thumbs.db
+edge/haproxy/haproxy.cfg

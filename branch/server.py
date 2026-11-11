@@ -4,9 +4,16 @@
 Çalıştırma (repo kökünden):  PYTHONIOENCODING=utf-8 python branch/server.py  ->  http://127.0.0.1:9100
 Ön koşul: edge ayakta, gw-branch kurulu (dmz-cluster/scripts/load-branch.sh), identity kurulu (setup-realm.sh).
 
-Akış: tarayıcı -> bu sunucu -> teller.lab.local (edge, SNI passthrough) -> gw-branch (cihaz sertifikası mTLS)
+Akış: şube UI (branch cluster, pod) -> WAN -> gw-branch (DMZ NodePort 30449, cihaz sertifikası mTLS, F10)
       -> /bff/* ext-authz (branch) -> token exchange -> iç gateway -> BFF.
-Bu sunucu şube iş istasyonunun yerine geçer: cihaz sertifikasını (branch-device) kullanır.
+HAProxy kullanılmaz. Bu sunucu şube iş istasyonunun yerine geçer: cihaz sertifikasını (branch-device) kullanır.
+
+Ortam değişkenleri (pod'da verilir; host'ta yoksa varsayılanlar kullanılır):
+  BRANCH_GW_HOST   gw-branch'in erişildiği DMZ node IP'si (zorunlu pod'da)
+  BRANCH_GW_PORT   gw-branch NodePort (varsayılan 30449)
+  BRANCH_CERT_DIR  cihaz ve internal-ca sertifikaları (varsayılan edge/certs)
+  BRANCH_LISTEN    dinleme adresi (varsayılan 127.0.0.1; pod'da 0.0.0.0)
+  BRANCH_APP_SECRET, TELLER_PASSWORD  verilmezse kubectl ile identity'den okunur (host modu)
 
 Güvenlik notları (lab): client secret ve parola yalnız bellekte; tarayıcıya gönderilmez. Token'lar tarayıcıya ham gitmez.
 """
@@ -16,6 +23,7 @@ import html
 import http.client
 import http.server
 import json
+import os
 import re
 import secrets
 import socket
@@ -26,13 +34,15 @@ import urllib.parse
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-CERTS = ROOT / "edge" / "certs"
-EDGE = ("127.0.0.1", 8443)
+CERTS = Path(os.environ.get("BRANCH_CERT_DIR", ROOT / "edge" / "certs"))
+# gw-branch doğrudan (HAProxy yok). SNI ve sertifika doğrulaması teller.lab.local ile (gw-branch sertifikası bunu içerir).
+EDGE = (os.environ.get("BRANCH_GW_HOST", "127.0.0.1"), int(os.environ.get("BRANCH_GW_PORT", "30449")))
 HOST = "teller.lab.local"
 INTERNAL_CA = str(CERTS / "internal-ca.crt")
 DEVICE = (str(CERTS / "branch-device.crt"), str(CERTS / "branch-device.key"))
 REALM = "/realms/bank/protocol/openid-connect"
 PORT = 9100
+LISTEN = os.environ.get("BRANCH_LISTEN", "127.0.0.1")
 
 SECRETS = {}
 SESSIONS = {}
@@ -58,6 +68,11 @@ def summarize(token):
 
 
 def load_secrets():
+    # Pod modu: secret'lar ortam değişkeninden gelir (branch-app-secrets). Host modu: kubectl ile identity'den okunur.
+    if os.environ.get("BRANCH_APP_SECRET") and os.environ.get("TELLER_PASSWORD"):
+        SECRETS["branch-app"] = os.environ["BRANCH_APP_SECRET"]
+        SECRETS["teller-password"] = os.environ["TELLER_PASSWORD"]
+        return
     out = subprocess.run(["kubectl", "--context", "kind-identity", "-n", "auth", "get", "secret",
                           "keycloak-client-secrets", "-o", "json"], capture_output=True, text=True, check=True).stdout
     data = json.loads(out)["data"]
@@ -222,5 +237,5 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     load_secrets()
-    print(f"Şube arayüzü: http://127.0.0.1:{PORT}  (yalniz lab, cihaz sertifikası: branch-device)", flush=True)
-    http.server.ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
+    print(f"Şube arayüzü: http://{LISTEN}:{PORT} -> gw-branch {EDGE[0]}:{EDGE[1]} (yalniz lab, cihaz sertifikası: branch-device)", flush=True)
+    http.server.ThreadingHTTPServer((LISTEN, PORT), Handler).serve_forever()

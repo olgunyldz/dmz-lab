@@ -7,10 +7,11 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+source "$ROOT/../scripts/lab-ips.sh"
 K="kubectl --context kind-dmz"
 CERTS="$ROOT/../edge/certs"
 
-$K apply -f "$ROOT/manifests/branch.yaml"
+render "$ROOT/manifests/branch.yaml" | $K apply -f -
 
 $K -n gw-branch create secret tls gw-branch-tls --cert="$CERTS/gw-branch.crt" --key="$CERTS/gw-branch.key" \
     --dry-run=client -o yaml | $K apply -f -
