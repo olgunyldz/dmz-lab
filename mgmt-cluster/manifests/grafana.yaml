@@ -17,11 +17,11 @@ data:
         access: proxy
         url: http://prometheus.observability.svc.cluster.local:9090
         isDefault: true
-      - name: Jaeger
-        uid: jaeger
-        type: jaeger
+      - name: Tempo
+        uid: tempo
+        type: tempo
         access: proxy
-        url: http://jaeger.observability.svc.cluster.local:16686
+        url: http://tempo.observability.svc.cluster.local:3200
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -49,44 +49,135 @@ data:
     {
       "uid": "dmz-lab-overview",
       "title": "DMZ Lab – Genel Bakış",
-      "tags": ["dmz-lab"],
+      "tags": [
+        "dmz-lab"
+      ],
       "timezone": "browser",
       "schemaVersion": 39,
       "version": 1,
       "refresh": "30s",
-      "time": {"from": "now-1h", "to": "now"},
+      "time": {
+        "from": "now-1h",
+        "to": "now"
+      },
       "panels": [
         {
-          "id": 1, "type": "timeseries", "title": "İstek hızı (servis bazlı, req/s)",
-          "gridPos": {"x": 0, "y": 0, "w": 12, "h": 8},
-          "datasource": {"type": "prometheus", "uid": "prometheus"},
-          "targets": [{"refId": "A", "expr": "sum by (service, status) (rate(svc_requests_total[5m]))", "legendFormat": "{{service}} {{status}}"}]
+          "id": 1,
+          "type": "timeseries",
+          "title": "İstek hızı (servis bazlı, req/s)",
+          "gridPos": {
+            "x": 0,
+            "y": 0,
+            "w": 12,
+            "h": 8
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (service, status) (rate(svc_requests_total[5m]))",
+              "legendFormat": "{{service}} {{status}}"
+            }
+          ]
         },
         {
-          "id": 2, "type": "timeseries", "title": "p95 gecikme (servis bazlı, s)",
-          "gridPos": {"x": 12, "y": 0, "w": 12, "h": 8},
-          "datasource": {"type": "prometheus", "uid": "prometheus"},
-          "targets": [{"refId": "A", "expr": "histogram_quantile(0.95, sum by (le, service) (rate(svc_request_duration_seconds_bucket[5m])))", "legendFormat": "{{service}}"}]
+          "id": 2,
+          "type": "timeseries",
+          "title": "p95 gecikme (servis bazlı, s)",
+          "gridPos": {
+            "x": 12,
+            "y": 0,
+            "w": 12,
+            "h": 8
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "histogram_quantile(0.95, sum by (le, service) (rate(svc_request_duration_seconds_bucket[5m])))",
+              "legendFormat": "{{service}}"
+            }
+          ]
         },
         {
-          "id": 3, "type": "timeseries", "title": "Yetkilendirme kararları (kanal, allow/deny)",
-          "gridPos": {"x": 0, "y": 8, "w": 12, "h": 8},
-          "datasource": {"type": "prometheus", "uid": "prometheus"},
-          "targets": [{"refId": "A", "expr": "sum by (channel, decision) (rate(authz_decisions_total[5m]))", "legendFormat": "{{channel}} {{decision}}"}]
+          "id": 3,
+          "type": "timeseries",
+          "title": "Yetkilendirme kararları (kanal, allow/deny)",
+          "gridPos": {
+            "x": 0,
+            "y": 8,
+            "w": 12,
+            "h": 8
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (channel, decision) (rate(authz_decisions_total[5m]))",
+              "legendFormat": "{{channel}} {{decision}}"
+            }
+          ]
         },
         {
-          "id": 4, "type": "timeseries", "title": "Transfer sonuçları (kanal, sonuç)",
-          "gridPos": {"x": 12, "y": 8, "w": 12, "h": 8},
-          "datasource": {"type": "prometheus", "uid": "prometheus"},
-          "targets": [{"refId": "A", "expr": "sum by (channel, result) (rate(core_transfers_total[5m]))", "legendFormat": "{{channel}} {{result}}"}]
+          "id": 4,
+          "type": "timeseries",
+          "title": "Transfer sonuçları (kanal, sonuç)",
+          "gridPos": {
+            "x": 12,
+            "y": 8,
+            "w": 12,
+            "h": 8
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (channel, result) (rate(core_transfers_total[5m]))",
+              "legendFormat": "{{channel}} {{result}}"
+            }
+          ]
         },
         {
-          "id": 5, "type": "table", "title": "Son izler (console)",
-          "gridPos": {"x": 0, "y": 16, "w": 24, "h": 10},
-          "datasource": {"type": "jaeger", "uid": "jaeger"},
-          "targets": [{"refId": "A", "datasource": {"type": "jaeger", "uid": "jaeger"}, "queryType": "search", "service": "console", "limit": 20}]
+          "id": 5,
+          "type": "table",
+          "title": "Son izler (console)",
+          "gridPos": {
+            "x": 0,
+            "y": 16,
+            "w": 24,
+            "h": 10
+          },
+          "datasource": {
+            "type": "tempo",
+            "uid": "tempo"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "tempo",
+                "uid": "tempo"
+              },
+              "queryType": "traceql",
+              "query": "{ resource.service.name = \"console\" }",
+              "limit": 20
+            }
+          ]
         }
-      ]
+      ],
+      "links": []
     }
   lab-tracing.json: |
     {
@@ -123,7 +214,7 @@ data:
         {
           "id": 100,
           "type": "row",
-          "title": "Servis bazlı son izler (Jaeger)",
+          "title": "Servis bazlı son izler (Tempo)",
           "collapsed": false,
           "gridPos": {
             "x": 0,
@@ -144,44 +235,33 @@ data:
             "h": 9
           },
           "datasource": {
-            "type": "jaeger",
-            "uid": "jaeger"
+            "type": "tempo",
+            "uid": "tempo"
           },
           "targets": [
             {
               "refId": "A",
               "datasource": {
-                "type": "jaeger",
-                "uid": "jaeger"
+                "type": "tempo",
+                "uid": "tempo"
               },
-              "queryType": "search",
-              "service": "console",
-              "limit": 20
+              "queryType": "traceqlSearch",
+              "query": "{ resource.service.name = \"console\" }",
+              "limit": 20,
+              "filters": [
+                {
+                  "id": "svc",
+                  "tag": "service.name",
+                  "operator": "=",
+                  "scope": "resource",
+                  "value": [
+                    "console"
+                  ],
+                  "valueType": "string"
+                }
+              ]
             }
-          ],
-          "fieldConfig": {
-            "defaults": {},
-            "overrides": [
-              {
-                "matcher": {
-                  "id": "byName",
-                  "options": "traceID"
-                },
-                "properties": [
-                  {
-                    "id": "links",
-                    "value": [
-                      {
-                        "title": "Jaeger'da aç",
-                        "url": "http://127.0.0.1:16686/trace/${__value.raw}",
-                        "targetBlank": true
-                      }
-                    ]
-                  }
-                ]
-              }
-            ]
-          }
+          ]
         },
         {
           "id": 2,
@@ -194,44 +274,33 @@ data:
             "h": 9
           },
           "datasource": {
-            "type": "jaeger",
-            "uid": "jaeger"
+            "type": "tempo",
+            "uid": "tempo"
           },
           "targets": [
             {
               "refId": "A",
               "datasource": {
-                "type": "jaeger",
-                "uid": "jaeger"
+                "type": "tempo",
+                "uid": "tempo"
               },
-              "queryType": "search",
-              "service": "gw-web",
-              "limit": 20
+              "queryType": "traceqlSearch",
+              "query": "{ resource.service.name = \"gw-web\" }",
+              "limit": 20,
+              "filters": [
+                {
+                  "id": "svc",
+                  "tag": "service.name",
+                  "operator": "=",
+                  "scope": "resource",
+                  "value": [
+                    "gw-web"
+                  ],
+                  "valueType": "string"
+                }
+              ]
             }
-          ],
-          "fieldConfig": {
-            "defaults": {},
-            "overrides": [
-              {
-                "matcher": {
-                  "id": "byName",
-                  "options": "traceID"
-                },
-                "properties": [
-                  {
-                    "id": "links",
-                    "value": [
-                      {
-                        "title": "Jaeger'da aç",
-                        "url": "http://127.0.0.1:16686/trace/${__value.raw}",
-                        "targetBlank": true
-                      }
-                    ]
-                  }
-                ]
-              }
-            ]
-          }
+          ]
         },
         {
           "id": 3,
@@ -244,44 +313,33 @@ data:
             "h": 9
           },
           "datasource": {
-            "type": "jaeger",
-            "uid": "jaeger"
+            "type": "tempo",
+            "uid": "tempo"
           },
           "targets": [
             {
               "refId": "A",
               "datasource": {
-                "type": "jaeger",
-                "uid": "jaeger"
+                "type": "tempo",
+                "uid": "tempo"
               },
-              "queryType": "search",
-              "service": "ext-authz",
-              "limit": 20
+              "queryType": "traceqlSearch",
+              "query": "{ resource.service.name = \"ext-authz\" }",
+              "limit": 20,
+              "filters": [
+                {
+                  "id": "svc",
+                  "tag": "service.name",
+                  "operator": "=",
+                  "scope": "resource",
+                  "value": [
+                    "ext-authz"
+                  ],
+                  "valueType": "string"
+                }
+              ]
             }
-          ],
-          "fieldConfig": {
-            "defaults": {},
-            "overrides": [
-              {
-                "matcher": {
-                  "id": "byName",
-                  "options": "traceID"
-                },
-                "properties": [
-                  {
-                    "id": "links",
-                    "value": [
-                      {
-                        "title": "Jaeger'da aç",
-                        "url": "http://127.0.0.1:16686/trace/${__value.raw}",
-                        "targetBlank": true
-                      }
-                    ]
-                  }
-                ]
-              }
-            ]
-          }
+          ]
         },
         {
           "id": 4,
@@ -294,44 +352,33 @@ data:
             "h": 9
           },
           "datasource": {
-            "type": "jaeger",
-            "uid": "jaeger"
+            "type": "tempo",
+            "uid": "tempo"
           },
           "targets": [
             {
               "refId": "A",
               "datasource": {
-                "type": "jaeger",
-                "uid": "jaeger"
+                "type": "tempo",
+                "uid": "tempo"
               },
-              "queryType": "search",
-              "service": "bff",
-              "limit": 20
+              "queryType": "traceqlSearch",
+              "query": "{ resource.service.name = \"bff\" }",
+              "limit": 20,
+              "filters": [
+                {
+                  "id": "svc",
+                  "tag": "service.name",
+                  "operator": "=",
+                  "scope": "resource",
+                  "value": [
+                    "bff"
+                  ],
+                  "valueType": "string"
+                }
+              ]
             }
-          ],
-          "fieldConfig": {
-            "defaults": {},
-            "overrides": [
-              {
-                "matcher": {
-                  "id": "byName",
-                  "options": "traceID"
-                },
-                "properties": [
-                  {
-                    "id": "links",
-                    "value": [
-                      {
-                        "title": "Jaeger'da aç",
-                        "url": "http://127.0.0.1:16686/trace/${__value.raw}",
-                        "targetBlank": true
-                      }
-                    ]
-                  }
-                ]
-              }
-            ]
-          }
+          ]
         },
         {
           "id": 5,
@@ -344,44 +391,33 @@ data:
             "h": 9
           },
           "datasource": {
-            "type": "jaeger",
-            "uid": "jaeger"
+            "type": "tempo",
+            "uid": "tempo"
           },
           "targets": [
             {
               "refId": "A",
               "datasource": {
-                "type": "jaeger",
-                "uid": "jaeger"
+                "type": "tempo",
+                "uid": "tempo"
               },
-              "queryType": "search",
-              "service": "core",
-              "limit": 20
+              "queryType": "traceqlSearch",
+              "query": "{ resource.service.name = \"core\" }",
+              "limit": 20,
+              "filters": [
+                {
+                  "id": "svc",
+                  "tag": "service.name",
+                  "operator": "=",
+                  "scope": "resource",
+                  "value": [
+                    "core"
+                  ],
+                  "valueType": "string"
+                }
+              ]
             }
-          ],
-          "fieldConfig": {
-            "defaults": {},
-            "overrides": [
-              {
-                "matcher": {
-                  "id": "byName",
-                  "options": "traceID"
-                },
-                "properties": [
-                  {
-                    "id": "links",
-                    "value": [
-                      {
-                        "title": "Jaeger'da aç",
-                        "url": "http://127.0.0.1:16686/trace/${__value.raw}",
-                        "targetBlank": true
-                      }
-                    ]
-                  }
-                ]
-              }
-            ]
-          }
+          ]
         },
         {
           "id": 6,
@@ -394,44 +430,33 @@ data:
             "h": 9
           },
           "datasource": {
-            "type": "jaeger",
-            "uid": "jaeger"
+            "type": "tempo",
+            "uid": "tempo"
           },
           "targets": [
             {
               "refId": "A",
               "datasource": {
-                "type": "jaeger",
-                "uid": "jaeger"
+                "type": "tempo",
+                "uid": "tempo"
               },
-              "queryType": "search",
-              "service": "keycloak",
-              "limit": 20
+              "queryType": "traceqlSearch",
+              "query": "{ resource.service.name = \"keycloak\" }",
+              "limit": 20,
+              "filters": [
+                {
+                  "id": "svc",
+                  "tag": "service.name",
+                  "operator": "=",
+                  "scope": "resource",
+                  "value": [
+                    "keycloak"
+                  ],
+                  "valueType": "string"
+                }
+              ]
             }
-          ],
-          "fieldConfig": {
-            "defaults": {},
-            "overrides": [
-              {
-                "matcher": {
-                  "id": "byName",
-                  "options": "traceID"
-                },
-                "properties": [
-                  {
-                    "id": "links",
-                    "value": [
-                      {
-                        "title": "Jaeger'da aç",
-                        "url": "http://127.0.0.1:16686/trace/${__value.raw}",
-                        "targetBlank": true
-                      }
-                    ]
-                  }
-                ]
-              }
-            ]
-          }
+          ]
         },
         {
           "id": 200,
@@ -457,45 +482,43 @@ data:
             "h": 9
           },
           "datasource": {
-            "type": "jaeger",
-            "uid": "jaeger"
+            "type": "tempo",
+            "uid": "tempo"
           },
           "targets": [
             {
               "refId": "A",
               "datasource": {
-                "type": "jaeger",
-                "uid": "jaeger"
+                "type": "tempo",
+                "uid": "tempo"
               },
-              "queryType": "search",
-              "service": "ext-authz",
-              "tags": "decision=deny:403",
-              "limit": 20
-            }
-          ],
-          "fieldConfig": {
-            "defaults": {},
-            "overrides": [
-              {
-                "matcher": {
-                  "id": "byName",
-                  "options": "traceID"
+              "queryType": "traceqlSearch",
+              "query": "{ resource.service.name = \"ext-authz\" && span.decision = \"deny:403\" }",
+              "limit": 20,
+              "filters": [
+                {
+                  "id": "svc",
+                  "tag": "service.name",
+                  "operator": "=",
+                  "scope": "resource",
+                  "value": [
+                    "ext-authz"
+                  ],
+                  "valueType": "string"
                 },
-                "properties": [
-                  {
-                    "id": "links",
-                    "value": [
-                      {
-                        "title": "Jaeger'da aç",
-                        "url": "http://127.0.0.1:16686/trace/${__value.raw}",
-                        "targetBlank": true
-                      }
-                    ]
-                  }
-                ]
-              }
-            ]
-          }
+                {
+                  "id": "tag1",
+                  "tag": "decision",
+                  "operator": "=",
+                  "scope": "span",
+                  "value": [
+                    "deny:403"
+                  ],
+                  "valueType": "string"
+                }
+              ]
+            }
+          ]
         },
         {
           "id": 8,
@@ -508,45 +531,43 @@ data:
             "h": 9
           },
           "datasource": {
-            "type": "jaeger",
-            "uid": "jaeger"
+            "type": "tempo",
+            "uid": "tempo"
           },
           "targets": [
             {
               "refId": "A",
               "datasource": {
-                "type": "jaeger",
-                "uid": "jaeger"
+                "type": "tempo",
+                "uid": "tempo"
               },
-              "queryType": "search",
-              "service": "bff",
-              "tags": "http.status_code=500",
-              "limit": 20
-            }
-          ],
-          "fieldConfig": {
-            "defaults": {},
-            "overrides": [
-              {
-                "matcher": {
-                  "id": "byName",
-                  "options": "traceID"
+              "queryType": "traceqlSearch",
+              "query": "{ resource.service.name = \"bff\" && span.http.status_code = \"500\" }",
+              "limit": 20,
+              "filters": [
+                {
+                  "id": "svc",
+                  "tag": "service.name",
+                  "operator": "=",
+                  "scope": "resource",
+                  "value": [
+                    "bff"
+                  ],
+                  "valueType": "string"
                 },
-                "properties": [
-                  {
-                    "id": "links",
-                    "value": [
-                      {
-                        "title": "Jaeger'da aç",
-                        "url": "http://127.0.0.1:16686/trace/${__value.raw}",
-                        "targetBlank": true
-                      }
-                    ]
-                  }
-                ]
-              }
-            ]
-          }
+                {
+                  "id": "tag1",
+                  "tag": "http.status_code",
+                  "operator": "=",
+                  "scope": "span",
+                  "value": [
+                    "500"
+                  ],
+                  "valueType": "string"
+                }
+              ]
+            }
+          ]
         },
         {
           "id": 9,
@@ -559,45 +580,43 @@ data:
             "h": 9
           },
           "datasource": {
-            "type": "jaeger",
-            "uid": "jaeger"
+            "type": "tempo",
+            "uid": "tempo"
           },
           "targets": [
             {
               "refId": "A",
               "datasource": {
-                "type": "jaeger",
-                "uid": "jaeger"
+                "type": "tempo",
+                "uid": "tempo"
               },
-              "queryType": "search",
-              "service": "core",
-              "tags": "http.status_code=422",
-              "limit": 20
-            }
-          ],
-          "fieldConfig": {
-            "defaults": {},
-            "overrides": [
-              {
-                "matcher": {
-                  "id": "byName",
-                  "options": "traceID"
+              "queryType": "traceqlSearch",
+              "query": "{ resource.service.name = \"core\" && span.http.status_code = \"422\" }",
+              "limit": 20,
+              "filters": [
+                {
+                  "id": "svc",
+                  "tag": "service.name",
+                  "operator": "=",
+                  "scope": "resource",
+                  "value": [
+                    "core"
+                  ],
+                  "valueType": "string"
                 },
-                "properties": [
-                  {
-                    "id": "links",
-                    "value": [
-                      {
-                        "title": "Jaeger'da aç",
-                        "url": "http://127.0.0.1:16686/trace/${__value.raw}",
-                        "targetBlank": true
-                      }
-                    ]
-                  }
-                ]
-              }
-            ]
-          }
+                {
+                  "id": "tag1",
+                  "tag": "http.status_code",
+                  "operator": "=",
+                  "scope": "span",
+                  "value": [
+                    "422"
+                  ],
+                  "valueType": "string"
+                }
+              ]
+            }
+          ]
         },
         {
           "id": 300,
@@ -623,43 +642,20 @@ data:
             "h": 12
           },
           "datasource": {
-            "type": "jaeger",
-            "uid": "jaeger"
+            "type": "tempo",
+            "uid": "tempo"
           },
           "targets": [
             {
               "refId": "A",
               "datasource": {
-                "type": "jaeger",
-                "uid": "jaeger"
+                "type": "tempo",
+                "uid": "tempo"
               },
-              "queryType": "traceID",
+              "queryType": "traceql",
               "query": "$traceId"
             }
-          ],
-          "fieldConfig": {
-            "defaults": {},
-            "overrides": [
-              {
-                "matcher": {
-                  "id": "byName",
-                  "options": "traceID"
-                },
-                "properties": [
-                  {
-                    "id": "links",
-                    "value": [
-                      {
-                        "title": "Jaeger'da aç",
-                        "url": "http://127.0.0.1:16686/trace/${__value.raw}",
-                        "targetBlank": true
-                      }
-                    ]
-                  }
-                ]
-              }
-            ]
-          }
+          ]
         },
         {
           "id": 400,
@@ -747,13 +743,6 @@ data:
         }
       ],
       "links": [
-        {
-          "title": "Jaeger (izler)",
-          "type": "link",
-          "url": "http://127.0.0.1:16686",
-          "targetBlank": true,
-          "icon": "external link"
-        },
         {
           "title": "Organizer",
           "type": "link",

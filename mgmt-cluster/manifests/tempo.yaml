@@ -1,0 +1,126 @@
+# Grafana Tempo (mgmt cluster, ns observability): trace depolama ve sorgu. Jaeger'ın yerini alır.
+# OTLP alımı Jaeger ile aynı NodePort'larda: HTTP 30318 (/v1/traces), gRPC 30317. Böylece istemci tarafında
+# (servisler, ext-authz, gateway'ler, Keycloak) yapılandırma değişmez.
+# Sorgu: Grafana Tempo veri kaynağı (TraceQL), HTTP 3200.
+# Depolama: local disk (emptyDir, lab). Prod: object storage (S3/MinIO), retention ve replikasyon.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tempo-config
+  namespace: observability
+data:
+  tempo.yaml: |
+    server:
+      http_listen_port: 3200
+    distributor:
+      receivers:
+        otlp:
+          protocols:
+            http:
+              endpoint: 0.0.0.0:4318
+            grpc:
+              endpoint: 0.0.0.0:4317
+    ingester:
+      max_block_duration: 5m
+    compactor:
+      compaction:
+        block_retention: 48h
+    storage:
+      trace:
+        backend: local
+        wal:
+          path: /var/tempo/wal
+        local:
+          path: /var/tempo/blocks
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tempo
+  namespace: observability
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: tempo }
+  template:
+    metadata:
+      labels: { app: tempo }
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: tempo
+          image: grafana/tempo:2.6.1
+          imagePullPolicy: IfNotPresent
+          args:
+            - -config.file=/etc/tempo/tempo.yaml
+          ports:
+            - name: http
+              containerPort: 3200
+            - name: otlp-http
+              containerPort: 4318
+            - name: otlp-grpc
+              containerPort: 4317
+          volumeMounts:
+            - name: config
+              mountPath: /etc/tempo
+              readOnly: true
+            - name: data
+              mountPath: /var/tempo
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 10001
+            capabilities: { drop: ["ALL"] }
+      volumes:
+        - name: config
+          configMap:
+            name: tempo-config
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tempo
+  namespace: observability
+spec:
+  selector: { app: tempo }
+  ports:
+    - name: http
+      port: 3200
+      targetPort: 3200
+    - name: otlp-http
+      port: 4318
+      targetPort: 4318
+    - name: otlp-grpc
+      port: 4317
+      targetPort: 4317
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tempo-otlp-http-nodeport
+  namespace: observability
+spec:
+  type: NodePort
+  selector: { app: tempo }
+  ports:
+    - name: otlp-http
+      port: 4318
+      targetPort: 4318
+      nodePort: 30318
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tempo-otlp-grpc-nodeport
+  namespace: observability
+spec:
+  type: NodePort
+  selector: { app: tempo }
+  ports:
+    - name: otlp-grpc
+      port: 4317
+      targetPort: 4317
+      nodePort: 30317

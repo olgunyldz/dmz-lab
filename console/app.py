@@ -38,7 +38,14 @@ os.environ.setdefault("OTLP_ENDPOINT", "http://127.0.0.1:14318")
 os.environ.setdefault("SERVICE_NAME", "console")
 sys.path.insert(0, str(ROOT / "shared"))
 import tracing  # noqa: E402  (shared/tracing.py)
-JAEGER_UI = "http://127.0.0.1:16686"
+GRAFANA = "http://127.0.0.1:3000"
+
+
+def trace_link(trace_id):
+    """Tempo izini Grafana Explore'da açan bağlantı (Tempo veri kaynağı uid: tempo)."""
+    left = {"datasource": "tempo", "queries": [{"refId": "A", "datasource": {"type": "tempo", "uid": "tempo"},
+            "queryType": "traceql", "query": trace_id}], "range": {"from": "now-6h", "to": "now"}}
+    return f"{GRAFANA}/explore?orgId=1&left={urllib.parse.quote(json.dumps(left))}"
 HERE = Path(__file__).resolve().parent
 CERTS = ROOT / "edge" / "certs"
 EDGE = ("127.0.0.1", 8443)
@@ -334,7 +341,7 @@ def do_call(sess, ch, method, path, auth, dpop, cert, token_from=None, body=None
     finally:
         root.end(http_status=st)
     return {"status": st, "body": resp_body[:600], "trace_id": root.trace_id,
-            "trace_url": f"{JAEGER_UI}/trace/{root.trace_id}"}
+            "trace_url": trace_link(root.trace_id)}
 
 
 def state_of(sess):
@@ -423,7 +430,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
 def start_observability_forwards():
     """Jaeger OTLP (14318), Jaeger UI (16686) ve Grafana (3000) için port-forward; kapanışta sonlandırılır."""
     procs = []
-    for svc, local, remote in (("jaeger", 14318, 4318), ("jaeger", 16686, 16686), ("grafana", 3000, 3000)):
+    for svc, local, remote in (("tempo", 14318, 4318), ("grafana", 3000, 3000)):
         p = subprocess.Popen(["kubectl", "--context", "kind-mgmt", "-n", "observability", "port-forward",
                               f"svc/{svc}", f"{local}:{remote}"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         atexit.register(p.terminate)
