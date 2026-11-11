@@ -8,6 +8,8 @@ K="kubectl --context kind-internal"
 for ns in app-bff app-core; do
     $K create namespace "$ns" --dry-run=client -o yaml | $K apply -f - >/dev/null
     $K -n "$ns" create configmap svc-code --from-file=svc.py="$ROOT/services/svc.py" \
+        --from-file=tracing.py="$ROOT/../shared/tracing.py" \
+        --from-file=metrics.py="$ROOT/../shared/metrics.py" \
         --dry-run=client -o yaml | $K apply -f -
 done
 

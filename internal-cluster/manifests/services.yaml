@@ -25,6 +25,8 @@ spec:
               value: "1"
             - name: SERVICE_NAME
               value: bff
+            - name: OTLP_ENDPOINT
+              value: http://172.18.0.12:30318
             - name: CORE_URL
               value: http://core.app-core.svc.cluster.local
             - name: ALLOWED_CHANNELS
@@ -90,6 +92,8 @@ spec:
               value: "1"
             - name: SERVICE_NAME
               value: core
+            - name: OTLP_ENDPOINT
+              value: http://172.18.0.12:30318
             - name: ALLOWED_CHANNELS
               value: partner
             - name: EXPECTED_ISSUER

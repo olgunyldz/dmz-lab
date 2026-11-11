@@ -1,0 +1,860 @@
+# Grafana (mgmt cluster, ns observability). Veri kaynakları: Prometheus (metrikler) ve Jaeger (izler).
+# Veri kaynakları ve dashboard provizyonla yüklenir; admin parolası secret'tan gelir (scripts/install-grafana: repoda yok).
+# Depolama: emptyDir (lab; dashboard ConfigMap'ten yeniden yüklenir). Prod: kalıcı volume, SSO/OIDC ile giriş.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-datasources
+  namespace: observability
+data:
+  datasources.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        uid: prometheus
+        type: prometheus
+        access: proxy
+        url: http://prometheus.observability.svc.cluster.local:9090
+        isDefault: true
+      - name: Jaeger
+        uid: jaeger
+        type: jaeger
+        access: proxy
+        url: http://jaeger.observability.svc.cluster.local:16686
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-provider
+  namespace: observability
+data:
+  provider.yaml: |
+    apiVersion: 1
+    providers:
+      - name: lab
+        folder: DMZ Lab
+        type: file
+        disableDeletion: true
+        options:
+          path: /var/lib/grafana/dashboards
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboards
+  namespace: observability
+data:
+  lab-overview.json: |
+    {
+      "uid": "dmz-lab-overview",
+      "title": "DMZ Lab – Genel Bakış",
+      "tags": ["dmz-lab"],
+      "timezone": "browser",
+      "schemaVersion": 39,
+      "version": 1,
+      "refresh": "30s",
+      "time": {"from": "now-1h", "to": "now"},
+      "panels": [
+        {
+          "id": 1, "type": "timeseries", "title": "İstek hızı (servis bazlı, req/s)",
+          "gridPos": {"x": 0, "y": 0, "w": 12, "h": 8},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [{"refId": "A", "expr": "sum by (service, status) (rate(svc_requests_total[5m]))", "legendFormat": "{{service}} {{status}}"}]
+        },
+        {
+          "id": 2, "type": "timeseries", "title": "p95 gecikme (servis bazlı, s)",
+          "gridPos": {"x": 12, "y": 0, "w": 12, "h": 8},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [{"refId": "A", "expr": "histogram_quantile(0.95, sum by (le, service) (rate(svc_request_duration_seconds_bucket[5m])))", "legendFormat": "{{service}}"}]
+        },
+        {
+          "id": 3, "type": "timeseries", "title": "Yetkilendirme kararları (kanal, allow/deny)",
+          "gridPos": {"x": 0, "y": 8, "w": 12, "h": 8},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [{"refId": "A", "expr": "sum by (channel, decision) (rate(authz_decisions_total[5m]))", "legendFormat": "{{channel}} {{decision}}"}]
+        },
+        {
+          "id": 4, "type": "timeseries", "title": "Transfer sonuçları (kanal, sonuç)",
+          "gridPos": {"x": 12, "y": 8, "w": 12, "h": 8},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [{"refId": "A", "expr": "sum by (channel, result) (rate(core_transfers_total[5m]))", "legendFormat": "{{channel}} {{result}}"}]
+        },
+        {
+          "id": 5, "type": "table", "title": "Son izler (console)",
+          "gridPos": {"x": 0, "y": 16, "w": 24, "h": 10},
+          "datasource": {"type": "jaeger", "uid": "jaeger"},
+          "targets": [{"refId": "A", "datasource": {"type": "jaeger", "uid": "jaeger"}, "queryType": "search", "service": "console", "limit": 20}]
+        }
+      ]
+    }
+  lab-tracing.json: |
+    {
+      "uid": "dmz-lab-tracing",
+      "title": "DMZ Lab – Dağıtık İzleme",
+      "tags": [
+        "dmz-lab",
+        "tracing"
+      ],
+      "timezone": "browser",
+      "schemaVersion": 39,
+      "version": 1,
+      "refresh": "30s",
+      "time": {
+        "from": "now-1h",
+        "to": "now"
+      },
+      "templating": {
+        "list": [
+          {
+            "name": "traceId",
+            "label": "İz kimliği",
+            "type": "textbox",
+            "query": "",
+            "current": {
+              "text": "",
+              "value": ""
+            },
+            "hide": 0
+          }
+        ]
+      },
+      "panels": [
+        {
+          "id": 100,
+          "type": "row",
+          "title": "Servis bazlı son izler (Jaeger)",
+          "collapsed": false,
+          "gridPos": {
+            "x": 0,
+            "y": 0,
+            "w": 24,
+            "h": 1
+          },
+          "panels": []
+        },
+        {
+          "id": 1,
+          "type": "table",
+          "title": "console (başlangıç noktası)",
+          "gridPos": {
+            "x": 0,
+            "y": 1,
+            "w": 8,
+            "h": 9
+          },
+          "datasource": {
+            "type": "jaeger",
+            "uid": "jaeger"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "jaeger",
+                "uid": "jaeger"
+              },
+              "queryType": "search",
+              "service": "console",
+              "limit": 20
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {},
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "traceID"
+                },
+                "properties": [
+                  {
+                    "id": "links",
+                    "value": [
+                      {
+                        "title": "Jaeger'da aç",
+                        "url": "http://127.0.0.1:16686/trace/${__value.raw}",
+                        "targetBlank": true
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "id": 2,
+          "type": "table",
+          "title": "gw-web (Envoy)",
+          "gridPos": {
+            "x": 8,
+            "y": 1,
+            "w": 8,
+            "h": 9
+          },
+          "datasource": {
+            "type": "jaeger",
+            "uid": "jaeger"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "jaeger",
+                "uid": "jaeger"
+              },
+              "queryType": "search",
+              "service": "gw-web",
+              "limit": 20
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {},
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "traceID"
+                },
+                "properties": [
+                  {
+                    "id": "links",
+                    "value": [
+                      {
+                        "title": "Jaeger'da aç",
+                        "url": "http://127.0.0.1:16686/trace/${__value.raw}",
+                        "targetBlank": true
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "id": 3,
+          "type": "table",
+          "title": "ext-authz (karar ve exchange)",
+          "gridPos": {
+            "x": 16,
+            "y": 1,
+            "w": 8,
+            "h": 9
+          },
+          "datasource": {
+            "type": "jaeger",
+            "uid": "jaeger"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "jaeger",
+                "uid": "jaeger"
+              },
+              "queryType": "search",
+              "service": "ext-authz",
+              "limit": 20
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {},
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "traceID"
+                },
+                "properties": [
+                  {
+                    "id": "links",
+                    "value": [
+                      {
+                        "title": "Jaeger'da aç",
+                        "url": "http://127.0.0.1:16686/trace/${__value.raw}",
+                        "targetBlank": true
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "id": 4,
+          "type": "table",
+          "title": "bff",
+          "gridPos": {
+            "x": 0,
+            "y": 10,
+            "w": 8,
+            "h": 9
+          },
+          "datasource": {
+            "type": "jaeger",
+            "uid": "jaeger"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "jaeger",
+                "uid": "jaeger"
+              },
+              "queryType": "search",
+              "service": "bff",
+              "limit": 20
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {},
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "traceID"
+                },
+                "properties": [
+                  {
+                    "id": "links",
+                    "value": [
+                      {
+                        "title": "Jaeger'da aç",
+                        "url": "http://127.0.0.1:16686/trace/${__value.raw}",
+                        "targetBlank": true
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "id": 5,
+          "type": "table",
+          "title": "core",
+          "gridPos": {
+            "x": 8,
+            "y": 10,
+            "w": 8,
+            "h": 9
+          },
+          "datasource": {
+            "type": "jaeger",
+            "uid": "jaeger"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "jaeger",
+                "uid": "jaeger"
+              },
+              "queryType": "search",
+              "service": "core",
+              "limit": 20
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {},
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "traceID"
+                },
+                "properties": [
+                  {
+                    "id": "links",
+                    "value": [
+                      {
+                        "title": "Jaeger'da aç",
+                        "url": "http://127.0.0.1:16686/trace/${__value.raw}",
+                        "targetBlank": true
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "id": 6,
+          "type": "table",
+          "title": "keycloak (token exchange)",
+          "gridPos": {
+            "x": 16,
+            "y": 10,
+            "w": 8,
+            "h": 9
+          },
+          "datasource": {
+            "type": "jaeger",
+            "uid": "jaeger"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "jaeger",
+                "uid": "jaeger"
+              },
+              "queryType": "search",
+              "service": "keycloak",
+              "limit": 20
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {},
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "traceID"
+                },
+                "properties": [
+                  {
+                    "id": "links",
+                    "value": [
+                      {
+                        "title": "Jaeger'da aç",
+                        "url": "http://127.0.0.1:16686/trace/${__value.raw}",
+                        "targetBlank": true
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "id": 200,
+          "type": "row",
+          "title": "Hata ve reddetme izleri",
+          "collapsed": false,
+          "gridPos": {
+            "x": 0,
+            "y": 19,
+            "w": 24,
+            "h": 1
+          },
+          "panels": []
+        },
+        {
+          "id": 7,
+          "type": "table",
+          "title": "ext-authz: reddedilen istekler (403)",
+          "gridPos": {
+            "x": 0,
+            "y": 20,
+            "w": 8,
+            "h": 9
+          },
+          "datasource": {
+            "type": "jaeger",
+            "uid": "jaeger"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "jaeger",
+                "uid": "jaeger"
+              },
+              "queryType": "search",
+              "service": "ext-authz",
+              "tags": "decision=deny:403",
+              "limit": 20
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {},
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "traceID"
+                },
+                "properties": [
+                  {
+                    "id": "links",
+                    "value": [
+                      {
+                        "title": "Jaeger'da aç",
+                        "url": "http://127.0.0.1:16686/trace/${__value.raw}",
+                        "targetBlank": true
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "id": 8,
+          "type": "table",
+          "title": "bff: sunucu hataları (5xx)",
+          "gridPos": {
+            "x": 8,
+            "y": 20,
+            "w": 8,
+            "h": 9
+          },
+          "datasource": {
+            "type": "jaeger",
+            "uid": "jaeger"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "jaeger",
+                "uid": "jaeger"
+              },
+              "queryType": "search",
+              "service": "bff",
+              "tags": "http.status_code=500",
+              "limit": 20
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {},
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "traceID"
+                },
+                "properties": [
+                  {
+                    "id": "links",
+                    "value": [
+                      {
+                        "title": "Jaeger'da aç",
+                        "url": "http://127.0.0.1:16686/trace/${__value.raw}",
+                        "targetBlank": true
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "id": 9,
+          "type": "table",
+          "title": "core: iş kuralı reddi (422: limit, bakiye)",
+          "gridPos": {
+            "x": 16,
+            "y": 20,
+            "w": 8,
+            "h": 9
+          },
+          "datasource": {
+            "type": "jaeger",
+            "uid": "jaeger"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "jaeger",
+                "uid": "jaeger"
+              },
+              "queryType": "search",
+              "service": "core",
+              "tags": "http.status_code=422",
+              "limit": 20
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {},
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "traceID"
+                },
+                "properties": [
+                  {
+                    "id": "links",
+                    "value": [
+                      {
+                        "title": "Jaeger'da aç",
+                        "url": "http://127.0.0.1:16686/trace/${__value.raw}",
+                        "targetBlank": true
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "id": 300,
+          "type": "row",
+          "title": "İz kimliği ile ara",
+          "collapsed": false,
+          "gridPos": {
+            "x": 0,
+            "y": 29,
+            "w": 24,
+            "h": 1
+          },
+          "panels": []
+        },
+        {
+          "id": 10,
+          "type": "table",
+          "title": "Seçilen iz (üstteki 'İz kimliği' alanına yazın)",
+          "gridPos": {
+            "x": 0,
+            "y": 30,
+            "w": 24,
+            "h": 12
+          },
+          "datasource": {
+            "type": "jaeger",
+            "uid": "jaeger"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "jaeger",
+                "uid": "jaeger"
+              },
+              "queryType": "traceID",
+              "query": "$traceId"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {},
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "traceID"
+                },
+                "properties": [
+                  {
+                    "id": "links",
+                    "value": [
+                      {
+                        "title": "Jaeger'da aç",
+                        "url": "http://127.0.0.1:16686/trace/${__value.raw}",
+                        "targetBlank": true
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "id": 400,
+          "type": "row",
+          "title": "İzlerle ilişkili metrikler (Prometheus)",
+          "collapsed": false,
+          "gridPos": {
+            "x": 0,
+            "y": 42,
+            "w": 24,
+            "h": 1
+          },
+          "panels": []
+        },
+        {
+          "id": 11,
+          "type": "timeseries",
+          "title": "5xx oranı (servis bazlı)",
+          "gridPos": {
+            "x": 0,
+            "y": 43,
+            "w": 8,
+            "h": 8
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (service) (rate(svc_requests_total{status=~\"5..\"}[5m])) / sum by (service) (rate(svc_requests_total[5m])) or vector(0)",
+              "legendFormat": "{{service}}"
+            }
+          ]
+        },
+        {
+          "id": 12,
+          "type": "timeseries",
+          "title": "Gecikme p50 / p99 (servis bazlı, s)",
+          "gridPos": {
+            "x": 8,
+            "y": 43,
+            "w": 8,
+            "h": 8
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "histogram_quantile(0.5, sum by (le, service) (rate(svc_request_duration_seconds_bucket[5m])))",
+              "legendFormat": "p50 {{service}}"
+            },
+            {
+              "refId": "B",
+              "expr": "histogram_quantile(0.99, sum by (le, service) (rate(svc_request_duration_seconds_bucket[5m])))",
+              "legendFormat": "p99 {{service}}"
+            }
+          ]
+        },
+        {
+          "id": 13,
+          "type": "timeseries",
+          "title": "ext-authz karar süresi p95 (kanal bazlı, s)",
+          "gridPos": {
+            "x": 16,
+            "y": 43,
+            "w": 8,
+            "h": 8
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "histogram_quantile(0.95, sum by (le, channel) (rate(authz_decision_duration_seconds_bucket[5m])))",
+              "legendFormat": "{{channel}}"
+            }
+          ]
+        }
+      ],
+      "links": [
+        {
+          "title": "Jaeger (izler)",
+          "type": "link",
+          "url": "http://127.0.0.1:16686",
+          "targetBlank": true,
+          "icon": "external link"
+        },
+        {
+          "title": "Organizer",
+          "type": "link",
+          "url": "http://127.0.0.1:9000",
+          "targetBlank": true,
+          "icon": "external link"
+        },
+        {
+          "title": "Keycloak admin (port-forward 18080 gerekir)",
+          "type": "link",
+          "url": "http://127.0.0.1:18080/admin/",
+          "targetBlank": true,
+          "icon": "external link"
+        }
+      ]
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  namespace: observability
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: grafana }
+  template:
+    metadata:
+      labels: { app: grafana }
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        fsGroup: 472
+      containers:
+        - name: grafana
+          image: grafana/grafana:11.3.0
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: GF_SECURITY_ADMIN_USER
+              value: admin
+            - name: GF_SECURITY_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: grafana-admin, key: password }
+            - name: GF_USERS_ALLOW_SIGN_UP
+              value: "false"
+            - name: GF_AUTH_ANONYMOUS_ENABLED
+              value: "false"
+            - name: GF_ANALYTICS_REPORTING_ENABLED
+              value: "false"
+          ports:
+            - name: http
+              containerPort: 3000
+          volumeMounts:
+            - name: datasources
+              mountPath: /etc/grafana/provisioning/datasources
+              readOnly: true
+            - name: dashboard-provider
+              mountPath: /etc/grafana/provisioning/dashboards
+              readOnly: true
+            - name: dashboards
+              mountPath: /var/lib/grafana/dashboards
+              readOnly: true
+            - name: data
+              mountPath: /var/lib/grafana
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 472
+            capabilities: { drop: ["ALL"] }
+      volumes:
+        - name: datasources
+          configMap: { name: grafana-datasources }
+        - name: dashboard-provider
+          configMap: { name: grafana-dashboard-provider }
+        - name: dashboards
+          configMap: { name: grafana-dashboards }
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+  namespace: observability
+spec:
+  selector: { app: grafana }
+  ports:
+    - name: http
+      port: 3000
+      targetPort: 3000
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana-nodeport
+  namespace: observability
+spec:
+  type: NodePort
+  selector: { app: grafana }
+  ports:
+    - name: http
+      port: 3000
+      targetPort: 3000
+      nodePort: 30300

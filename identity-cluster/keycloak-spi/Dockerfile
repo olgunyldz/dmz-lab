@@ -11,4 +11,5 @@ RUN mvn -q -B package -DskipTests
 FROM quay.io/keycloak/keycloak:26.6
 COPY --from=build /src/target/dmz-dpop-mobile-exchange.jar /opt/keycloak/providers/
 # x509 provider (exchange istemcileri client-x509 ile kimlik doğrular) ve SPI'nin build'e alınması
-RUN /opt/keycloak/bin/kc.sh build --spi-x509cert-lookup--provider=envoy
+# Dağıtık izleme (OpenTelemetry): tracing build zamanında açılır; endpoint ve protokol çalışma zamanında verilir
+RUN /opt/keycloak/bin/kc.sh build --spi-x509cert-lookup--provider=envoy --features=opentelemetry --tracing-enabled=true

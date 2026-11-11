@@ -25,6 +25,8 @@ $K -n auth create secret generic dmz-exchange-client-tls \
     --dry-run=client -o yaml | $K apply -f -
 
 $K -n auth create configmap ext-authz-code --from-file=ext_authz.py="$ROOT/extauth/ext_authz.py" \
+    --from-file=tracing.py="$ROOT/../shared/tracing.py" \
+    --from-file=metrics.py="$ROOT/../shared/metrics.py" \
     --dry-run=client -o yaml | $K apply -f -
 $K -n auth create configmap internal-ca --from-file=internal-ca.crt="$CERTS/internal-ca.crt" \
     --dry-run=client -o yaml | $K apply -f -

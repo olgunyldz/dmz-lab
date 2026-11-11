@@ -1,0 +1,16 @@
+# DMZ metrikleri: ext-authz uygulama metrikleri (karar, exchange, süre). Yalnız metrik portu (9100) NodePort'a açılır.
+# Kazıma mgmt cluster'daki Prometheus'tan dmz node IP'si üzerinden yapılır (lab kısayolu).
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ext-authz-metrics
+  namespace: auth
+spec:
+  type: NodePort
+  selector: { app: ext-authz }
+  ports:
+    - name: metrics
+      port: 9100
+      targetPort: 9100
+      nodePort: 30903

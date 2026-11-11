@@ -58,6 +58,11 @@ spec:
               value: /exch/branch.crt
             - name: EXCHANGE_KEY_BRANCH
               value: /exch/branch.key
+            # İzleme: span'ler mgmt cluster'daki Jaeger OTLP girişine gider (NodePort 30318)
+            - name: SERVICE_NAME
+              value: ext-authz
+            - name: OTLP_ENDPOINT
+              value: http://172.18.0.12:30318
           ports:
             - containerPort: 8080
           securityContext:
@@ -185,7 +190,7 @@ metadata:
 spec:
   extAuth:
     failOpen: false
-    headersToForward: ["authorization", "dpop", "host"]
+    headersToForward: ["authorization", "dpop", "host", "traceparent", "x-request-id"]
     httpService:
       backendRef:
         name: ext-authz
@@ -219,7 +224,7 @@ metadata:
 spec:
   extAuth:
     failOpen: false
-    headersToForward: ["authorization", "dpop", "host"]
+    headersToForward: ["authorization", "dpop", "host", "traceparent", "x-request-id"]
     httpService:
       backendRef:
         name: ext-authz
@@ -253,7 +258,7 @@ metadata:
 spec:
   extAuth:
     failOpen: false
-    headersToForward: ["authorization", "dpop", "host"]
+    headersToForward: ["authorization", "dpop", "host", "traceparent", "x-request-id"]
     httpService:
       backendRef:
         name: ext-authz
@@ -303,7 +308,7 @@ metadata:
 spec:
   extAuth:
     failOpen: false
-    headersToForward: ["authorization", "dpop", "host"]
+    headersToForward: ["authorization", "dpop", "host", "traceparent", "x-request-id"]
     httpService:
       backendRef:
         name: ext-authz

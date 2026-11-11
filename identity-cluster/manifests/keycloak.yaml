@@ -81,6 +81,16 @@ spec:
             # DMZ exchange client sertifikaları: iç gateway XFCC ile iletir (SanitizeSet)
             - --spi-x509cert-lookup--provider=envoy
             - --spi-x509cert-lookup--envoy--trust-proxy-verification=true
+            # Admin konsolu yerel port-forward (127.0.0.1:18080) üzerinden açılsın; token issuer'ı (id.bank.lab.local) değişmez
+            - --hostname-admin=http://127.0.0.1:18080
+            # Dağıtık izleme: span'ler mgmt cluster'daki Jaeger OTLP/HTTP girişine (NodePort 30318) gider
+            # Tracing çalışma zamanındaki yeniden derlemede de açık olmalı (aksi halde endpoint seçenekleri devre dışı kalır)
+            - --features=opentelemetry
+            - --tracing-enabled=true
+            - --tracing-endpoint=http://172.18.0.12:30318
+            - --tracing-protocol=http/protobuf
+            - --tracing-sampler-type=parentbased_always_on
+            - --tracing-jdbc-enabled=false
           env:
             - name: KC_HOSTNAME
               value: https://id.bank.lab.local

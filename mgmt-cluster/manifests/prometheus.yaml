@@ -1,0 +1,113 @@
+# Merkezi Prometheus (mgmt cluster, ns observability). Cluster ve namespace bilgisi statik etiketlerle taşınır.
+#   - Uygulama metrikleri: bff, core (internal), ext-authz (dmz) -> namespace etiketi ile ayrılır
+#   - Cluster metrikleri: kube-state-metrics (internal) -> cluster etiketi ile ayrılır
+# Lab kısayolu: kazıma hedefleri bir node IP'si + NodePort. Prod: her cluster'da yerel Prometheus + remote_write.
+# Depolama: emptyDir (lab, yeniden başlatmada veri gider). Prod: kalıcı volume ve retention politikası.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  namespace: observability
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+      evaluation_interval: 15s
+      external_labels:
+        monitor: dmz-lab
+    scrape_configs:
+      - job_name: prometheus
+        static_configs:
+          - targets: ["localhost:9090"]
+            labels: { cluster: mgmt, namespace: observability }
+
+      - job_name: bff
+        static_configs:
+          - targets: ["172.18.0.8:30901"]
+            labels: { cluster: internal, namespace: app-bff }
+
+      - job_name: core
+        static_configs:
+          - targets: ["172.18.0.8:30902"]
+            labels: { cluster: internal, namespace: app-core }
+
+      - job_name: ext-authz
+        static_configs:
+          - targets: ["172.18.0.2:30903"]
+            labels: { cluster: dmz, namespace: auth }
+
+      - job_name: kube-state-metrics
+        static_configs:
+          - targets: ["172.18.0.8:30904"]
+            labels: { cluster: internal, namespace: kube-system }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus
+  namespace: observability
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: prometheus }
+  template:
+    metadata:
+      labels: { app: prometheus }
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: prometheus
+          image: prom/prometheus:v2.55.1
+          imagePullPolicy: IfNotPresent
+          args:
+            - --config.file=/etc/prometheus/prometheus.yml
+            - --storage.tsdb.path=/prometheus
+            - --storage.tsdb.retention.time=2d
+            - --web.enable-lifecycle
+          ports:
+            - name: http
+              containerPort: 9090
+          volumeMounts:
+            - name: config
+              mountPath: /etc/prometheus
+              readOnly: true
+            - name: data
+              mountPath: /prometheus
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 65534
+            capabilities: { drop: ["ALL"] }
+      volumes:
+        - name: config
+          configMap:
+            name: prometheus-config
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus
+  namespace: observability
+spec:
+  selector: { app: prometheus }
+  ports:
+    - name: http
+      port: 9090
+      targetPort: 9090
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus-nodeport
+  namespace: observability
+spec:
+  type: NodePort
+  selector: { app: prometheus }
+  ports:
+    - name: http
+      port: 9090
+      targetPort: 9090
+      nodePort: 30090

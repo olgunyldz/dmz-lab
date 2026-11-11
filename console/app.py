@@ -25,6 +25,7 @@ import secrets
 import socket
 import ssl
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -32,6 +33,12 @@ import urllib.parse
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+# İzleme: span'ler kendi kurulan port-forward üzerinden mgmt cluster'daki Jaeger OTLP girişine gider
+os.environ.setdefault("OTLP_ENDPOINT", "http://127.0.0.1:14318")
+os.environ.setdefault("SERVICE_NAME", "console")
+sys.path.insert(0, str(ROOT / "shared"))
+import tracing  # noqa: E402  (shared/tracing.py)
+JAEGER_UI = "http://127.0.0.1:16686"
 HERE = Path(__file__).resolve().parent
 CERTS = ROOT / "edge" / "certs"
 EDGE = ("127.0.0.1", 8443)
@@ -316,9 +323,18 @@ def do_call(sess, ch, method, path, auth, dpop, cert, token_from=None, body=None
     if dpop and cfg["dpop"] and token and entry.get("key"):
         headers["DPoP"] = dpop_proof(entry["key"], entry["x"], entry["y"], method,
                                      f"https://{cfg['host']}{path}", token)
-    st, _, resp_body = sni_request(cfg["host"], cfg["ca"], method, path, headers=headers,
-                                   body=payload, client_cert=cfg["cert"] if cert else None)
-    return {"status": st, "body": resp_body[:600]}
+    # Her çağrının kök span'i: traceparent ile zincirin tamamına (edge, ext-authz, BFF, core) taşınır
+    root = tracing.start_server_span(f"console {method} {path}", None,
+                                     {"channel": ch, "auth": auth, "http.method": method, "http.target": path})
+    headers["traceparent"] = root.header()
+    st = None
+    try:
+        st, _, resp_body = sni_request(cfg["host"], cfg["ca"], method, path, headers=headers,
+                                       body=payload, client_cert=cfg["cert"] if cert else None)
+    finally:
+        root.end(http_status=st)
+    return {"status": st, "body": resp_body[:600], "trace_id": root.trace_id,
+            "trace_url": f"{JAEGER_UI}/trace/{root.trace_id}"}
 
 
 def state_of(sess):
@@ -404,8 +420,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
         print("console", self.command, self.path, fmt % args, flush=True)
 
 
+def start_observability_forwards():
+    """Jaeger OTLP (14318), Jaeger UI (16686) ve Grafana (3000) için port-forward; kapanışta sonlandırılır."""
+    procs = []
+    for svc, local, remote in (("jaeger", 14318, 4318), ("jaeger", 16686, 16686), ("grafana", 3000, 3000)):
+        p = subprocess.Popen(["kubectl", "--context", "kind-mgmt", "-n", "observability", "port-forward",
+                              f"svc/{svc}", f"{local}:{remote}"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        atexit.register(p.terminate)
+        procs.append(p)
+    time.sleep(3)
+    return procs
+
+
 if __name__ == "__main__":
     load_secrets()
     start_identity_forward()
+    start_observability_forwards()
     print(f"DMZ lab organizer: http://127.0.0.1:{PORT}  (yalniz lab)", flush=True)
     http.server.ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()

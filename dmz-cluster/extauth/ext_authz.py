@@ -25,6 +25,13 @@ import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+import tracing  # ConfigMap ile /app/tracing.py (shared/tracing.py)
+import metrics  # ConfigMap ile /app/metrics.py (shared/metrics.py)
+
+DECISIONS = metrics.Counter("authz_decisions_total", "Yetkilendirme kararları", ["channel", "decision", "status"])
+EXCHANGES = metrics.Counter("authz_exchange_total", "Token exchange sonuçları", ["channel", "status"])
+DECISION_LATENCY = metrics.Histogram("authz_decision_duration_seconds", "Karar süresi", ["channel"])
+
 EXPECTED_ISSUER = os.environ["EXPECTED_ISSUER"]
 JWKS_URL = os.environ["JWKS_URL"]
 STS_URL = os.environ["STS_URL"]
@@ -276,7 +283,7 @@ def verify_dpop(proof, method, htu, access_token, expected_jkt):
         _replay[jti] = iat + DPOP_MAX_AGE + DPOP_MAX_FUTURE
 
 
-def exchange(subject_token, channel):
+def exchange(subject_token, channel, span=None):
     # Kanala özel exchange istemcisi: dmz-exchange-<channel>. Kimlik doğrulama mTLS sertifikası ile.
     form = urllib.parse.urlencode({
         "grant_type": "urn:ietf:params:oauth:grant-type:token-exchange",
@@ -286,22 +293,48 @@ def exchange(subject_token, channel):
         "requested_token_type": "urn:ietf:params:oauth:token-type:access_token",
         "audience": INTERNAL_AUDIENCE,
     }).encode()
-    req = urllib.request.Request(
-        STS_URL, data=form, method="POST",
-        headers={"Content-Type": "application/x-www-form-urlencoded"},
-    )
+    child = tracing.start_client_span("ext-authz -> token exchange", span,
+                                      {"peer.service": "keycloak", "exchange.channel": channel}) if span else None
+    headers = {"Content-Type": "application/x-www-form-urlencoded"}
+    if child:
+        headers["traceparent"] = child.header()
+    req = urllib.request.Request(STS_URL, data=form, method="POST", headers=headers)
+    status = None
     try:
         with urllib.request.urlopen(req, timeout=5, context=EXCHANGE_CTX[channel]) as resp:
+            status = resp.status
             return json.loads(resp.read())["access_token"]
     except urllib.error.HTTPError as e:
+        status = e.code
         raise Denied(403, f"exchange rejected ({e.code})")
     except Exception:
+        status = 503
         raise Denied(503, "exchange unavailable")
+    finally:
+        EXCHANGES.inc(channel=channel if channel in PROFILES else "unknown", status=str(status or "error"))
+        if child:
+            child.end(http_status=status)
 
 
 class Handler(BaseHTTPRequestHandler):
     def _handle(self):
+        path = self.path.split("?", 1)[0]
         channel = self.headers.get("X-Dmz-Channel", "")
+        span = tracing.start_server_span(f"ext-authz {self.command} {path}", self.headers.get("traceparent"),
+                                         {"http.method": self.command, "http.target": path, "channel": channel,
+                                          "x-request-id": self.headers.get("X-Request-ID")})
+        self._status = None
+        started = time.perf_counter()
+        label = channel if channel in PROFILES else "unknown"  # kardinalite sınırı
+        try:
+            self._decide(span, channel)
+        finally:
+            code = self._status or 200
+            span.end(http_status=code)
+            DECISIONS.inc(channel=label, decision="allow" if code == 200 else "deny", status=str(code))
+            DECISION_LATENCY.observe(time.perf_counter() - started, channel=label)
+
+    def _decide(self, span, channel):
         auth = self.headers.get("Authorization", "")
         try:
             if channel not in PROFILES:
@@ -311,6 +344,7 @@ class Handler(BaseHTTPRequestHandler):
             token = auth[len("Bearer "):]
             claims = verify_rs256(token)
             check_claims(claims, channel)
+            span.set("user.hash", tracing.user_hash(claims.get("sub")))
 
             jkt = (claims.get("cnf") or {}).get("jkt")
             if channel == "mobile" and not jkt:
@@ -323,13 +357,16 @@ class Handler(BaseHTTPRequestHandler):
                 htu = f"https://{self.headers.get('Host', '')}{self.path.split('?', 1)[0]}"
                 verify_dpop(proof, self.command, htu, token, jkt)
 
-            internal = exchange(token, channel)
+            internal = exchange(token, channel, span)
         except Denied as d:
+            span.set("decision", f"deny:{d.status}")
             self._send(d.status, d.message, None)
             return
+        span.set("decision", "allow")
         self._send(200, "ok", internal)
 
     def _send(self, status, message, internal):
+        self._status = status
         if status >= 400:
             # Hata gövdesi yapılandırılmış JSON: neden reddedildiği istemciye ve konsola döner.
             # Mesaj metni error_description'da aynen kalır (testler ve loglar için).
@@ -356,4 +393,5 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
+    metrics.start_metrics_server(int(os.environ.get("METRICS_PORT", "9100")))  # metrikler API portundan ayrı
     ThreadingHTTPServer(("0.0.0.0", 8080), Handler).serve_forever()

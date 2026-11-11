@@ -30,6 +30,21 @@ from datetime import date
 from decimal import Decimal, InvalidOperation
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+import tracing  # ConfigMap ile /app/tracing.py (shared/tracing.py)
+import metrics  # ConfigMap ile /app/metrics.py (shared/metrics.py)
+
+REQUESTS = metrics.Counter("svc_requests_total", "Servis istek sayısı", ["service", "route", "status"])
+LATENCY = metrics.Histogram("svc_request_duration_seconds", "Servis istek süresi", ["service", "route"])
+TRANSFERS = metrics.Counter("core_transfers_total", "Transfer sonuçları", ["channel", "result"])
+TRANSFER_CENTS = metrics.Counter("core_transfer_amount_cents_total", "Başarılı transferlerin toplam tutarı (kuruş)",
+                                 ["channel", "currency"])
+KNOWN_ROUTES = ("/bff/", "/api/v1/", "/partner/", "/public/", "/metrics")
+
+
+def metric_route(route):
+    """Etiket kardinalitesini sınırla: bilinmeyen yollar tek etikette toplanır."""
+    return route if route.startswith(KNOWN_ROUTES) else "other"
+
 SERVICE = os.environ["SERVICE_NAME"]
 ALLOWED = set(os.environ["ALLOWED_CHANNELS"].split(","))
 EXPECTED_ISSUER = os.environ["EXPECTED_ISSUER"]
@@ -251,11 +266,26 @@ _seed_counterparties()
 # ---------------------------------------------------------------------------
 # BFF: kanal şekillendirme ve core çağrısı
 # ---------------------------------------------------------------------------
-def call_core(method, path, auth, body=None, idem=None):
+def call_core(method, path, auth, body=None, idem=None, span=None):
+    """BFF -> core çağrısı; istemci span'i ve traceparent ile izlenir."""
+    child = tracing.start_client_span(f"{SERVICE} -> core {method} {path.split('?')[0]}", span,
+                                      {"peer.service": "core"}) if span else None
+    status = None
+    try:
+        status, payload = _call_core(method, path, auth, body, idem, child.header() if child else None)
+        return status, payload
+    finally:
+        if child:
+            child.end(http_status=status)
+
+
+def _call_core(method, path, auth, body=None, idem=None, tp=None):
     if not CORE_URL:
         raise Denied(503, "core adresi tanımlı değil")
     req = urllib.request.Request(CORE_URL + path, data=body, method=method)
     req.add_header("Authorization", auth)  # iç token iletilir (forwardToken); core kendisi de doğrular
+    if tp:
+        req.add_header("traceparent", tp)
     if idem:
         req.add_header("Idempotency-Key", idem)
     if body is not None:
@@ -294,6 +324,7 @@ ROUTE_BFF = re.compile(r"^/bff/(web|mobile|branch)/(accounts(?:/([A-Za-z0-9-]+)/
 
 class Handler(BaseHTTPRequestHandler):
     def _send(self, status, body):
+        self._status = status
         if status >= 400:
             # Hata gövdesi yapılandırılmış JSON: iç servis reddi nedeniyle birlikte döner
             message = body.strip()
@@ -313,6 +344,7 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def _json(self, status, obj):
+        self._status = status
         data = json.dumps(obj, ensure_ascii=False).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -348,9 +380,18 @@ class Handler(BaseHTTPRequestHandler):
     def _route_transfer(self, claims, method, raw_body, body, idem):
         if method != "POST":
             raise Denied(405, "izin verilmeyen yöntem")
-        return 200, core_transfer(claims, body, idem)
+        ch = claims.get("channel", "unknown")
+        try:
+            resp = core_transfer(claims, body, idem)
+        except Denied as d:
+            TRANSFERS.inc(channel=ch, result=f"http_{d.status}")
+            raise
+        TRANSFERS.inc(channel=ch, result="ok")
+        cents = int(Decimal(resp["amount"]) * 100)
+        TRANSFER_CENTS.inc(cents, channel=ch, currency=resp["currency"])
+        return 200, resp
 
-    def _route_bff(self, claims, path, method, auth, body_obj, raw_body, idem):
+    def _route_bff(self, claims, path, method, auth, body_obj, raw_body, idem, span=None):
         m = ROUTE_BFF.match(path)
         if not m:
             raise Denied(404, "bulunamadı")
@@ -361,19 +402,37 @@ class Handler(BaseHTTPRequestHandler):
         if rest == "transfers":
             if method != "POST":
                 raise Denied(405, "izin verilmeyen yöntem")
-            status, payload = call_core("POST", "/api/v1/transfers", auth, raw_body, idem)
+            status, payload = call_core("POST", "/api/v1/transfers", auth, raw_body, idem, span)
             return status, payload
         if method != "GET":
             raise Denied(405, "izin verilmeyen yöntem")
         if m.group(3):
-            status, payload = call_core("GET", f"/api/v1/accounts/{m.group(3)}/transactions", auth)
+            status, payload = call_core("GET", f"/api/v1/accounts/{m.group(3)}/transactions", auth, span=span)
         else:
-            status, payload = call_core("GET", "/api/v1/accounts", auth)
+            status, payload = call_core("GET", "/api/v1/accounts", auth, span=span)
         if status == 200:
             payload = shape_for_channel(ch, payload)
         return status, payload
 
     def _handle(self):
+        path = self.path.split("?", 1)[0]
+        # Span adında kimlikleri maskele (TR..., EXT-...); tam yol http.target'ta kalır
+        route = re.sub(r"/(TR[0-9A-F]{12}|EXT-\d+)(?=/|$)", "/{id}", path)
+        span = tracing.start_server_span(f"{SERVICE} {self.command} {route}", self.headers.get("traceparent"),
+                                         {"http.method": self.command, "http.target": path,
+                                          "x-request-id": self.headers.get("X-Request-ID")})
+        self._status = None
+        started = time.perf_counter()
+        try:
+            self._dispatch(span)
+        finally:
+            code = self._status or 200
+            span.end(http_status=code)
+            labels = {"service": SERVICE, "route": metric_route(route)}
+            REQUESTS.inc(status=str(code), **labels)
+            LATENCY.observe(time.perf_counter() - started, **labels)
+
+    def _dispatch(self, span):
         path = self.path.split("?", 1)[0]
         if PUBLIC_PATHS and self.command == "GET" and path.startswith("/public/"):
             return self._send(200, f"service={SERVICE} public path={self.path}\n")
@@ -385,6 +444,9 @@ class Handler(BaseHTTPRequestHandler):
             is_api = (path.startswith("/api/v1/") and SERVICE == "core") or \
                      (path.startswith("/bff/") and SERVICE == "bff" and ROUTE_BFF.match(path))
             claims = verify(auth[len("Bearer "):], API_CHANNELS if is_api else ALLOWED)
+            span.set("channel", claims.get("channel"))
+            span.set("auth_method", claims.get("auth_method"))
+            span.set("user.hash", tracing.user_hash(claims.get("sub")))
             if path.startswith("/api/v1/") and SERVICE == "core":
                 body_obj, raw = ({}, b"")
                 if self.command == "POST":
@@ -398,7 +460,7 @@ class Handler(BaseHTTPRequestHandler):
                 body_obj, raw = ({}, b"")
                 if self.command == "POST":
                     body_obj, raw = self._body()
-                status, payload = self._route_bff(claims, path, self.command, auth, body_obj, raw, idem)
+                status, payload = self._route_bff(claims, path, self.command, auth, body_obj, raw, idem, span)
                 return self._json(status, payload)
         except Denied as d:
             return self._send(d.status, d.message + "\n")
@@ -412,4 +474,5 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
+    metrics.start_metrics_server(int(os.environ.get("METRICS_PORT", "9100")))  # metrikler API portundan ayrı
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()

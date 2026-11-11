@@ -75,7 +75,7 @@
 
 <div id="log-wrap">
   <table id="log">
-    <thead><tr><th>Zaman</th><th>Kanal</th><th>İstek</th><th>Auth</th><th>Beklenen</th><th>Gerçek</th><th>Sonuç</th><th>Yanıt (kısa)</th></tr></thead>
+    <thead><tr><th>Zaman</th><th>Kanal</th><th>İstek</th><th>Auth</th><th>Beklenen</th><th>Gerçek</th><th>Sonuç</th><th>Yanıt (kısa)</th><th>İz</th></tr></thead>
     <tbody></tbody>
   </table>
 </div>
@@ -119,13 +119,21 @@ const $ = (id) => document.getElementById(id);
 const now = () => new Date().toLocaleTimeString();
 const tbody = document.querySelector('#log tbody');
 
-function addRow(cols) {
+// trace: {url, id} -> son sütunda Jaeger bağlantısı (dağıtık iz)
+function addRow(cols, trace) {
   const tr = document.createElement('tr');
   cols.forEach((c) => {
     const td = document.createElement('td');
     if (c && c.cls) { td.className = c.cls; td.textContent = c.text; } else td.textContent = c == null ? '' : String(c);
     tr.appendChild(td);
   });
+  const last = document.createElement('td');
+  if (trace && trace.url) {
+    const a = document.createElement('a');
+    a.href = trace.url; a.target = '_blank'; a.textContent = 'izi aç (' + String(trace.id || '').slice(0, 8) + ')';
+    last.appendChild(a);
+  }
+  tr.appendChild(last);
   tbody.insertBefore(tr, tbody.firstChild);
 }
 
@@ -165,7 +173,8 @@ function setupPage(channels) {
   renderMenu($('menu'), KEY, (op, cfg, res) => {
     const ok = res.pass === true || String(res.status) === String(cfg.expect || '200');
     addRow([now(), KEY, `menü: ${op.label}`, cfg.auth || '-', cfg.expect || '200', res.status,
-      { cls: ok ? 'pass' : 'fail', text: ok ? 'PASS' : 'FAIL' }, String(res.body || '').replace(/\s+/g, ' ').slice(0, 140)]);
+      { cls: ok ? 'pass' : 'fail', text: ok ? 'PASS' : 'FAIL' }, String(res.body || '').replace(/\s+/g, ' ').slice(0, 140)],
+      { url: res.trace_url, id: res.trace_id });
   });
 
   const box = $('checks');
@@ -188,7 +197,8 @@ async function runCheck(btn, c) {
     const ok = !!d.pass;
     addRow([now(), c.channel, `${c.method} ${c.path}${c.dpop ? ' (DPoP)' : ''}`, c.auth + (c.token_from ? ` (${c.token_from})` : ''),
       c.expect, d.status, { cls: ok ? 'pass' : 'fail', text: ok ? 'PASS' : 'FAIL' },
-      (d.body || d.error || '').replace(/\s+/g, ' ').slice(0, 140)]);
+      (d.body || d.error || '').replace(/\s+/g, ' ').slice(0, 140)],
+      { url: d.trace_url, id: d.trace_id });
   } catch (e) {
     addRow([now(), c.channel, c.label, '-', c.expect, 'hata', { cls: 'fail', text: 'FAIL' }, String(e)]);
   } finally { btn.disabled = false; }
