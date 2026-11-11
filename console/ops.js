@@ -1,3 +1,22 @@
+if (typeof apiFetch === 'undefined') {
+
+// İşlem başına X-Trace-Id: çağıran traceId verirse onu kullanır, vermezse yenisini üretir (mevcut kimliği ezmez).
+function newTraceId(){const a=new Uint8Array(16);crypto.getRandomValues(a);return Array.from(a,b=>b.toString(16).padStart(2,'0')).join('');}
+function apiFetch(url, opts = {}) {
+  const headers = Object.assign({}, opts.headers || {});
+  // Tek trace kimliği: X-Trace-Id (uygulama) > traceparent (W3C) > opts.traceId > yeni. Varsa üzerine yazılmaz.
+  const tp = (headers['traceparent'] || '').split('-');
+  const tid = headers['X-Trace-Id'] || (tp.length === 4 ? tp[1] : '') || opts.traceId || newTraceId();
+  headers['X-Trace-Id'] = tid;
+  if (!headers['traceparent']) {
+    const sp = new Uint8Array(8); crypto.getRandomValues(sp);
+    headers['traceparent'] = '00-' + tid + '-' + Array.from(sp, b => b.toString(16).padStart(2, '0')).join('') + '-01';
+  }
+  const o = Object.assign({ credentials: 'same-origin' }, opts, { headers });
+  delete o.traceId;
+  return fetch(url, o).then((r) => { r.sentTraceId = tid; return r; });
+}
+}
 // Operasyon matrisi: hangi kanal neyi yapabilir, neyi yapamaz ve neden.
 // Tek kaynak: organizer matrisi ve kanal menüsü bu tabloyu kullanır. Kurallar sunucudaki gerçek kontrollerle eşleşir
 // (bkz. internal-cluster/tests/api.sh, dmz-cluster/tests/branch.sh, console/channel.html CHECKS).
@@ -104,7 +123,7 @@ async function firstAccount(channel) {
 }
 
 async function callApi(body) {
-  const r = await fetch('/api/call', { method: 'POST', credentials: 'same-origin',
+  const r = await apiFetch('/api/call', { method: 'POST', credentials: 'same-origin',
     headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   return r.json();
 }

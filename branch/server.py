@@ -48,6 +48,25 @@ SECRETS = {}
 SESSIONS = {}
 LOCK = threading.Lock()
 
+# İstek başına trace kimliği. Konsol/tarayıcı X-Trace-Id gönderirse aynen kullanılır (üzerine yazılmaz).
+_req = threading.local()
+TID_RE = re.compile(r"^[0-9a-f]{32}$")
+
+
+def inbound_trace_id(headers):
+    # Öncelik: X-Trace-Id (tarayıcı), sonra W3C traceparent; ikisi de yoksa yeni üretilir.
+    v = (headers.get("X-Trace-Id") or "").strip().lower()
+    if TID_RE.match(v):
+        return v
+    parts = (headers.get("traceparent") or "").strip().lower().split("-")
+    if len(parts) == 4 and TID_RE.match(parts[1]) and parts[1] != "0" * 32:
+        return parts[1]
+    return secrets.token_hex(16)
+
+
+def child_traceparent(tid):
+    return f"00-{tid}-{secrets.token_hex(8)}-01"
+
 
 def b64u(raw):
     return base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
@@ -94,6 +113,8 @@ def teller_request(method, path, headers=None, body=None, cert=True):
     conn = SNIConnection(EDGE[0], EDGE[1], context=ctx, timeout=20)
     h = {"Host": HOST, "Connection": "close"}
     h.update(headers or {})
+    if getattr(_req, "tid", None) and "traceparent" not in h:
+        h["traceparent"] = child_traceparent(_req.tid)  # gateway, ext-authz, BFF, core aynı izi taşır
     conn.request(method, path, body=body, headers=h)
     resp = conn.getresponse()
     data = resp.read().decode("utf-8", "replace")
@@ -158,6 +179,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
+        self.send_header("X-Trace-Id", getattr(_req, "tid", "") or "")
         if new:
             self.send_header("Set-Cookie", f"branch_sid={sid}; HttpOnly; SameSite=Strict; Path=/")
         self.end_headers()
@@ -168,6 +190,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return SESSIONS.setdefault(sid, {"tok": None, "user": None})
 
     def do_GET(self):
+        _req.tid = inbound_trace_id(self.headers)
         sid, new = self._sid()
         if self.path == "/":
             body = (Path(__file__).parent / "index.html").read_bytes()
@@ -186,6 +209,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self._json(404, {"error": "not found"}, sid, new)
 
     def do_POST(self):
+        _req.tid = inbound_trace_id(self.headers)
         sid, new = self._sid()
         s = self._session(sid)
         n = int(self.headers.get("Content-Length", "0") or 0)

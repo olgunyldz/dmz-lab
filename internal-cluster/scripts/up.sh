@@ -50,10 +50,14 @@ bash "$ROOT/scripts/load-services.sh"
 
 render "$ROOT/manifests/gateway.yaml" | $K apply -f -
 $K apply -f "$ROOT/manifests/listener-client-cert.yaml"
+render "$ROOT/manifests/gateway-tracing.yaml" | $K apply -f -
 $K apply -f "$ROOT/manifests/gw-internal-nodeport.yaml"
 $K apply -f "$ROOT/manifests/internal-authz.yaml"
 $K apply -f "$ROOT/manifests/metrics.yaml"
 
 $K -n gw-internal wait --for=condition=Programmed gateway/gw-internal --timeout=300s
+
+# F8 (identity) iç node IP'lerini ister; identity kurulumu internal'dan önce çalışır, bu yüzden burada yeniden uygulanır
+bash "$ROOT/../identity-cluster/scripts/host-firewall.sh"
 
 echo "Internal cluster hazır. Gateway: gw-internal (NodePort 30444). Testler: bash internal-cluster/tests/api.sh"

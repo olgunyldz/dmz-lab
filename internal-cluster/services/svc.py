@@ -338,6 +338,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(data)))
+        self.send_header("X-Trace-Id", getattr(self, "_trace_id", ""))
         if status == 401:
             self.send_header("WWW-Authenticate", f'Bearer error="invalid_token", error_description="{message}"')
         self.end_headers()
@@ -349,6 +350,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(data)))
+        self.send_header("X-Trace-Id", getattr(self, "_trace_id", ""))
         self.end_headers()
         self.wfile.write(data)
 
@@ -422,6 +424,7 @@ class Handler(BaseHTTPRequestHandler):
                                          {"http.method": self.command, "http.target": path,
                                           "x-request-id": self.headers.get("X-Request-ID")})
         self._status = None
+        self._trace_id = span.trace_id  # yanıtta X-Trace-Id olarak döner
         started = time.perf_counter()
         try:
             self._dispatch(span)

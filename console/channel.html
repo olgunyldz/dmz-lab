@@ -82,6 +82,24 @@
 
 <script src="/ops.js"></script>
 <script>
+
+// İşlem başına X-Trace-Id: çağıran traceId verirse onu kullanır, vermezse yenisini üretir (mevcut kimliği ezmez).
+function newTraceId(){const a=new Uint8Array(16);crypto.getRandomValues(a);return Array.from(a,b=>b.toString(16).padStart(2,'0')).join('');}
+function apiFetch(url, opts = {}) {
+  const headers = Object.assign({}, opts.headers || {});
+  // Tek trace kimliği: X-Trace-Id (uygulama) > traceparent (W3C) > opts.traceId > yeni. Varsa üzerine yazılmaz.
+  const tp = (headers['traceparent'] || '').split('-');
+  const tid = headers['X-Trace-Id'] || (tp.length === 4 ? tp[1] : '') || opts.traceId || newTraceId();
+  headers['X-Trace-Id'] = tid;
+  if (!headers['traceparent']) {
+    const sp = new Uint8Array(8); crypto.getRandomValues(sp);
+    headers['traceparent'] = '00-' + tid + '-' + Array.from(sp, b => b.toString(16).padStart(2, '0')).join('') + '-01';
+  }
+  const o = Object.assign({ credentials: 'same-origin' }, opts, { headers });
+  delete o.traceId;
+  return fetch(url, o).then((r) => { r.sentTraceId = tid; return r; });
+}
+
 // Kanal sayfasının kontrolleri. Yollar iç cluster'daki kanala özel endpoint'lere gider.
 // cert:false -> cihaz/partner sertifikası sunulmaz (beklenen: TLS red). token_from: başka kanalın oturumu.
 const CHECKS = {
@@ -128,6 +146,12 @@ function addRow(cols, trace) {
     tr.appendChild(td);
   });
   const last = document.createElement('td');
+  if (trace && (trace.url || trace.sent)) {
+    const sent = document.createElement('div');
+    sent.className = 'sentid'; sent.textContent = 'gönderilen X-Trace-Id: ' + (trace.sent || trace.id || '');
+    sent.style.cssText = 'font-family:ui-monospace,Consolas,monospace;font-size:11px;color:#64748B;word-break:break-all;';
+    last.appendChild(sent);
+  }
   if (trace && trace.url) {
     const a = document.createElement('a');
     a.href = trace.url; a.target = '_blank'; a.textContent = 'izi aç (' + String(trace.id || '').slice(0, 8) + ')';
@@ -138,13 +162,13 @@ function addRow(cols, trace) {
 }
 
 async function post(url, body) {
-  const r = await fetch(url, { method: 'POST', credentials: 'same-origin',
+  const r = await apiFetch(url, { method: 'POST', credentials: 'same-origin',
     headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
-  return { ok: r.ok, status: r.status, data: await r.json() };
+  return { ok: r.ok, status: r.status, data: await r.json(), traceId: r.sentTraceId };
 }
 
 async function refreshState() {
-  const s = await (await fetch('/api/state', { credentials: 'same-origin' })).json();
+  const s = await (await apiFetch('/api/state', { credentials: 'same-origin' })).json();
   const e = s[KEY];
   if (KEY === 'public') { $('st').textContent = 'public kanal: oturum yok'; return; }
   if (!e) { $('st').textContent = 'durum: oturum kapalı'; return; }
@@ -166,7 +190,7 @@ function setupPage(channels) {
     $('hint').textContent = 'Public kanalda giriş ve çıkış yok (token gerekmez). Çağrılar aşağıda.';
   }
   if (KEY === 'partner') $('hint').textContent = 'Partner girişi client credentials ile (mTLS). Çıkış yerel token siler.';
-  if (KEY === 'branch') $('hint').textContent = 'Şube girişi: şube UI pod'u (branch-cluster, cihaz sertifikası pod'da). Giriş: teller kullanıcısı.';
+  if (KEY === 'branch') $('hint').textContent = 'Şube girişi: şube UI pod’u (branch-cluster, cihaz sertifikası pod’da). Giriş: teller kullanıcısı.';
   if (KEY === 'mobile') $('hint').textContent = 'Mobil girişte DPoP anahtarı üretilir; çıkış refresh token\'ı iptal eder.';
   if (KEY === 'web') $('hint').textContent = 'Web girişi PKCE ile. Çıkış Keycloak oturumunu kapatır.';
 
@@ -198,7 +222,7 @@ async function runCheck(btn, c) {
     addRow([now(), c.channel, `${c.method} ${c.path}${c.dpop ? ' (DPoP)' : ''}`, c.auth + (c.token_from ? ` (${c.token_from})` : ''),
       c.expect, d.status, { cls: ok ? 'pass' : 'fail', text: ok ? 'PASS' : 'FAIL' },
       (d.body || d.error || '').replace(/\s+/g, ' ').slice(0, 140)],
-      { url: d.trace_url, id: d.trace_id });
+      { url: d.trace_url, id: d.trace_id, sent: r.traceId });
   } catch (e) {
     addRow([now(), c.channel, c.label, '-', c.expect, 'hata', { cls: 'fail', text: 'FAIL' }, String(e)]);
   } finally { btn.disabled = false; }
@@ -229,7 +253,7 @@ $('btn-login').addEventListener('click', login);
 $('btn-logout').addEventListener('click', logout);
 
 (async () => {
-  const channels = await (await fetch('/api/channels')).json();
+  const channels = await (await apiFetch('/api/channels')).json();
   setupPage(channels);
   await refreshState();
   if (location.hash === '#logout') $('btn-logout').scrollIntoView();

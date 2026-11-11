@@ -1,0 +1,193 @@
+# Gateway (Envoy) OTLP trace: Tempo gRPC (mgmt NodePort 30317). Yer tutucu __MGMT_NODE_IP__ kurulumda render ile yazılır.
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tempo-otlp
+  namespace: gw-web
+spec:
+  ports:
+    - name: otlp-grpc
+      port: 4317
+      targetPort: 30317
+      appProtocol: kubernetes.io/h2c
+---
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: tempo-otlp
+  namespace: gw-web
+subsets:
+  - addresses:
+      - ip: __MGMT_NODE_IP__
+    ports:
+      - name: otlp-grpc
+        port: 30317
+---
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: ListenerPolicy
+metadata:
+  name: gw-web-tracing
+  namespace: gw-web
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: gw-web
+  default:
+    httpSettings:
+      tracing:
+        provider:
+          openTelemetry:
+            grpcService:
+              backendRef:
+                name: tempo-otlp
+                port: 4317
+              timeout: 10s
+            serviceName: gw-web
+            sampler:
+              alwaysOnConfig: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tempo-otlp
+  namespace: gw-mobile
+spec:
+  ports:
+    - name: otlp-grpc
+      port: 4317
+      targetPort: 30317
+      appProtocol: kubernetes.io/h2c
+---
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: tempo-otlp
+  namespace: gw-mobile
+subsets:
+  - addresses:
+      - ip: __MGMT_NODE_IP__
+    ports:
+      - name: otlp-grpc
+        port: 30317
+---
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: ListenerPolicy
+metadata:
+  name: gw-mobile-tracing
+  namespace: gw-mobile
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: gw-mobile
+  default:
+    httpSettings:
+      tracing:
+        provider:
+          openTelemetry:
+            grpcService:
+              backendRef:
+                name: tempo-otlp
+                port: 4317
+              timeout: 10s
+            serviceName: gw-mobile
+            sampler:
+              alwaysOnConfig: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tempo-otlp
+  namespace: gw-partner
+spec:
+  ports:
+    - name: otlp-grpc
+      port: 4317
+      targetPort: 30317
+      appProtocol: kubernetes.io/h2c
+---
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: tempo-otlp
+  namespace: gw-partner
+subsets:
+  - addresses:
+      - ip: __MGMT_NODE_IP__
+    ports:
+      - name: otlp-grpc
+        port: 30317
+---
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: ListenerPolicy
+metadata:
+  name: gw-partner-tracing
+  namespace: gw-partner
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: gw-partner
+  default:
+    httpSettings:
+      tracing:
+        provider:
+          openTelemetry:
+            grpcService:
+              backendRef:
+                name: tempo-otlp
+                port: 4317
+              timeout: 10s
+            serviceName: gw-partner
+            sampler:
+              alwaysOnConfig: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tempo-otlp
+  namespace: gw-branch
+spec:
+  ports:
+    - name: otlp-grpc
+      port: 4317
+      targetPort: 30317
+      appProtocol: kubernetes.io/h2c
+---
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: tempo-otlp
+  namespace: gw-branch
+subsets:
+  - addresses:
+      - ip: __MGMT_NODE_IP__
+    ports:
+      - name: otlp-grpc
+        port: 30317
+---
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: ListenerPolicy
+metadata:
+  name: gw-branch-tracing
+  namespace: gw-branch
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: gw-branch
+  default:
+    httpSettings:
+      tracing:
+        provider:
+          openTelemetry:
+            grpcService:
+              backendRef:
+                name: tempo-otlp
+                port: 4317
+              timeout: 10s
+            serviceName: gw-branch
+            sampler:
+              alwaysOnConfig: {}

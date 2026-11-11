@@ -179,6 +179,68 @@ data:
       ],
       "links": []
     }
+  lab-gateways.json: |
+    {
+      "uid": "dmz-lab-gateways",
+      "title": "DMZ Lab – Gateway İzleri (DMZ ve şube)",
+      "tags": [
+        "dmz-lab",
+        "tracing",
+        "gateway"
+      ],
+      "timezone": "browser",
+      "schemaVersion": 39,
+      "version": 1,
+      "refresh": "30s",
+      "time": {
+        "from": "now-3h",
+        "to": "now"
+      },
+      "templating": {
+        "list": [
+          {
+            "name": "traceId",
+            "label": "İz kimliği (trace id) — sadece id yazın",
+            "type": "textbox",
+            "query": "",
+            "current": {
+              "text": "",
+              "value": ""
+            },
+            "hide": 0
+          }
+        ]
+      },
+      "panels": [
+        {
+          "id": 2,
+          "type": "traces",
+          "title": "Trace id ile iz (tüm span'ler)",
+          "gridPos": {
+            "x": 0,
+            "y": 1,
+            "h": 18,
+            "w": 24
+          },
+          "datasource": {
+            "type": "tempo",
+            "uid": "tempo"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "tempo",
+                "uid": "tempo"
+              },
+              "queryType": "traceql",
+              "query": "$traceId"
+            }
+          ],
+          "options": {}
+        }
+      ]
+    }
   lab-tracing.json: |
     {
       "uid": "dmz-lab-tracing",
@@ -738,6 +800,344 @@ data:
               "refId": "A",
               "expr": "histogram_quantile(0.95, sum by (le, channel) (rate(authz_decision_duration_seconds_bucket[5m])))",
               "legendFormat": "{{channel}}"
+            }
+          ]
+        },
+        {
+          "id": 300,
+          "type": "row",
+          "title": "Kanal bazlı izler (span.channel)",
+          "collapsed": false,
+          "gridPos": {
+            "x": 0,
+            "y": 51,
+            "w": 24,
+            "h": 1
+          },
+          "panels": []
+        },
+        {
+          "id": 301,
+          "type": "table",
+          "title": "Kanal: web",
+          "gridPos": {
+            "x": 0,
+            "y": 52,
+            "w": 12,
+            "h": 9
+          },
+          "datasource": {
+            "type": "tempo",
+            "uid": "tempo"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "tempo",
+                "uid": "tempo"
+              },
+              "queryType": "traceqlSearch",
+              "query": "{ span.channel = \"web\" }",
+              "limit": 20,
+              "filters": [
+                {
+                  "id": "ch-web",
+                  "tag": "channel",
+                  "operator": "=",
+                  "scope": "span",
+                  "value": [
+                    "web"
+                  ],
+                  "valueType": "string"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": 302,
+          "type": "table",
+          "title": "Kanal: mobile",
+          "gridPos": {
+            "x": 12,
+            "y": 52,
+            "w": 12,
+            "h": 9
+          },
+          "datasource": {
+            "type": "tempo",
+            "uid": "tempo"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "tempo",
+                "uid": "tempo"
+              },
+              "queryType": "traceqlSearch",
+              "query": "{ span.channel = \"mobile\" }",
+              "limit": 20,
+              "filters": [
+                {
+                  "id": "ch-mobile",
+                  "tag": "channel",
+                  "operator": "=",
+                  "scope": "span",
+                  "value": [
+                    "mobile"
+                  ],
+                  "valueType": "string"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": 303,
+          "type": "table",
+          "title": "Kanal: partner",
+          "gridPos": {
+            "x": 0,
+            "y": 61,
+            "w": 12,
+            "h": 9
+          },
+          "datasource": {
+            "type": "tempo",
+            "uid": "tempo"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "tempo",
+                "uid": "tempo"
+              },
+              "queryType": "traceqlSearch",
+              "query": "{ span.channel = \"partner\" }",
+              "limit": 20,
+              "filters": [
+                {
+                  "id": "ch-partner",
+                  "tag": "channel",
+                  "operator": "=",
+                  "scope": "span",
+                  "value": [
+                    "partner"
+                  ],
+                  "valueType": "string"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": 304,
+          "type": "table",
+          "title": "Kanal: branch",
+          "gridPos": {
+            "x": 12,
+            "y": 61,
+            "w": 12,
+            "h": 9
+          },
+          "datasource": {
+            "type": "tempo",
+            "uid": "tempo"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "tempo",
+                "uid": "tempo"
+              },
+              "queryType": "traceqlSearch",
+              "query": "{ span.channel = \"branch\" }",
+              "limit": 20,
+              "filters": [
+                {
+                  "id": "ch-branch",
+                  "tag": "channel",
+                  "operator": "=",
+                  "scope": "span",
+                  "value": [
+                    "branch"
+                  ],
+                  "valueType": "string"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": 400,
+          "type": "row",
+          "title": "DMZ ve şube gateway izleri (Envoy)",
+          "collapsed": false,
+          "gridPos": {
+            "x": 0,
+            "y": 70,
+            "w": 24,
+            "h": 1
+          },
+          "panels": []
+        },
+        {
+          "id": 401,
+          "type": "table",
+          "title": "DMZ gw-web",
+          "gridPos": {
+            "x": 0,
+            "y": 71,
+            "w": 12,
+            "h": 9
+          },
+          "datasource": {
+            "type": "tempo",
+            "uid": "tempo"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "tempo",
+                "uid": "tempo"
+              },
+              "queryType": "traceqlSearch",
+              "query": "{ resource.service.name = \"gw-web\" }",
+              "limit": 20,
+              "filters": [
+                {
+                  "id": "gw-gw-web",
+                  "tag": "service.name",
+                  "operator": "=",
+                  "scope": "resource",
+                  "value": [
+                    "gw-web"
+                  ],
+                  "valueType": "string"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": 402,
+          "type": "table",
+          "title": "DMZ gw-mobile",
+          "gridPos": {
+            "x": 12,
+            "y": 71,
+            "w": 12,
+            "h": 9
+          },
+          "datasource": {
+            "type": "tempo",
+            "uid": "tempo"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "tempo",
+                "uid": "tempo"
+              },
+              "queryType": "traceqlSearch",
+              "query": "{ resource.service.name = \"gw-mobile\" }",
+              "limit": 20,
+              "filters": [
+                {
+                  "id": "gw-gw-mobile",
+                  "tag": "service.name",
+                  "operator": "=",
+                  "scope": "resource",
+                  "value": [
+                    "gw-mobile"
+                  ],
+                  "valueType": "string"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": 403,
+          "type": "table",
+          "title": "DMZ gw-partner",
+          "gridPos": {
+            "x": 0,
+            "y": 80,
+            "w": 12,
+            "h": 9
+          },
+          "datasource": {
+            "type": "tempo",
+            "uid": "tempo"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "tempo",
+                "uid": "tempo"
+              },
+              "queryType": "traceqlSearch",
+              "query": "{ resource.service.name = \"gw-partner\" }",
+              "limit": 20,
+              "filters": [
+                {
+                  "id": "gw-gw-partner",
+                  "tag": "service.name",
+                  "operator": "=",
+                  "scope": "resource",
+                  "value": [
+                    "gw-partner"
+                  ],
+                  "valueType": "string"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": 404,
+          "type": "table",
+          "title": "Şube gw-branch",
+          "gridPos": {
+            "x": 12,
+            "y": 80,
+            "w": 12,
+            "h": 9
+          },
+          "datasource": {
+            "type": "tempo",
+            "uid": "tempo"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "tempo",
+                "uid": "tempo"
+              },
+              "queryType": "traceqlSearch",
+              "query": "{ resource.service.name = \"gw-branch\" }",
+              "limit": 20,
+              "filters": [
+                {
+                  "id": "gw-gw-branch",
+                  "tag": "service.name",
+                  "operator": "=",
+                  "scope": "resource",
+                  "value": [
+                    "gw-branch"
+                  ],
+                  "valueType": "string"
+                }
+              ]
             }
           ]
         }

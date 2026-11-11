@@ -55,6 +55,24 @@
 
 <script src="/ops.js"></script>
 <script>
+
+// İşlem başına X-Trace-Id: çağıran traceId verirse onu kullanır, vermezse yenisini üretir (mevcut kimliği ezmez).
+function newTraceId(){const a=new Uint8Array(16);crypto.getRandomValues(a);return Array.from(a,b=>b.toString(16).padStart(2,'0')).join('');}
+function apiFetch(url, opts = {}) {
+  const headers = Object.assign({}, opts.headers || {});
+  // Tek trace kimliği: X-Trace-Id (uygulama) > traceparent (W3C) > opts.traceId > yeni. Varsa üzerine yazılmaz.
+  const tp = (headers['traceparent'] || '').split('-');
+  const tid = headers['X-Trace-Id'] || (tp.length === 4 ? tp[1] : '') || opts.traceId || newTraceId();
+  headers['X-Trace-Id'] = tid;
+  if (!headers['traceparent']) {
+    const sp = new Uint8Array(8); crypto.getRandomValues(sp);
+    headers['traceparent'] = '00-' + tid + '-' + Array.from(sp, b => b.toString(16).padStart(2, '0')).join('') + '-01';
+  }
+  const o = Object.assign({ credentials: 'same-origin' }, opts, { headers });
+  delete o.traceId;
+  return fetch(url, o).then((r) => { r.sentTraceId = tid; return r; });
+}
+
 const DESCRIPTIONS = {
   web: 'Kullanıcı girişi (PKCE, Bearer token). Iç servis: /bff/web/… (kanal: web).',
   mobile: 'Kullanıcı girişi (PKCE + ES256 DPoP). Iç servis: /bff/mobile/… (kanal: mobile).',
@@ -65,8 +83,8 @@ const DESCRIPTIONS = {
 
 async function render() {
   const [chans, state] = await Promise.all([
-    fetch('/api/channels').then(r => r.json()),
-    fetch('/api/state').then(r => r.json())
+    apiFetch('/api/channels').then(r => r.json()),
+    apiFetch('/api/state').then(r => r.json())
   ]);
   const box = document.getElementById('cards');
   box.innerHTML = '';

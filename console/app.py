@@ -38,6 +38,25 @@ os.environ.setdefault("OTLP_ENDPOINT", "http://127.0.0.1:14318")
 os.environ.setdefault("SERVICE_NAME", "console")
 sys.path.insert(0, str(ROOT / "shared"))
 import tracing  # noqa: E402  (shared/tracing.py)
+
+# İstek başına trace kimliği. Tarayıcı X-Trace-Id gönderirse aynen kullanılır (üzerine yazılmaz).
+_req = threading.local()
+TID_RE = re.compile(r"^[0-9a-f]{32}$")
+
+
+def inbound_trace_id(headers):
+    # Öncelik: X-Trace-Id (tarayıcı), sonra W3C traceparent; ikisi de yoksa yeni üretilir.
+    v = (headers.get("X-Trace-Id") or "").strip().lower()
+    if TID_RE.match(v):
+        return v
+    parts = (headers.get("traceparent") or "").strip().lower().split("-")
+    if len(parts) == 4 and TID_RE.match(parts[1]) and parts[1] != "0" * 32:
+        return parts[1]
+    return secrets.token_hex(16)
+
+
+def child_traceparent(tid):
+    return f"00-{tid}-{secrets.token_hex(8)}-01"
 GRAFANA = "http://127.0.0.1:3000"
 
 
@@ -341,7 +360,7 @@ def do_call(sess, ch, method, path, auth, dpop, cert, token_from=None, body=None
         headers["DPoP"] = dpop_proof(entry["key"], entry["x"], entry["y"], method,
                                      f"https://{cfg['host']}{path}", token)
     # Her çağrının kök span'i: traceparent ile zincirin tamamına (edge, ext-authz, BFF, core) taşınır
-    root = tracing.start_server_span(f"console {method} {path}", None,
+    root = tracing.start_server_span(f"console {method} {path}", child_traceparent(_req.tid),
                                      {"channel": ch, "auth": auth, "http.method": method, "http.target": path})
     headers["traceparent"] = root.header()
     st = None
@@ -367,6 +386,8 @@ def branch_ui_req(method, path, cookie=None, payload=None):
         headers["Content-Type"] = "application/json"
     if cookie:
         headers["Cookie"] = cookie
+    if getattr(_req, "tid", None):
+        headers["X-Trace-Id"] = _req.tid  # şube UI aynı trace kimliğini zincire taşır
     conn.request(method, path, body=data, headers=headers)
     r = conn.getresponse()
     body = r.read().decode("utf-8", "replace")
@@ -432,6 +453,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         if new:
             self.send_header("Set-Cookie", f"console_sid={sid}; HttpOnly; SameSite=Strict; Path=/")
+        self.send_header("X-Trace-Id", getattr(_req, "tid", "") or "")
         self.end_headers()
         self.wfile.write(body)
 
@@ -439,6 +461,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self._send(status, json.dumps(obj, ensure_ascii=False).encode(), "application/json; charset=utf-8", sid, new)
 
     def do_GET(self):
+        _req.tid = inbound_trace_id(self.headers)
         sid, new = self._sid()
         path = urllib.parse.urlparse(self.path).path
         if path == "/":
@@ -456,6 +479,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self._json(404, {"error": "not found"}, sid, new)
 
     def do_POST(self):
+        _req.tid = inbound_trace_id(self.headers)
         sid, new = self._sid()
         sess = session_for(sid)
         n = int(self.headers.get("Content-Length", "0") or 0)
@@ -466,13 +490,23 @@ class Handler(http.server.BaseHTTPRequestHandler):
         try:
             if self.path == "/api/login":
                 ch = req.get("channel")
-                info = do_login(sess, ch, req.get("username"), req.get("password"))
+                span = tracing.start_server_span(f"console login {ch}", child_traceparent(_req.tid),
+                                                 {"channel": ch, "http.target": "/api/login"})
+                try:
+                    info = do_login(sess, ch, req.get("username"), req.get("password"))
+                finally:
+                    span.end()
                 return self._json(200, {"ok": True, "token": info}, sid, new)
             if self.path == "/api/logout":
                 ch = req.get("channel")
                 if not sess["channels"].get(ch):
                     return self._json(200, {"ok": True, "keycloak_status": None, "note": "oturum yoktu"}, sid, new)
-                kc = do_logout(sess, ch)
+                span = tracing.start_server_span(f"console logout {ch}", child_traceparent(_req.tid),
+                                                 {"channel": ch, "http.target": "/api/logout"})
+                try:
+                    kc = do_logout(sess, ch)
+                finally:
+                    span.end(http_status=200)
                 return self._json(200, {"ok": kc in (200, 204, None), "keycloak_status": kc}, sid, new)
             if self.path == "/api/call":
                 res = do_call(sess, req.get("channel"), req.get("method", "GET"), req.get("path", "/"),
