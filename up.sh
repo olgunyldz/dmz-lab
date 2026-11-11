@@ -182,6 +182,11 @@ bash "$ROOT/mgmt-cluster/scripts/up.sh"
 
 # 2) Edge
 step "2/5 Edge (HAProxy + Coraza WAF)"
+# HAProxy yapılandırması: DMZ IP'leri henüz yoksa (ilk kurulum) yer tutucular 127.0.0.1 ile başlatılır;
+# DMZ kurulduktan sonra render-haproxy.sh gerçek IP'lerle yeniden üretir ve HAProxy'yi yeniden başlatır.
+if [[ ! -f "$ROOT/edge/haproxy/haproxy.cfg" ]]; then
+    sed -e 's/__DMZ_NODE_IP__/127.0.0.1/g' -e 's/__DMZ_WORKER2_IP__/127.0.0.1/g' \n        "$ROOT/edge/haproxy/haproxy.cfg.tpl" > "$ROOT/edge/haproxy/haproxy.cfg"
+fi
 docker compose -f "$ROOT/edge/docker-compose.yml" up -d
 
 # 3) identity: cluster, Vault'tan parolalar, Keycloak, realm
@@ -207,6 +212,12 @@ bash "$ROOT/edge/scripts/render-haproxy.sh"
 # 6) Şube cluster'ı (HAProxy yok; gw-branch'e WAN üzerinden doğrudan, F10)
 step "6/6 Şube cluster (şube UI pod'u, gw-branch'e doğrudan bağlantı)"
 bash "$ROOT/branch-cluster/scripts/up.sh"
+
+# Gözlemlenebilirlik (Tempo, Prometheus, Grafana): tüm cluster IP'leri hazır olduktan sonra
+bash "$ROOT/mgmt-cluster/scripts/load-observability.sh"
+
+# Yönetim araçları host'tan doğrudan (HAProxy yok): Grafana 3000, Prometheus 9090, Vault 8200
+bash "$ROOT/mgmt-cluster/scripts/tools-forward.sh" start || true
 
 echo
 echo "=================== TAMAM ==================="

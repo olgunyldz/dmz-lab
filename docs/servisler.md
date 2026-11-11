@@ -201,7 +201,7 @@ Tam koşu: `bash run-all.sh` (kök dizin), 11 süit. Son tam koşu Tempo ve Keyc
 | `dmz-cluster/tests/extauth.sh` | 29 | Önceki çalıştırma geçti |
 | `dmz-cluster/tests/internal-path.sh` | 8 | Önceki çalıştırma geçti |
 | `dmz-cluster/tests/firewall.sh` (F1) | 4 | Önceki çalıştırma geçti. F10 eklendi, yeniden çalıştırılmalı |
-| `dmz-cluster/tests/branch.sh` | 9 | **Yeniden yazıldı, doğrulama bekliyor** |
+| `dmz-cluster/tests/branch.sh` | 9 | **9/9 geçti** (token alımı web gateway'in `/realms` route'u üzerinden https ile) |
 | `internal-cluster/tests/authz.sh` | 16 | Önceki çalıştırma geçti |
 | `internal-cluster/tests/service-verify.sh` | 9 | Önceki çalıştırma geçti |
 | `internal-cluster/tests/api.sh` | 16 | Önceki çalıştırma geçti |
@@ -211,7 +211,7 @@ Tam koşu: `bash run-all.sh` (kök dizin), 11 süit. Son tam koşu Tempo ve Keyc
 
 ## 10. Açık Konular
 
-- **Sabit node IP'leri (kritik):** Lab IP'lerinin sabit olduğunu varsayıyor (`172.18.0.2`–`.12` gibi), ama kind cluster'ları yeniden kurulduğunda Docker IP'leri farklı atıyor. Şu anki durum: HAProxy DMZ backend'leri `172.18.0.2`/`.4` (artık mgmt node'ları), `identity-keycloak` Endpoint'i `172.18.0.5` (artık edge), tracing ve Prometheus hedefleri de kayık. Sonuç: `/realms` 503, token akışı ve edge yolları bozuk. Düzeltme: IP'leri kurulum anında node container'larından okuyup manifest ve HAProxy yapılandırmasına yazmak, ya da node container adlarını (Docker DNS) kullanmak. Şube testi bu nedenle 4/9 geçiyor (TLS reddi, F10 yolu ve 404'ler geçiyor).
+- **Sabit node IP'leri:** Çözüldü. IP'ler kurulumda okunuyor (`scripts/lab-ips.sh`, `render`); HAProxy yapılandırması `edge/scripts/render-haproxy.sh` ile üretiliyor. Gateway NodePort'ları ve public/login route'ları artık kurulumda uygulanıyor.
 
 - **Konsol şube kanalı:** `console/app.py` şube kanalını `teller.lab.local` (HAProxy) üzerinden çağırıyor. Şube artık HAProxy'den geçmediği için bu kanal çalışmaz. Düzeltme: şube kanalını şube cluster'ındaki pod üzerinden (`kubectl exec` ya da port-forward) çağırmak.
 - **Şube kurulumunun doğrulanması:** `up.sh` adım 6, `branch.sh` 9 kontrol ve F10 henüz uçtan uca çalıştırılmadı.

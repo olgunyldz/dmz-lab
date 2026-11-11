@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # F1 testi (DMZ node NodePort erişim kısıtı, scripts/host-firewall.sh):
 #   - Edge HAProxy üzerinden gelen istek DMZ gateway'ine ulaşır (401 = gateway yanıt verdi, token yok)
-#   - Kind ağındaki yabancı bir container, her üç NodePort'tan da reddedilir (000)
+#   - Kind ağındaki yabancı bir container, dört NodePort'tan da reddedilir (000): 30446-30448 (F1) ve 30449 (F10, yalnız şube node'ları)
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -30,7 +30,7 @@ OUT_EDGE=$("${CURL[@]}" -s -o /dev/null -w '%{http_code}' --max-time 10 \
 check "edge HAProxy -> DMZ gateway (NodePort 30446) açık" "401" "$OUT_EDGE"
 
 # 2) Yabancı container (kind ağı, edge değil): her NodePort reddedilir
-for port in 30446 30447 30448; do
+for port in 30446 30447 30448 30449; do
     OUT=$(MSYS_NO_PATHCONV=1 docker run --rm --network kind --entrypoint curl curlimages/curl:8.11.1 \
         -s -o /dev/null -w '%{http_code}' --max-time 5 "http://$DMZ_NODE_IP:$port/" 2>/dev/null; true)
     check "yabancı kaynak -> DMZ NodePort $port reddedilir" "000" "$OUT"

@@ -166,7 +166,7 @@ function setupPage(channels) {
     $('hint').textContent = 'Public kanalda giriş ve çıkış yok (token gerekmez). Çağrılar aşağıda.';
   }
   if (KEY === 'partner') $('hint').textContent = 'Partner girişi client credentials ile (mTLS). Çıkış yerel token siler.';
-  if (KEY === 'branch') $('hint').textContent = 'Şube girişi cihaz sertifikasıyla (teller.lab.local). Giriş: teller kullanıcısı.';
+  if (KEY === 'branch') $('hint').textContent = 'Şube girişi: şube UI pod'u (branch-cluster, cihaz sertifikası pod'da). Giriş: teller kullanıcısı.';
   if (KEY === 'mobile') $('hint').textContent = 'Mobil girişte DPoP anahtarı üretilir; çıkış refresh token\'ı iptal eder.';
   if (KEY === 'web') $('hint').textContent = 'Web girişi PKCE ile. Çıkış Keycloak oturumunu kapatır.';
 

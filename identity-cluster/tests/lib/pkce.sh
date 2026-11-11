@@ -13,6 +13,10 @@
 PKCE_BASE=${PKCE_BASE:-http://127.0.0.1:18080}
 PKCE_PUBLIC_HOST=${PKCE_PUBLIC_HOST:-https://id.bank.lab.local}
 
+# Ek curl argümanları (ör. --cacert, --resolve). Lab: web.lab.local:8443 üzerinden https (DMZ /realms route'u).
+PKCE_CURL_ARGS=${PKCE_CURL_ARGS:-}
+_pkce_curl() { curl ${PKCE_CURL_ARGS} "$@"; }
+
 _pkce_b64u() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
 
 # pkce_token <client_id> <redirect_uri> <user> <password> <client_secret|""> <dpop_proof|"">
@@ -26,21 +30,17 @@ pkce_token() {
     jar=$(mktemp)
 
     # 1) Yetkilendirme isteği: login formunu al
-    page=$(curl -s -c "$jar" -b "$jar" -G "$PKCE_BASE/realms/bank/protocol/openid-connect/auth" \
+    page=$(_pkce_curl -s -c "$jar" -b "$jar" -G "$PKCE_BASE/realms/bank/protocol/openid-connect/auth" \
         --data-urlencode "client_id=$client" --data-urlencode "redirect_uri=$redirect" \
         -d response_type=code -d scope=openid -d state=lab \
         -d code_challenge="$challenge" -d code_challenge_method=S256)
-
-    # Keycloak çerezleri Secure işaretler (KC_HOSTNAME https), oysa test port-forward ile http konuşur.
-    # Lab testinde çerez dosyasındaki Secure alanı kapatılır; curl bunları http üzerinden geri gönderir.
-    awk 'BEGIN{FS=OFS="	"} { if ($0 ~ /^#HttpOnly_/) sub(/^#HttpOnly_/, "", $1); if (NF >= 7) $4="FALSE"; print }' "$jar" > "$jar.t" && mv "$jar.t" "$jar"
 
     # 2) Form action: KC_HOSTNAME (https://id.bank.lab.local) yerine port-forward adresine çevrilir
     action=$(echo "$page" | grep -o 'action="[^"]*"' | head -1 | sed 's/action="//;s/"$//;s/&amp;/\&/g')
     action=${action/$PKCE_PUBLIC_HOST/$PKCE_BASE}
 
     # 3) Kimlik bilgilerini gönder: 302 Location içinde code
-    loc=$(curl -s -o /dev/null -D - -c "$jar" -b "$jar" -X POST "$action" \
+    loc=$(_pkce_curl -s -o /dev/null -D - -c "$jar" -b "$jar" -X POST "$action" \
         --data-urlencode "username=$user" --data-urlencode "password=$pw" --data-urlencode "credentialId=" \
         | tr -d '\r' | grep -i '^location:' | sed 's/^[Ll]ocation: //')
     code=$(echo "$loc" | sed -n 's/.*[?&]code=\([^&]*\).*/\1/p')
@@ -56,7 +56,7 @@ pkce_token() {
     [[ -n "$secret" ]] && args+=(-d "client_secret=$secret")
     local -a hdr=()
     [[ -n "$proof" ]] && hdr=(-H "DPoP: $proof")
-    body=$(curl -s -X POST "$PKCE_BASE/realms/bank/protocol/openid-connect/token" "${hdr[@]}" "${args[@]}")
+    body=$(_pkce_curl -s -X POST "$PKCE_BASE/realms/bank/protocol/openid-connect/token" "${hdr[@]}" "${args[@]}")
     token=$(echo "$body" | sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p')
     if [[ -z "$token" ]]; then
         echo "pkce: token alınamadı ($client): $(echo "$body" | cut -c1-200)" >&2

@@ -68,7 +68,7 @@ CHANNELS = {
                 "cert": (str(CERTS / "partner-client.crt"), str(CERTS / "partner-client.key")),
                 "login": "client_credentials", "client": "partner-acme", "secret": "partner-acme", "redirect": None,
                 "user": None, "password": None, "dpop": False},
-    "branch": {"title": "Şube (çalışan) kanalı", "host": "teller.lab.local", "ca": INTERNAL_CA,
+    "branch": {"title": "Şube (çalışan) kanalı", "via": "branch-ui", "host": "teller.lab.local", "ca": INTERNAL_CA,
                "cert": (str(CERTS / "branch-device.crt"), str(CERTS / "branch-device.key")),
                "login": "pkce", "client": "branch-app", "secret": "branch-app", "redirect": "https://teller.lab.local/callback",
                "user": "teller", "password": "teller-password", "dpop": False},
@@ -260,6 +260,8 @@ def do_login(sess, ch, username, password):
     if not cfg.get("login"):
         raise RuntimeError("bu kanalda giriş yok (public)")
     user = username or cfg["user"]
+    if cfg.get("via") == "branch-ui":
+        return branch_login(sess, ch, user, password)
     pw = password or (SECRETS.get(cfg["password"]) if cfg["password"] else "")
     if cfg["login"] == "client_credentials":
         st, _, body = sni_request(cfg["host"], cfg["ca"], "POST", f"{REALM}/token",
@@ -294,6 +296,12 @@ def identity_req_fn(method, path, headers=None, body=None):
 def do_logout(sess, ch):
     cfg = CHANNELS[ch]
     entry = sess["channels"].get(ch)
+    if cfg.get("via") == "branch-ui":
+        status = None
+        if entry:
+            status, _, _ = branch_ui_req("POST", "/api/logout", entry.get("cookie"))
+        sess["channels"][ch] = None
+        return status
     status = None
     if entry and cfg.get("login") == "pkce_dpop":
         proof = dpop_proof(entry["key"], entry["x"], entry["y"], "POST", f"{IDENTITY_TOKEN_URL[:-6]}/revoke")
@@ -315,6 +323,8 @@ def do_logout(sess, ch):
 
 def do_call(sess, ch, method, path, auth, dpop, cert, token_from=None, body=None, idem=None):
     cfg = CHANNELS[ch]
+    if cfg.get("via") == "branch-ui":
+        return branch_call(sess, ch, method, path, auth, cert, body)
     headers = {}
     payload = None
     if body is not None:
@@ -344,11 +354,67 @@ def do_call(sess, ch, method, path, auth, dpop, cert, token_from=None, body=None
             "trace_url": trace_link(root.trace_id)}
 
 
+# Şube kanalı: şube UI pod'u (branch-cluster, port 9100). Cihaz sertifikası ve token pod'da; konsol yalnız çerezi tutar.
+BRANCH_UI_HOST, BRANCH_UI_PORT = "127.0.0.1", 9100
+
+
+def branch_ui_req(method, path, cookie=None, payload=None):
+    conn = http.client.HTTPConnection(BRANCH_UI_HOST, BRANCH_UI_PORT, timeout=40)
+    headers = {}
+    data = None
+    if payload is not None:
+        data = json.dumps(payload).encode()
+        headers["Content-Type"] = "application/json"
+    if cookie:
+        headers["Cookie"] = cookie
+    conn.request(method, path, body=data, headers=headers)
+    r = conn.getresponse()
+    body = r.read().decode("utf-8", "replace")
+    hdrs = r.getheaders()
+    conn.close()
+    return r.status, hdrs, body
+
+
+def branch_cookie(hdrs, fallback):
+    for k, v in hdrs:
+        if k.lower() == "set-cookie" and v.startswith("branch_sid="):
+            return v.split(";", 1)[0]
+    return fallback
+
+
+def branch_login(sess, ch, user, pw):
+    payload = {"username": user}
+    if pw:
+        payload["password"] = pw
+    st, hdrs, body = branch_ui_req("POST", "/api/login", None, payload)
+    res = json.loads(body) if body.startswith("{") else {}
+    if st != 200 or not res.get("ok"):
+        raise RuntimeError(f"şube girişi başarısız (HTTP {st}): {res.get('error', body[:200])}")
+    sess["channels"][ch] = {"ui": True, "user": user, "cookie": branch_cookie(hdrs, None), "info": res.get("token")}
+    return res.get("token")
+
+
+def branch_call(sess, ch, method, path, auth, cert, body):
+    entry = sess["channels"].get(ch)
+    if body is not None:
+        raise RuntimeError("şube kanalında gövdeli istek bu konsolda desteklenmiyor (şube UI /api/call yalnız GET ve gövdesiz çağrı)")
+    payload = {"method": method, "path": path, "auth": "session" if auth == "session" and entry else "none",
+               "cert": bool(cert)}
+    st, _, resp = branch_ui_req("POST", "/api/call", entry.get("cookie") if entry else None, payload)
+    res = json.loads(resp) if resp.startswith("{") else {"status": st, "body": resp[:600]}
+    return {"status": res.get("status"), "body": str(res.get("body", ""))[:600], "trace_id": None, "trace_url": None}
+
+
 def state_of(sess):
     out = {}
     for ch in CHANNELS:
         e = sess["channels"].get(ch)
-        out[ch] = ({"user": e.get("user"), "token": summarize(e["access"])} if e else None)
+        if not e:
+            out[ch] = None
+        elif e.get("ui"):
+            out[ch] = {"user": e.get("user"), "token": e.get("info")}
+        else:
+            out[ch] = {"user": e.get("user"), "token": summarize(e["access"])}
     return out
 
 
