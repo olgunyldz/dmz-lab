@@ -27,3 +27,8 @@ $K -n gw-branch patch gateway gw-branch --type merge -p \
 
 $K -n gw-branch wait --for=condition=available deploy --all --timeout=300s 2>/dev/null || true
 echo "gw-branch hazır (NodePort 30449). Test: bash dmz-cluster/tests/branch.sh"
+
+# Gateway OTLP trace (Tempo) gw-branch dahil: namespace bu betikte oluşur, tracing burada uygulanır
+# Gateway OTLP trace (Tempo): tempo-otlp Service/Endpoints + ListenerPolicy (render: mgmt node IP)
+source "$ROOT/../scripts/lab-ips.sh"
+render "$ROOT/manifests/gateway-tracing.yaml" | $K apply -f -

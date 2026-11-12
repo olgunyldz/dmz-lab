@@ -22,9 +22,6 @@ render "$ROOT/manifests/internal-backend.yaml" | $K apply -f -
 $K apply -f "$ROOT/manifests/channels.yaml"
 # Public ve login route'ları (/public, /realms -> iç gateway); bunlar olmadan sağlık kontrolü 404 alır
 $K apply -f "$ROOT/manifests/route-classes.yaml"
-# Gateway OTLP trace (Tempo): tempo-otlp Service/Endpoints + ListenerPolicy (render: mgmt node IP)
-source "$ROOT/../scripts/lab-ips.sh"
-render "$ROOT/manifests/gateway-tracing.yaml" | $K apply -f -
 
 for gw in gw-web:gw-web gw-mobile:gw-mobile gw-partner:gw-partner; do
     ns=${gw%%:*}
