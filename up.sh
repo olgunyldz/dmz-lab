@@ -69,7 +69,7 @@ preflight() {
 
     # 3) Repo dosyaları: betiklerin ve manifest'lerin varlığı
     local required=(
-        edge/docker-compose.yml edge/haproxy/haproxy.cfg edge/scripts/build-waf.sh
+        edge/docker-compose.yml edge/haproxy/haproxy.cfg.tpl edge/scripts/build-waf.sh
         edge/scripts/gen-certs.sh edge/scripts/gen-branch-certs.sh edge/scripts/gen-internal-certs.sh
         mgmt-cluster/kind-config.yaml mgmt-cluster/scripts/up.sh
         identity-cluster/kind-config.yaml identity-cluster/scripts/up.sh
@@ -96,7 +96,7 @@ preflight() {
         if echo "$subnets" | grep -qw "172.18.0.0/16"; then
             pass "kind ağı 172.18.0.0/16 içeriyor"
         else
-            fail "kind ağı ($subnets) 172.18.0.0/16 içermiyor; lab IP planı bu subnet'e bağlı. Ağı yeniden oluşturmak için önce tüm kind cluster'larını silin (bash down.sh)."
+            warn "kind ağı ($subnets); IP'ler kurulumda dinamik okunur, 172.18.0.0/16 zorunlu değil"
         fi
     else
         pass "kind ağı henüz yok (ilk cluster oluşturulunca açılır)"
@@ -185,7 +185,8 @@ step "2/5 Edge (HAProxy + Coraza WAF)"
 # HAProxy yapılandırması: DMZ IP'leri henüz yoksa (ilk kurulum) yer tutucular 127.0.0.1 ile başlatılır;
 # DMZ kurulduktan sonra render-haproxy.sh gerçek IP'lerle yeniden üretir ve HAProxy'yi yeniden başlatır.
 if [[ ! -f "$ROOT/edge/haproxy/haproxy.cfg" ]]; then
-    sed -e 's/__DMZ_NODE_IP__/127.0.0.1/g' -e 's/__DMZ_WORKER2_IP__/127.0.0.1/g' \n        "$ROOT/edge/haproxy/haproxy.cfg.tpl" > "$ROOT/edge/haproxy/haproxy.cfg"
+        sed -e 's/__DMZ_NODE_IP__/127.0.0.1/g' -e 's/__DMZ_WORKER2_IP__/127.0.0.1/g' \
+            "$ROOT/edge/haproxy/haproxy.cfg.tpl" > "$ROOT/edge/haproxy/haproxy.cfg"
 fi
 docker compose -f "$ROOT/edge/docker-compose.yml" up -d
 
