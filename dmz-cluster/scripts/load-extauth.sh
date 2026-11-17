@@ -17,7 +17,7 @@ render "$ROOT/manifests/extauth.yaml" | $K apply -f -
 # Eski stub kaldır (artık kullanılmıyor)
 $K delete namespace sts-internal --ignore-not-found >/dev/null 2>&1 || true
 
-# Token exchange istemci sertifikaları (kanal başına, Keycloak client-x509). Secret paylaşılmaz.
+# Token exchange istemci sertifikaları (kanal başına, IdP client-x509). Secret paylaşılmaz.
 $K -n auth create secret generic dmz-exchange-client-tls \
     --from-file=web.crt="$CERTS/dmz-exchange-web.crt" --from-file=web.key="$CERTS/dmz-exchange-web.key" \
     --from-file=mobile.crt="$CERTS/dmz-exchange-mobile.crt" --from-file=mobile.key="$CERTS/dmz-exchange-mobile.key" \
@@ -38,4 +38,4 @@ $K -n auth create secret tls dmz-gateway-client-tls --cert="$CERTS/dmz-client.cr
 
 $K -n auth rollout restart deploy/ext-authz >/dev/null
 $K -n auth rollout status deploy/ext-authz --timeout=180s
-echo "ext-authz kuruldu (token exchange: iç kgateway -> identity Keycloak)."
+echo "ext-authz kuruldu (token exchange: iç kgateway -> identity IdP)."

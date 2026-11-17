@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# F8 (lab): Identity node'larında Keycloak'a (pod 8080) yalnız iç cluster node IP'lerinden ve
+# F8 (lab): Identity node'larında IdP'ye (pod 8080) yalnız iç cluster node IP'lerinden ve
 # identity pod ağından (cluster içi) erişim. Diğer kaynaklar (DMZ, kind ağındaki yabancı container'lar) reddedilir.
 #
 # Neden host iptables: kindnet NetworkPolicy uygulamaz. Cilium bu WSL2 çekirdeğinde çalışmıyor (xt_socket eksik).
@@ -11,7 +11,7 @@ set -euo pipefail
 
 INTERNAL_NODE_IPS=($(for n in $(kind get nodes --name internal); do docker inspect "$n" -f '{{ .NetworkSettings.Networks.kind.IPAddress }}'; done))  # internal cluster node IP'leri (kind-internal)
 POD_CIDR="10.244.0.0/16"
-CHAIN="F8-KEYCLOAK"
+CHAIN="F8-IDP"
 
 # Identity node IP'leri: kube-proxy NodePort trafiğini (externalTrafficPolicy=Cluster) giriş node'unda SNAT'ler.
 # Dış kaynak, giriş node'unda (SNAT'tan önce) kontrol edilir; bu yüzden node IP'leri ikinci sıçrama için kabul edilir.

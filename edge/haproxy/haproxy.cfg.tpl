@@ -10,7 +10,7 @@
 #   fe_https (L7)
 #       - TLS sonlandırma (public sertifika)
 #       - IP başına istek hızı sınırı (DDoS/kötüye kullanım, L7)
-#       - Coraza WAF (SPOE)
+#       - WAF: MOCK (demo; uygulama katmanı saldırı engelleme yok)
 #       - Host bazlı yönlendirme, re-encrypt -> be_gw_web / be_gw_mobile (sağlık kontrollü)
 
 global
@@ -81,12 +81,7 @@ frontend fe_https
     acl host_mobile hdr(host) -i mobile-api.lab.local
     http-request return status 404 content-type text/plain string "not found" unless host_web || host_mobile
 
-    # WAF: Coraza (SPOE). Her istek önce WAF'tan geçer.
-    filter spoe engine coraza config /usr/local/etc/haproxy/coraza.cfg
-    http-request set-var(txn.coraza.app) str(sample_app)
-    http-request send-spoe-group coraza coraza-req
-    http-request deny deny_status 403 hdr waf-block "request" if { var(txn.coraza.action) -m str deny }
-    http-request deny deny_status 500 if { var(txn.coraza.error) -m int gt 0 }
+    # MOCK WAF: güvenlik kontrolü YOK (demo). Coraza kaldırıldı; bu edge'de uygulama katmanı saldırı engelleme yoktur.
 
     http-request set-header X-Edge-Zone dmz-edge
     http-request set-header X-Forwarded-Proto https
@@ -120,14 +115,6 @@ backend be_gw_mobile
     http-check expect status 200
     server dmz-worker __DMZ_NODE_IP__:30447
     server dmz-worker2 __DMZ_WORKER2_IP__:30447
-
-# ---------------------------------------------------------------------------
-# WAF servisi (coraza-spoa)
-# ---------------------------------------------------------------------------
-backend coraza-spoa
-    mode tcp
-    option spop-check
-    server coraza coraza-spoa:9000 check
 
 # ---------------------------------------------------------------------------
 # İzleme (yalnız lab, host'ta 127.0.0.1'e bağlı)

@@ -16,7 +16,7 @@ fi
 $K apply -f "$ROOT/manifests/vault.yaml"
 $K apply -f "$ROOT/manifests/vault-nodeport.yaml"
 
-kind load docker-image hashicorp/vault:1.18 --name mgmt >/dev/null 2>&1 || true
+kind load docker-image hashicorp/vault:1.20.1 --name mgmt >/dev/null 2>&1 || true
 bash "$ROOT/scripts/host-firewall.sh"
 
 echo "Mgmt cluster hazır. Vault: NodePort 30200. Sonraki: bash identity-cluster/scripts/load-vault.sh"

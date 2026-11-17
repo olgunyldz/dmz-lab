@@ -14,9 +14,9 @@ echo "Grafana     http://127.0.0.1:3000"
 echo "  kullanıcı : admin"
 echo "  parola    : $(get kind-mgmt observability grafana-admin password)"
 echo
-echo "Keycloak    http://127.0.0.1:18080/admin/"
-echo "  kullanıcı : admin"
-echo "  parola    : $(get kind-identity auth keycloak-admin password)"
+echo "Kimlik (IdP) https://id.bank.lab.local/realms/bank   (yerel: tools-forward 18080, https)"
+echo "  kullanıcı : alice"
+echo "  parola    : $(get kind-identity idp idp-secrets ALICE_PASSWORD)"
 echo
 echo "Prometheus  http://127.0.0.1:9090   (kimlik gerekmez)"
 echo
@@ -26,7 +26,7 @@ echo "  root token: $(get kind-mgmt secrets vault-bootstrap root_token)"
 echo "  (lab için; prod'da root token kapatılır)"
 echo
 echo "Şube UI     http://127.0.0.1:9100   (kimlik: teller; parola identity'de)"
-echo "  teller    : $(get kind-identity auth keycloak-client-secrets teller-password)"
+echo "  teller    : $(get kind-identity idp idp-secrets TELLER_PASSWORD)"
 echo
 echo "Konsol      http://127.0.0.1:9000   (bash console/start.sh ile açılır)"
 echo "====================================================="

@@ -63,14 +63,6 @@ body=$(printf 'GET /partner/payments HTTP/1.1\r\nHost: partner-api.lab.local\r\n
     -cert "$CERTS/partner-client.crt" -key "$CERTS/partner-client.key" -quiet 2>/dev/null)
 check "partner mTLS geçer -> /partner ext-authz token ister (401)" "missing bearer token" "$body"
 
-# 10) Gateway'ler artık DMZ cluster'da; edge compose'da WAF servisi host'a port yayınlamaz
-for svc in coraza-spoa; do
-    port=$(docker compose -f "$EDGE_DIR/docker-compose.yml" port "$svc" 443 2>/dev/null)
-    if [[ -z "$port" ]]; then
-        echo "PASS  $svc host'a açık değil"; pass=$((pass + 1))
-    else
-        echo "FAIL  $svc host'a açık: $port"; fail=$((fail + 1))
-    fi
-done
+# 10) Gateway'ler artık DMZ cluster'da (bu testin WAF kısmı Coraza kaldırıldığı için yok)
 
 summary

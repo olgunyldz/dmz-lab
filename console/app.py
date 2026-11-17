@@ -7,7 +7,7 @@
 Kanallar: web, mobile, partner, branch (şube), public.
 
 Ön koşullar: edge ayakta (docker compose), gw-branch kurulu (load-branch.sh), identity kurulu (setup-realm.sh),
-kubectl erişimi. Sunucu identity Keycloak'a port-forward açar (mobil login için).
+kubectl erişimi. Sunucu identity IdP'ye port-forward açar (mobil login için).
 
 Güvenlik notları (lab): client secret ve parolalar yalnız bellekte; tarayıcıya gönderilmez. Token'lar
 tarayıcıya ham gitmez, yalnız claim özeti. Token imzası burada doğrulanmaz.
@@ -111,18 +111,24 @@ def b64u_dec(s):
     return base64.urlsafe_b64decode(s + "=" * (-len(s) % 4))
 
 
+# Test adı -> Spring IdP secret anahtarı (idp/idp-secrets). branch-app istemcisi WEB_APP_SECRET ile kayıtlı.
+IDP_SECRET_KEYS = {"web-app": "WEB_APP_SECRET", "partner-acme": "PARTNER_ACME_SECRET", "branch-app": "WEB_APP_SECRET",
+                   "alice-password": "ALICE_PASSWORD", "teller-password": "TELLER_PASSWORD"}
+
+
 def load_secrets():
-    out = subprocess.run(["kubectl", "--context", "kind-identity", "-n", "auth", "get", "secret",
-                          "keycloak-client-secrets", "-o", "json"], capture_output=True, text=True, check=True).stdout
+    out = subprocess.run(["kubectl", "--context", "kind-identity", "-n", "idp", "get", "secret",
+                          "idp-secrets", "-o", "json"], capture_output=True, text=True, check=True).stdout
     data = json.loads(out)["data"]
-    for key in ("web-app", "partner-acme", "branch-app", "alice-password", "teller-password"):
+    for name, key in IDP_SECRET_KEYS.items():
         if key in data:
-            SECRETS[key] = base64.b64decode(data[key]).decode()
+            SECRETS[name] = base64.b64decode(data[key]).decode()
 
 
 def start_identity_forward():
-    proc = subprocess.Popen(["kubectl", "--context", "kind-identity", "-n", "auth", "port-forward",
-                             "svc/keycloak", f"{IDENTITY_PORT}:8080"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    # Spring IdP iç HTTP portu (8080): mobil login DPoP htu'su http://127.0.0.1:<port>/... ile eşleşir
+    proc = subprocess.Popen(["kubectl", "--context", "kind-identity", "-n", "idp", "port-forward",
+                             "svc/spring-idp", f"{IDENTITY_PORT}:8080"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     atexit.register(proc.terminate)
     time.sleep(3)
     return proc
@@ -232,31 +238,50 @@ def request_for(cfg):
                                                     client_cert=cfg["cert"])
 
 
-def keycloak_pkce(req, cfg, username, password, client_secret=None, dpop_for_token=None):
+def cookie_header(jar):
+    return "; ".join(f"{k}={v}" for k, v in jar.items())
+
+
+def location_path(hdrs):
+    """Location başlığını yol+sorgu olarak döndürür (absolute ise host atılır)."""
+    loc = next((v for k, v in hdrs if k.lower() == "location"), "")
+    p = urllib.parse.urlparse(loc)
+    return loc, (p.path + ("?" + p.query if p.query else ""))
+
+
+def idp_pkce(req, cfg, username, password, client_secret=None, dpop_for_token=None):
+    """Authorization Code + PKCE (Spring IdP): yetkilendirme -> /login (CSRF) -> devam -> code -> token."""
     verifier, challenge = pkce_pair()
     jar = {}
     params = urllib.parse.urlencode({"client_id": cfg["client"], "redirect_uri": cfg["redirect"],
                                      "response_type": "code", "scope": "openid", "state": secrets.token_hex(4),
                                      "code_challenge": challenge, "code_challenge_method": "S256"})
-    st, hdrs, page = req("GET", f"{REALM}/auth?{params}")
+    st, hdrs, _ = req("GET", f"{REALM}/auth?{params}")
     cookies_from(hdrs, jar)
-    m = re.search(r'action="([^"]*login-actions[^"]*)"', page)
+    # Yetkilendirme isteği oturumda saklanır, kullanıcı /login'e yönlendirilir
+    st, hdrs, page = req("GET", "/login", {"Cookie": cookie_header(jar)}, None)
+    cookies_from(hdrs, jar)
+    m = re.search(r'name="_csrf"[^>]*value="([^"]*)"', page)
     if not m:
         raise RuntimeError(f"login formu alınamadı (HTTP {st})")
-    act = urllib.parse.urlparse(html.unescape(m.group(1)))
-    st, hdrs, _ = req("POST", act.path + ("?" + act.query if act.query else ""),
-                      {"Cookie": "; ".join(f"{k}={v}" for k, v in jar.items()),
-                       "Content-Type": "application/x-www-form-urlencoded"},
-                      urllib.parse.urlencode({"username": username, "password": password, "credentialId": ""}))
-    loc = next((v for k, v in hdrs if k.lower() == "location"), "")
+    st, hdrs, _ = req("POST", "/login",
+                      {"Cookie": cookie_header(jar), "Content-Type": "application/x-www-form-urlencoded"},
+                      urllib.parse.urlencode({"username": username, "password": password, "_csrf": m.group(1)}))
+    cookies_from(hdrs, jar)
+    _, target = location_path(hdrs)
+    if not target or "/login" in target:
+        raise RuntimeError(f"giriş başarısız (HTTP {st}); kullanıcı veya parola hatalı olabilir")
+    # Yetkilendirmeye devam: redirect_uri?code=...
+    st, hdrs, _ = req("GET", target, {"Cookie": cookie_header(jar)}, None)
+    loc, _ = location_path(hdrs)
     code = urllib.parse.parse_qs(urllib.parse.urlparse(loc).query).get("code", [None])[0]
     if not code:
-        raise RuntimeError(f"giriş başarısız (HTTP {st}); kullanıcı veya parola hatalı olabilir")
+        raise RuntimeError(f"code alınamadı (HTTP {st})")
     form = {"grant_type": "authorization_code", "client_id": cfg["client"], "code": code,
             "redirect_uri": cfg["redirect"], "code_verifier": verifier}
-    if client_secret:
-        form["client_secret"] = client_secret
     headers = {"Content-Type": "application/x-www-form-urlencoded"}
+    if client_secret:
+        headers["Authorization"] = "Basic " + base64.b64encode(f"{cfg['client']}:{client_secret}".encode()).decode()
     if dpop_for_token:
         headers["DPoP"] = dpop_for_token
     st, _, body = req("POST", f"{REALM}/token", headers, urllib.parse.urlencode(form))
@@ -283,11 +308,11 @@ def do_login(sess, ch, username, password):
         return branch_login(sess, ch, user, password)
     pw = password or (SECRETS.get(cfg["password"]) if cfg["password"] else "")
     if cfg["login"] == "client_credentials":
+        basic = base64.b64encode(f"{cfg['client']}:{SECRETS[cfg['secret']]}".encode()).decode()
         st, _, body = sni_request(cfg["host"], cfg["ca"], "POST", f"{REALM}/token",
-                                  headers={"Content-Type": "application/x-www-form-urlencoded"},
-                                  body=urllib.parse.urlencode({"grant_type": "client_credentials",
-                                                               "client_id": cfg["client"],
-                                                               "client_secret": SECRETS[cfg["secret"]]}),
+                                  headers={"Content-Type": "application/x-www-form-urlencoded",
+                                           "Authorization": "Basic " + basic},
+                                  body=urllib.parse.urlencode({"grant_type": "client_credentials"}),
                                   client_cert=cfg["cert"])
         tok = json.loads(body)
         if "access_token" not in tok:
@@ -297,13 +322,13 @@ def do_login(sess, ch, username, password):
     if cfg["login"] == "pkce_dpop":
         key, x, y = ec_new_key(sess["tmp"])
         proof = dpop_proof(key, x, y, "POST", IDENTITY_TOKEN_URL)
-        tok = keycloak_pkce(identity_req_fn, cfg, user, pw, None, proof)
+        tok = idp_pkce(identity_req_fn, cfg, user, pw, None, proof)
         sess["channels"][ch] = {"access": tok["access_token"], "refresh": tok.get("refresh_token"), "user": user,
                                 "key": key, "x": x, "y": y}
         return summarize(tok["access_token"])
     # pkce (confidential)
     secret = SECRETS.get(cfg["secret"]) if cfg["secret"] else None
-    tok = keycloak_pkce(request_for(cfg), cfg, user, pw, secret)
+    tok = idp_pkce(request_for(cfg), cfg, user, pw, secret)
     sess["channels"][ch] = {"access": tok["access_token"], "refresh": tok.get("refresh_token"), "user": user}
     return summarize(tok["access_token"])
 
@@ -330,12 +355,15 @@ def do_logout(sess, ch):
                                                                  "token": entry.get("refresh") or "",
                                                                  "token_type_hint": "refresh_token"}))
     elif entry and cfg.get("login") == "pkce":
-        form = {"client_id": cfg["client"], "refresh_token": entry.get("refresh") or ""}
+        # RFC 7009 token iptali (Spring IdP /revoke); gizli anahtarlı istemci Basic auth ile
+        headers = {"Content-Type": "application/x-www-form-urlencoded"}
         if cfg.get("secret"):
-            form["client_secret"] = SECRETS[cfg["secret"]]
-        status, _, _ = sni_request(cfg["host"], cfg["ca"], "POST", f"{REALM}/logout",
-                                   headers={"Content-Type": "application/x-www-form-urlencoded"},
-                                   body=urllib.parse.urlencode(form), client_cert=cfg["cert"])
+            headers["Authorization"] = "Basic " + base64.b64encode(
+                f"{cfg['client']}:{SECRETS[cfg['secret']]}".encode()).decode()
+        status, _, _ = sni_request(cfg["host"], cfg["ca"], "POST", f"{REALM}/revoke", headers=headers,
+                                   body=urllib.parse.urlencode({"token": entry.get("refresh") or "",
+                                                                "token_type_hint": "refresh_token"}),
+                                   client_cert=cfg["cert"])
     sess["channels"][ch] = None
     return status
 
@@ -500,14 +528,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if self.path == "/api/logout":
                 ch = req.get("channel")
                 if not sess["channels"].get(ch):
-                    return self._json(200, {"ok": True, "keycloak_status": None, "note": "oturum yoktu"}, sid, new)
+                    return self._json(200, {"ok": True, "idp_status": None, "note": "oturum yoktu"}, sid, new)
                 span = tracing.start_server_span(f"console logout {ch}", child_traceparent(_req.tid),
                                                  {"channel": ch, "http.target": "/api/logout"})
                 try:
                     kc = do_logout(sess, ch)
                 finally:
                     span.end(http_status=200)
-                return self._json(200, {"ok": kc in (200, 204, None), "keycloak_status": kc}, sid, new)
+                return self._json(200, {"ok": kc in (200, 204, None), "idp_status": kc}, sid, new)
             if self.path == "/api/call":
                 res = do_call(sess, req.get("channel"), req.get("method", "GET"), req.get("path", "/"),
                               req.get("auth", "session"), bool(req.get("dpop")), req.get("cert", True),

@@ -1,4 +1,4 @@
-# DMZ auth servisi (ext-authz). Token exchange artık iç kgateway üzerinden gerçek iç Keycloak'a gider.
+# DMZ auth servisi (ext-authz). Token exchange artık iç kgateway üzerinden gerçek iç IdP'ye gider.
 # Kod ConfigMap'leri, exchange secret'ları ve iç CA scripts/load-extauth.sh ile yüklenir.
 ---
 apiVersion: v1
@@ -41,7 +41,7 @@ spec:
               value: https://id.bank.lab.local/realms/bank
             - name: JWKS_URL
               value: https://gw-internal:443/realms/bank/protocol/openid-connect/certs
-            # Kanal başına exchange sertifikası (Keycloak client-x509). Secret yok.
+            # Kanal başına exchange sertifikası (IdP client-x509). Secret yok.
             - name: EXCHANGE_CERT_WEB
               value: /exch/web.crt
             - name: EXCHANGE_KEY_WEB

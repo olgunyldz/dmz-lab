@@ -1,0 +1,174 @@
+# Spring kimlik sağlayıcı (identity cluster, namespace: idp). IdP (namespace: auth) ile yan yana; IdP'ye dokunmaz.
+# Sırlar ve TLS materyali load-spring-idp.sh tarafından üretilir (repoda sır yok):
+#   secret idp-secrets : IDP_DB_PASSWORD, ALICE_PASSWORD, WEB_APP_SECRET, PARTNER_ACME_SECRET, BFF_SECRET, CORE_SVC_SECRET,
+#                        IDP_TLS_KEYSTORE_PASSWORD, IDP_TLS_TRUSTSTORE_PASSWORD
+#   secret idp-tls     : server.p12 (sunucu), trust.p12 (lab CA)
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: idp
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-idp-data
+  namespace: idp
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres-idp
+  namespace: idp
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate   # RWO hacim: eski pod kapanmadan yenisi bağlanmaz
+  selector:
+    matchLabels: {app: postgres-idp}
+  template:
+    metadata:
+      labels: {app: postgres-idp}
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16.15-alpine
+          env:
+            - name: POSTGRES_DB
+              value: idp
+            - name: POSTGRES_USER
+              value: idp
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: idp-secrets, key: IDP_DB_PASSWORD}
+          ports:
+            - containerPort: 5432
+          # Kalıcı hacim (local-path). Prod: HA PostgreSQL (senkron replika, failover) ve yedekleme.
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: postgres-idp-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-idp
+  namespace: idp
+spec:
+  selector: {app: postgres-idp}
+  ports:
+    - port: 5432
+      targetPort: 5432
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spring-idp
+  namespace: idp
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: spring-idp}
+  template:
+    metadata:
+      labels: {app: spring-idp}
+    spec:
+      containers:
+        - name: spring-idp
+          image: dmz-lab/spring-idp:0.1.0
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: IDP_ISSUER
+              value: https://id.bank.lab.local/realms/bank
+            - name: IDP_DB_URL
+              value: jdbc:postgresql://postgres-idp.idp.svc:5432/idp
+            - name: IDP_DB_USER
+              value: idp
+            - name: IDP_DB_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: idp-secrets, key: IDP_DB_PASSWORD}
+            - name: IDP_OTLP_ENDPOINT
+              value: http://__MGMT_NODE_IP__:30318/v1/traces
+            - name: IDP_SIGNING_KEYSTORE
+              value: /signing/signing.p12
+            - name: IDP_SIGNING_KEYSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: idp-secrets, key: IDP_SIGNING_KEYSTORE_PASSWORD}
+            - name: IDP_TLS_KEYSTORE
+              value: /tls/server.p12
+            - name: IDP_TLS_KEYSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: idp-secrets, key: IDP_TLS_KEYSTORE_PASSWORD}
+            - name: IDP_TLS_TRUSTSTORE
+              value: /tls/trust.p12
+            - name: IDP_TLS_TRUSTSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: idp-secrets, key: IDP_TLS_TRUSTSTORE_PASSWORD}
+            - name: ALICE_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: idp-secrets, key: ALICE_PASSWORD}
+            - name: TELLER_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: idp-secrets, key: TELLER_PASSWORD}
+            - name: WEB_APP_SECRET
+              valueFrom:
+                secretKeyRef: {name: idp-secrets, key: WEB_APP_SECRET}
+            - name: PARTNER_ACME_SECRET
+              valueFrom:
+                secretKeyRef: {name: idp-secrets, key: PARTNER_ACME_SECRET}
+            - name: BFF_SECRET
+              valueFrom:
+                secretKeyRef: {name: idp-secrets, key: BFF_SECRET}
+            - name: CORE_SVC_SECRET
+              valueFrom:
+                secretKeyRef: {name: idp-secrets, key: CORE_SVC_SECRET}
+          ports:
+            - containerPort: 8443
+            - containerPort: 8080
+          readinessProbe:
+            httpGet:
+              scheme: HTTPS
+              path: /.well-known/openid-configuration
+              port: 8443
+            initialDelaySeconds: 20
+            periodSeconds: 5
+          volumeMounts:
+            - name: tls
+              mountPath: /tls
+              readOnly: true
+            - name: signing
+              mountPath: /signing
+              readOnly: true
+      volumes:
+        - name: tls
+          secret:
+            secretName: idp-tls
+        - name: signing
+          secret:
+            secretName: idp-signing
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: spring-idp
+  namespace: idp
+spec:
+  type: NodePort
+  selector: {app: spring-idp}
+  ports:
+    - name: https
+      port: 8443
+      targetPort: 8443
+      nodePort: 30443
+    # İç yol (düz HTTP): identity-IdP Endpoints'i buraya yönlendirilir (bkz. internal-cluster/manifests/gateway.yaml)
+    - name: internal
+      port: 8080
+      targetPort: 8080
+      nodePort: 30081

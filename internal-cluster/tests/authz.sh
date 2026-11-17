@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # İç kgateway testi: iç JWT doğrulaması ve kanal bazlı RBAC.
-# İç token'lar gerçek exchange ile alınır: dış token -> iç gateway üzerinden Keycloak token exchange.
+# İç token'lar gerçek exchange ile alınır: dış token -> iç gateway üzerinden IdP token exchange.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -24,7 +24,15 @@ check() {
 jwt_payload() {
     echo "$1" | cut -d. -f2 | tr '_-' '/+' | awk '{ while (length($0) % 4) $0 = $0 "="; print }' | base64 -d 2>/dev/null | tr -d ' '
 }
-secret() { $KI -n auth get secret keycloak-client-secrets -o jsonpath="{.data.$1}" | base64 -d; }
+# Sırlar Spring IdP'nin secret'ından (idp/idp-secrets); test adları -> anahtar eşlemesi
+secret() {
+    local k
+    case "$1" in
+        alice-password) k=ALICE_PASSWORD ;; web-app) k=WEB_APP_SECRET ;; partner-acme) k=PARTNER_ACME_SECRET ;;
+        bff) k=BFF_SECRET ;; core-svc) k=CORE_SVC_SECRET ;; *) k=$1 ;;
+    esac
+    $KI -n idp get secret idp-secrets -o jsonpath="{.data.$k}" | base64 -d
+}
 
 b64u() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
 DPOP_DIR=$(mktemp -d); DPOP_KEY="$DPOP_DIR/dpop.pem"
@@ -39,7 +47,8 @@ dpop_proof() { # <htm> <htu>
 }
 
 PF_PIDS=()
-$KI -n auth port-forward svc/keycloak 18080:8080 >/dev/null 2>&1 & PF_PIDS+=($!)
+IDP_PORT=${IDP_PORT:-18450}
+$KI -n idp port-forward svc/spring-idp "$IDP_PORT:8443" >/dev/null 2>&1 & PF_PIDS+=($!)
 $KN -n gw-internal port-forward svc/gw-internal 19543:443 >/dev/null 2>&1 & PF_PIDS+=($!)
 trap 'kill "${PF_PIDS[@]}" 2>/dev/null' EXIT
 sleep 6
@@ -48,18 +57,21 @@ CURL=(curl)
 if curl -V 2>/dev/null | grep -qi schannel; then CURL=(curl --ssl-no-revoke); fi
 # DMZ kimliği: iç gateway mTLS ister. Windows schannel için PKCS#12.
 CERT_OPTS=(--cert-type P12 --cert "$CERTS/dmz-client.p12:lab-dmz")
-KC_LOCAL=http://127.0.0.1:18080$TOKEN_PATH
+# Yayın adresi (issuer/htu): https://id.bank.lab.local; bağlantı port-forward'a yönlendirilir
+KC_LOCAL=https://id.bank.lab.local$TOKEN_PATH
+IDP_CURL=(curl -s "${CURL[@]:1}" --cacert "$CERTS/internal-ca.crt" --connect-to "id.bank.lab.local:443:127.0.0.1:$IDP_PORT")
 
 json_token() { sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p'; }
 
-# Dış token'lar (Keycloak, identity cluster)
+# Dış token'lar (Spring IdP, identity cluster)
 source "$ROOT/../identity-cluster/tests/lib/pkce.sh"
-PKCE_BASE=http://127.0.0.1:18080
+PKCE_BASE=https://id.bank.lab.local
+PKCE_CURL_ARGS="${CURL[*]:1} --cacert $CERTS/internal-ca.crt --connect-to id.bank.lab.local:443:127.0.0.1:$IDP_PORT"
 WEB_EXT=$(pkce_token web-app https://web.lab.local:8443/callback alice "$(secret alice-password)" "$(secret web-app)" "")
 MOBILE_EXT=$(pkce_token mobile-app com.bank.app:/callback alice "$(secret alice-password)" "" \
     "$(dpop_proof POST "$KC_LOCAL")")
-PARTNER_EXT=$(curl -s -X POST "$KC_LOCAL" -d grant_type=client_credentials -d client_id=partner-acme \
-    -d "client_secret=$(secret partner-acme)" | json_token)
+PARTNER_EXT=$("${IDP_CURL[@]}" -u "partner-acme:$(secret partner-acme)" -X POST "$KC_LOCAL" \
+    -d grant_type=client_credentials | json_token)
 
 # İç token'lar: exchange, iç gateway üzerinden (gerçek yol)
 # İç gateway istemcisi: DMZ kimliği (mTLS) ile openssl s_client (schannel PKCS#12 yükleyemiyor)

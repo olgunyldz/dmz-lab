@@ -11,7 +11,7 @@ module.exports = [
       { id: "gw", label: "kgateway gw-branch\n[DMZ]", color: DMZ },
       { id: "ea", label: "ext-authz (branch)\n[DMZ auth]", color: DMZ },
       { id: "gi", label: "kgateway internal\n[iç]", color: INT },
-      { id: "kc", label: "Keycloak\n[identity]", color: ID },
+      { id: "kc", label: "IdP\n[identity]", color: ID },
       { id: "bff", label: "BFF app-bff\n[iç]", color: INT },
     ],
     messages: [

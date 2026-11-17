@@ -92,11 +92,12 @@ def load_secrets():
         SECRETS["branch-app"] = os.environ["BRANCH_APP_SECRET"]
         SECRETS["teller-password"] = os.environ["TELLER_PASSWORD"]
         return
-    out = subprocess.run(["kubectl", "--context", "kind-identity", "-n", "auth", "get", "secret",
-                          "keycloak-client-secrets", "-o", "json"], capture_output=True, text=True, check=True).stdout
+    # Spring IdP: branch-app istemcisi WEB_APP_SECRET ile kayıtlı (IdP Seeder)
+    out = subprocess.run(["kubectl", "--context", "kind-identity", "-n", "idp", "get", "secret",
+                          "idp-secrets", "-o", "json"], capture_output=True, text=True, check=True).stdout
     data = json.loads(out)["data"]
-    SECRETS["branch-app"] = base64.b64decode(data["branch-app"]).decode()
-    SECRETS["teller-password"] = base64.b64decode(data["teller-password"]).decode()
+    SECRETS["branch-app"] = base64.b64decode(data["WEB_APP_SECRET"]).decode()
+    SECRETS["teller-password"] = base64.b64decode(data["TELLER_PASSWORD"]).decode()
 
 
 def teller_request(method, path, headers=None, body=None, cert=True):
@@ -133,6 +134,21 @@ def cookies_from(hdrs, jar):
     return jar
 
 
+def cookie_header(jar):
+    return "; ".join(f"{k}={v}" for k, v in jar.items())
+
+
+def location_path(hdrs):
+    """Location başlığı: (tam değer, yol+sorgu). Absolute ise host atılır."""
+    loc = next((v for k, v in hdrs if k.lower() == "location"), "")
+    p = urllib.parse.urlparse(loc)
+    return loc, (p.path + ("?" + p.query if p.query else ""))
+
+
+def basic_auth(client, secret):
+    return "Basic " + base64.b64encode(f"{client}:{secret}".encode()).decode()
+
+
 def login(username, password):
     redirect = "https://teller.lab.local/callback"
     verifier = secrets.token_urlsafe(48)
@@ -141,26 +157,32 @@ def login(username, password):
     params = urllib.parse.urlencode({"client_id": "branch-app", "redirect_uri": redirect, "response_type": "code",
                                      "scope": "openid", "state": secrets.token_hex(4),
                                      "code_challenge": challenge, "code_challenge_method": "S256"})
-    st, hdrs, page = teller_request("GET", f"{REALM}/auth?{params}")
+    st, hdrs, _ = teller_request("GET", f"{REALM}/auth?{params}")
     cookies_from(hdrs, jar)
-    m = re.search(r'action="([^"]*login-actions[^"]*)"', page)
+    # Spring IdP: yetkilendirme isteği oturumda kalır, /login'e yönlendirilir; CSRF'li form
+    st, hdrs, page = teller_request("GET", "/login", headers={"Cookie": cookie_header(jar)})
+    cookies_from(hdrs, jar)
+    m = re.search(r'name="_csrf"[^>]*value="([^"]*)"', page)
     if not m:
         raise RuntimeError(f"login formu alınamadı (HTTP {st})")
-    act = urllib.parse.urlparse(html.unescape(m.group(1)))
-    st, hdrs, _ = teller_request("POST", act.path + ("?" + act.query if act.query else ""),
-                                 headers={"Cookie": "; ".join(f"{k}={v}" for k, v in jar.items()),
+    st, hdrs, _ = teller_request("POST", "/login",
+                                 headers={"Cookie": cookie_header(jar),
                                           "Content-Type": "application/x-www-form-urlencoded"},
                                  body=urllib.parse.urlencode({"username": username, "password": password,
-                                                              "credentialId": ""}))
-    loc = next((v for k, v in hdrs if k.lower() == "location"), "")
+                                                              "_csrf": m.group(1)}))
+    cookies_from(hdrs, jar)
+    _, target = location_path(hdrs)
+    if not target or "/login" in target:
+        raise RuntimeError(f"giriş başarısız (HTTP {st}); parola veya kullanıcı hatalı olabilir")
+    st, hdrs, _ = teller_request("GET", target, headers={"Cookie": cookie_header(jar)})
+    loc, _ = location_path(hdrs)
     code = urllib.parse.parse_qs(urllib.parse.urlparse(loc).query).get("code", [None])[0]
     if not code:
-        raise RuntimeError(f"giriş başarısız (HTTP {st}); parola veya kullanıcı hatalı olabilir")
+        raise RuntimeError(f"code alınamadı (HTTP {st})")
     st, _, body = teller_request("POST", f"{REALM}/token",
-                                 headers={"Content-Type": "application/x-www-form-urlencoded"},
+                                 headers={"Content-Type": "application/x-www-form-urlencoded",
+                                          "Authorization": basic_auth("branch-app", SECRETS["branch-app"])},
                                  body=urllib.parse.urlencode({"grant_type": "authorization_code",
-                                                              "client_id": "branch-app",
-                                                              "client_secret": SECRETS["branch-app"],
                                                               "code": code, "redirect_uri": redirect,
                                                               "code_verifier": verifier}))
     tok = json.loads(body)
@@ -227,15 +249,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if self.path == "/api/logout":
                 status = None
                 if s["tok"]:
-                    status, _, _ = teller_request("POST", f"{REALM}/logout",
-                                                  headers={"Content-Type": "application/x-www-form-urlencoded"},
+                    # RFC 7009 token iptali (Spring IdP /revoke), istemci Basic auth ile
+                    status, _, _ = teller_request("POST", f"{REALM}/revoke",
+                                                  headers={"Content-Type": "application/x-www-form-urlencoded",
+                                                           "Authorization": basic_auth("branch-app",
+                                                                                       SECRETS["branch-app"])},
                                                   body=urllib.parse.urlencode({
-                                                      "client_id": "branch-app",
-                                                      "client_secret": SECRETS["branch-app"],
-                                                      "refresh_token": s["tok"].get("refresh_token", "")}))
+                                                      "token": s["tok"].get("refresh_token", ""),
+                                                      "token_type_hint": "refresh_token"}))
                 s["tok"] = None
                 s["user"] = None
-                return self._json(200, {"ok": status in (None, 204), "keycloak_status": status}, sid, new)
+                return self._json(200, {"ok": status in (None, 204), "idp_status": status}, sid, new)
             if self.path == "/api/call":
                 method = req.get("method", "GET")
                 path = req.get("path", "/")

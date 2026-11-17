@@ -8,7 +8,7 @@
 #   0) Ön kontroller ve sertifikalar (edge/certs)
 #   1) mgmt cluster (Vault)                   ← kind ağını oluşturur, edge bunu kullanır
 #   2) Edge (docker compose: HAProxy + WAF)
-#   3) identity cluster (PostgreSQL, Keycloak) + Vault'tan parolalar + realm/client kurulumu
+#   3) identity cluster (Spring IdP + PostgreSQL)
 #   4) internal cluster (kgateway, BFF, core)
 #   5) DMZ cluster (kgateway, kanal gateway'leri, F1) + iç backend + ext-authz + şube
 #
@@ -24,6 +24,8 @@ ROOT="$(cd "$(dirname "$0")" && pwd)"
 CERTS="$ROOT/edge/certs"
 CHECK_ONLY=0
 [[ "${1:-}" == "--check" ]] && CHECK_ONLY=1
+
+echo "UYARI: Demo WAF (mock). Uygulama katmanı saldırı engelleme YOKTUR; prod'da kullanılmaz."
 
 step() { echo; echo "=================== $* ==================="; }
 
@@ -69,12 +71,12 @@ preflight() {
 
     # 3) Repo dosyaları: betiklerin ve manifest'lerin varlığı
     local required=(
-        edge/docker-compose.yml edge/haproxy/haproxy.cfg.tpl edge/scripts/build-waf.sh
+        edge/docker-compose.yml edge/haproxy/haproxy.cfg.tpl
         edge/scripts/gen-certs.sh edge/scripts/gen-branch-certs.sh edge/scripts/gen-internal-certs.sh
         mgmt-cluster/kind-config.yaml mgmt-cluster/scripts/up.sh
         identity-cluster/kind-config.yaml identity-cluster/scripts/up.sh
-        identity-cluster/scripts/load-vault.sh identity-cluster/scripts/setup-realm.sh
-        identity-cluster/keycloak-spi/Dockerfile
+        identity-cluster/scripts/load-spring-idp.sh identity-cluster/manifests/spring-idp.yaml
+        identity-cluster/spring-idp/Dockerfile
         internal-cluster/kind-config.yaml internal-cluster/scripts/up.sh
         internal-cluster/scripts/load-services.sh
         dmz-cluster/kind-config.yaml dmz-cluster/scripts/up.sh
@@ -128,7 +130,7 @@ preflight() {
         fi
     done
 
-    # 7) İnternet: gateway API manifest'i, kgateway chart, WAF/Keycloak bağımlılıkları
+    # 7) İnternet: gateway API manifest'i, kgateway chart, IdP imaj bağımlılıkları
     for url in https://github.com https://cr.kgateway.dev; do
         if curl -sI --max-time 10 "$url" >/dev/null 2>&1; then
             pass "erişilebilir: $url"
@@ -168,20 +170,12 @@ fi
 bash "$ROOT/edge/scripts/gen-branch-certs.sh"
 bash "$ROOT/edge/scripts/gen-internal-certs.sh"
 
-# Yerel imajlar (Docker Hub'da yok ya da kind'a yüklenmeli)
-if ! docker image inspect dmz-lab/coraza-spoa:0.9.1 >/dev/null 2>&1; then
-    bash "$ROOT/edge/scripts/build-waf.sh"
-fi
-if ! docker image inspect dmz-lab/keycloak-dpop:26.6 >/dev/null 2>&1; then
-    docker build -t dmz-lab/keycloak-dpop:26.6 "$ROOT/identity-cluster/keycloak-spi"
-fi
-
 # 1) mgmt cluster (Vault). kind ağı bu adımda oluşur.
 step "1/5 mgmt cluster (Vault, F9)"
 bash "$ROOT/mgmt-cluster/scripts/up.sh"
 
 # 2) Edge
-step "2/5 Edge (HAProxy + Coraza WAF)"
+step "2/5 Edge (HAProxy, demo WAF yok)"
 # HAProxy yapılandırması: DMZ IP'leri henüz yoksa (ilk kurulum) yer tutucular 127.0.0.1 ile başlatılır;
 # DMZ kurulduktan sonra render-haproxy.sh gerçek IP'lerle yeniden üretir ve HAProxy'yi yeniden başlatır.
 if [[ ! -f "$ROOT/edge/haproxy/haproxy.cfg" ]]; then
@@ -190,10 +184,9 @@ if [[ ! -f "$ROOT/edge/haproxy/haproxy.cfg" ]]; then
 fi
 docker compose -f "$ROOT/edge/docker-compose.yml" up -d
 
-# 3) identity: cluster, Vault'tan parolalar, Keycloak, realm
-step "3/5 identity cluster (Keycloak, PostgreSQL, F8)"
+# 3) identity: cluster, Spring IdP, PostgreSQL, F8
+step "3/5 identity cluster (Spring IdP, PostgreSQL, F8)"
 bash "$ROOT/identity-cluster/scripts/up.sh"
-bash "$ROOT/identity-cluster/scripts/setup-realm.sh"
 
 # 4) internal
 step "4/5 internal cluster (gw-internal, BFF, core)"

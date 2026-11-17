@@ -1,48 +1,54 @@
 # Ortak yardımcı: Authorization Code + PKCE ile token alır (şifre grant'i yok).
-# Kullanıcı login'i Keycloak'ın gerçek login formu üzerinden yapılır.
+# Kullanıcı girişi Spring IdP'nin login formu üzerinden yapılır (CSRF belirteci ile).
 #
 # Kullanım (çağıran betik kendi port-forward'ını açmış olmalı):
 #   source "$ROOT/../identity-cluster/tests/lib/pkce.sh"
-#   PKCE_BASE=http://127.0.0.1:18080          # port-forward (token ve auth uç noktaları)
-#   PKCE_PUBLIC_HOST=https://id.bank.lab.local # Keycloak KC_HOSTNAME (form action'daki host)
+#   PKCE_BASE=https://id.bank.lab.local                       # yayın adresi (issuer host'u)
+#   PKCE_CURL_ARGS="--cacert <internal-ca> --connect-to id.bank.lab.local:443:127.0.0.1:<port>"
 #   WEB_TOKEN=$(pkce_token web-app https://web.lab.local:8443/callback alice "$ALICE_PW" "$WEB_SECRET")
 #   MOBILE_TOKEN=$(pkce_token mobile-app com.bank.app:/callback alice "$ALICE_PW" "" "$DPOP_PROOF_FOR_TOKEN_URL")
 #
 # Sınır: alice şifresi yalnız lab'da var (test kullanıcısı). Prod'da bu yardımcı kullanılmaz.
 
-PKCE_BASE=${PKCE_BASE:-http://127.0.0.1:18080}
-PKCE_PUBLIC_HOST=${PKCE_PUBLIC_HOST:-https://id.bank.lab.local}
+PKCE_BASE=${PKCE_BASE:-https://id.bank.lab.local}
 
-# Ek curl argümanları (ör. --cacert, --resolve). Lab: web.lab.local:8443 üzerinden https (DMZ /realms route'u).
+# Ek curl argümanları (--cacert, --connect-to). Port-forward'a yönlendirme için kullanılır.
 PKCE_CURL_ARGS=${PKCE_CURL_ARGS:-}
-_pkce_curl() { curl ${PKCE_CURL_ARGS} "$@"; }
+_pkce_curl() { curl -s ${PKCE_CURL_ARGS} "$@"; }
 
 _pkce_b64u() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
+
+# Location başlığını döndürür (yönlendirme yapılmaz)
+_pkce_location() { tr -d '\r' | grep -i '^location:' | head -1 | sed 's/^[Ll]ocation: //'; }
 
 # pkce_token <client_id> <redirect_uri> <user> <password> <client_secret|""> <dpop_proof|"">
 # Çıktı: access_token (boş ise hata; ham yanıt stderr'e yazılır)
 pkce_token() {
     local client=$1 redirect=$2 user=$3 pw=$4 secret=$5 proof=${6:-}
-    local verifier challenge jar page action loc code body token
+    local verifier challenge jar page csrf loc code body token
 
     verifier=$(openssl rand -hex 32)
     challenge=$(printf '%s' "$verifier" | openssl dgst -sha256 -binary | _pkce_b64u)
     jar=$(mktemp)
 
-    # 1) Yetkilendirme isteği: login formunu al
-    page=$(_pkce_curl -s -c "$jar" -b "$jar" -G "$PKCE_BASE/realms/bank/protocol/openid-connect/auth" \
+    # 1) Yetkilendirme isteği: IdP oturumu başlatır ve /login'e yönlendirir (istek oturumda saklanır)
+    _pkce_curl -c "$jar" -b "$jar" -o /dev/null -D - -G "$PKCE_BASE/realms/bank/protocol/openid-connect/auth" \
         --data-urlencode "client_id=$client" --data-urlencode "redirect_uri=$redirect" \
         -d response_type=code -d scope=openid -d state=lab \
-        -d code_challenge="$challenge" -d code_challenge_method=S256)
+        -d code_challenge="$challenge" -d code_challenge_method=S256 >/dev/null
 
-    # 2) Form action: KC_HOSTNAME (https://id.bank.lab.local) yerine port-forward adresine çevrilir
-    action=$(echo "$page" | grep -o 'action="[^"]*"' | head -1 | sed 's/action="//;s/"$//;s/&amp;/\&/g')
-    action=${action/$PKCE_PUBLIC_HOST/$PKCE_BASE}
+    # 2) Login formu ve CSRF belirteci
+    page=$(_pkce_curl -c "$jar" -b "$jar" "$PKCE_BASE/login")
+    csrf=$(echo "$page" | sed -n 's/.*name="_csrf"[^>]*value="\([^"]*\)".*/\1/p' | head -1)
 
-    # 3) Kimlik bilgilerini gönder: 302 Location içinde code
-    loc=$(_pkce_curl -s -o /dev/null -D - -c "$jar" -b "$jar" -X POST "$action" \
-        --data-urlencode "username=$user" --data-urlencode "password=$pw" --data-urlencode "credentialId=" \
-        | tr -d '\r' | grep -i '^location:' | sed 's/^[Ll]ocation: //')
+    # 3) Kimlik bilgileri: 302 -> kayıtlı yetkilendirme isteği
+    loc=$(_pkce_curl -c "$jar" -b "$jar" -o /dev/null -D - -X POST "$PKCE_BASE/login" \
+        --data-urlencode "username=$user" --data-urlencode "password=$pw" --data-urlencode "_csrf=$csrf" \
+        | _pkce_location)
+
+    # 4) Yetkilendirmeye devam: 302 -> redirect_uri?code=...
+    if [[ -n "$loc" && "$loc" != http* ]]; then loc="$PKCE_BASE$loc"; fi
+    loc=$(_pkce_curl -c "$jar" -b "$jar" -o /dev/null -D - "$loc" | _pkce_location)
     code=$(echo "$loc" | sed -n 's/.*[?&]code=\([^&]*\).*/\1/p')
     rm -f "$jar"
     if [[ -z "$code" ]]; then
@@ -50,13 +56,14 @@ pkce_token() {
         return 1
     fi
 
-    # 4) Token: code + code_verifier (+ confidential ise secret, mobil ise DPoP proof)
+    # 5) Token: code + code_verifier (+ confidential ise secret, mobil ise DPoP proof)
     local -a args=(-d grant_type=authorization_code -d "client_id=$client" -d "code=$code"
                    -d "redirect_uri=$redirect" -d "code_verifier=$verifier")
-    [[ -n "$secret" ]] && args+=(-d "client_secret=$secret")
+    # Gizli anahtarlı istemci: client_secret_basic (IdP kaydı bu yöntemi bekler)
     local -a hdr=()
-    [[ -n "$proof" ]] && hdr=(-H "DPoP: $proof")
-    body=$(_pkce_curl -s -X POST "$PKCE_BASE/realms/bank/protocol/openid-connect/token" "${hdr[@]}" "${args[@]}")
+    [[ -n "$secret" ]] && hdr+=(-u "$client:$secret")
+    [[ -n "$proof" ]] && hdr+=(-H "DPoP: $proof")
+    body=$(_pkce_curl -X POST "$PKCE_BASE/realms/bank/protocol/openid-connect/token" "${hdr[@]}" "${args[@]}")
     token=$(echo "$body" | sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p')
     if [[ -z "$token" ]]; then
         echo "pkce: token alınamadı ($client): $(echo "$body" | cut -c1-200)" >&2

@@ -4,7 +4,7 @@
 #   http://127.0.0.1:3000  Grafana      (kullanıcı admin; parola: grafana-admin secret'ı)
 #   http://127.0.0.1:9090  Prometheus
 #   http://127.0.0.1:8200  Vault        (sealed olabilir; UI yine açılır)
-#   http://127.0.0.1:18080/admin/  Keycloak admin (kullanıcı admin; parola: identity cluster'ı auth/keycloak-admin secret'ı)
+#   https://127.0.0.1:18080        Spring IdP (identity cluster, svc/spring-idp; sertifika lab CA ile imzalı)
 #
 # Kullanım (repo kökünden):
 #   bash mgmt-cluster/scripts/tools-forward.sh start   arka planda başlat
@@ -20,7 +20,7 @@ TOOLS=(
     "grafana|kind-mgmt|observability|svc/grafana|3000:3000"
     "prometheus|kind-mgmt|observability|svc/prometheus|9090:9090"
     "vault|kind-mgmt|secrets|svc/vault-nodeport|8200:8200"
-    "keycloak|kind-identity|auth|svc/keycloak|18080:8080"
+    "spring-idp|kind-identity|idp|svc/spring-idp|18080:8443"
 )
 
 start() {

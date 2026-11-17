@@ -2,7 +2,7 @@
 # Şube (branch) zone sertifikaları. Idempotent: var olan dosyalar yeniden üretilmez; mevcut CA'lar değişmez.
 #   branch-ca          : YENİ. Şube iş istasyonu (cihaz) istemci sertifikalarını imzalar
 #   gw-branch          : internal-ca ile. gw-branch sunucu sertifikası (SAN teller.lab.local, gw-branch)
-#   dmz-exchange-branch: internal-ca ile. Keycloak client-x509 exchange istemcisi (CN=dmz-exchange-branch)
+#   dmz-exchange-branch: internal-ca ile. IdP client-x509 exchange istemcisi (CN=dmz-exchange-branch)
 #   branch-device      : branch-ca ile. Şube iş istasyonu (CN=branch-ws-01), gw-branch'e mTLS ile bağlanır
 set -euo pipefail
 export MSYS_NO_PATHCONV=1

@@ -30,7 +30,7 @@ function architecture() {
 
   // Edge
   p.node("ha", 265, 125, 195, 96, "HAProxy 3.0\nSNI passthrough · TLS · L7 limit\nhost yönlendirme", "edge");
-  p.node("waf", 265, 245, 195, 58, "Coraza WAF\nOWASP CRS · SPOE", "edge");
+  p.node("waf", 265, 245, 195, 58, "WAF (mock, demo)\nuygulama katmanı koruma yok", "edge");
   p.node("ddos", 265, 330, 195, 58, "DDoS / CDN\n[prod]", "planned");
   p.node("vip", 265, 415, 195, 58, "HA çifti · VRRP\n[prod]", "planned");
 
@@ -56,7 +56,7 @@ function architecture() {
   p.node("hsm", 1370, 385, 290, 52, "HSM / KMS · realm imza anahtarı (D-12) [prod]", "planned");
 
   // Identity
-  p.node("kc", 520, 780, 375, 78, "Keycloak 26.6\nrealm bank · token exchange (standart V2 + SPI) · client-x509 · OTel", "identity");
+  p.node("kc", 520, 780, 375, 78, "Spring IdP\nrealm bank · token exchange (RFC 8693) · tls_client_auth · DPoP", "identity");
   p.node("pg", 520, 880, 175, 62, "PostgreSQL 16\n[lab: emptyDir]", "identity");
 
   // Mgmt
@@ -149,12 +149,12 @@ function architecture() {
 const IO_ROWS = [
   { k: "ha", name: "HAProxy 3.0 (edge)", kind: "edge",
     inp: "TLS 443 istemci bağlantısı, SNI, HTTP istek; kanal ve host kuralları",
-    out: "Yeniden şifrelenmiş istek → gw-web, gw-mobile\nTCP geçiş → gw-partner, gw-branch\nSPOE isteği → WAF",
+    out: "Yeniden şifrelenmiş istek → gw-web, gw-mobile\nTCP geçiş → gw-partner, gw-branch",
     tools: "haproxy 3.0 · stick table (L4/L7 hız) · health check GET /public/branches" },
-  { k: "waf", name: "Coraza WAF (SPOA)", kind: "edge",
-    inp: "SPOE: HTTP başlık ve gövde",
-    out: "allow / deny (403 waf-block)",
-    tools: "coraza-spoa 0.9.1 · OWASP CRS" },
+  { k: "waf", name: "WAF (mock, demo)", kind: "edge",
+    inp: "Demo: yok. Engelleme yapılmaz",
+    out: "Demo: doğrudan geçiş",
+    tools: "Gerçek WAF kararı güvenlik ekibinde" },
   { k: "gw", name: "kgateway gw-web / mobile / partner / branch", kind: "dmz",
     inp: "HTTPS istek; partner ve branch: istemci sertifikası (mTLS)",
     out: "/bff ve /partner → ext-authz çağrısı\n/public ve /realms → iç gateway (mTLS)",
@@ -162,7 +162,7 @@ const IO_ROWS = [
   { k: "ext", name: "ext-authz (auth, DMZ)", kind: "dmz",
     inp: "Bearer (web) veya DPoP proof + token (mobile); dış JWT (RS256, JWKS)",
     out: "İç JWT (exchange sonucu, yalnız iç ağda)\nHata: JSON gövde 401 / 403 / 5xx",
-    tools: "Python stdlib · Keycloak token exchange (client-x509, mTLS) · OTLP · metrik" },
+    tools: "Python stdlib · IdP token exchange (client-x509, mTLS) · OTLP · metrik" },
   { k: "gwi", name: "kgateway gw-internal", kind: "internal",
     inp: "DMZ mTLS istemci sertifikası + iç JWT",
     out: "Doğrulanmış kimlik; RBAC kararı (x-channel)\n/bff/* → BFF, /api/v1 → core",
@@ -175,14 +175,14 @@ const IO_ROWS = [
     inp: "BFF veya partner isteği; Idempotency-Key (transfer)",
     out: "Hesap, işlem, transfer yanıtları (JSON)\nMetrik: transfer sayısı ve tutarı",
     tools: "Python stdlib · bellekte, sub bazlı deterministik hesap deposu" },
-  { k: "kc", name: "Keycloak 26.6 (identity)", kind: "identity",
+  { k: "kc", name: "Spring IdP (identity)", kind: "identity",
     inp: "Login (PKCE), client credentials, token exchange (client-x509), DPoP proof",
     out: "Access token (RS256), JWKS, exchange token; realm bank",
-    tools: "Keycloak 26.6 · SPI dmz-dpop-mobile-exchange · PostgreSQL 16 · OTel" },
+    tools: "Spring IdP · DPoP (mobil) · PostgreSQL 16" },
   { k: "vault", name: "Vault 1.18 (mgmt, secrets)", kind: "mgmt",
-    inp: "init / unseal; KV v2 yazma (Keycloak parolaları)",
+    inp: "init / unseal; KV v2 yazma (IdP parolaları)",
     out: "Identity secret'ları (load-vault.sh türetir)",
-    tools: "vault CLI (betik) · KV v2 · keycloak politikası" },
+    tools: "vault CLI (betik) · KV v2" },
   { k: "prom", name: "Prometheus 2.55 (mgmt)", kind: "mgmt",
     inp: "/metrics scrape: bff, core, ext-authz, kube-state-metrics",
     out: "PromQL sonuçları (Grafana'ya)",
@@ -214,7 +214,7 @@ const IO_ROWS = [
   { k: "extb", name: "ext-authz branch profili (auth)", kind: "dmz",
     inp: "Dış token (aud channel-branch, RS256), X-Dmz-Channel=branch",
     out: "Token exchange sonucu iç JWT (channel=branch, auth_method=branch_cert)",
-    tools: "Python stdlib · Keycloak exchange (dmz-exchange-branch, client-x509)" },
+    tools: "Python stdlib · IdP exchange (dmz-exchange-branch, client-x509)" },
   { k: "tests", name: "Test süitleri (run-all.sh)", kind: "host",
     inp: "Çalışan cluster'lar, port-forward, sırlar",
     out: "Süit başına PASS / FAIL tablosu",
@@ -264,7 +264,7 @@ function allClusters() {
       nss: [
         { name: "docker: dmz-edge-lab", color: "#B45309", pods: [
           { k: "e_ha", label: "haproxy (HAProxy 3.0)" },
-          { k: "e_waf", label: "coraza-spoa (WAF)" },
+          { k: "e_waf", label: "WAF (mock, demo)" },
         ] },
       ] },
     { zone: "dmz", title: "DMZ cluster (kind-dmz)", x: 270, w: 370, h: 900, color: "#C2410C", kind: "dmz",
@@ -287,7 +287,7 @@ function allClusters() {
     { zone: "identity", title: "Identity cluster (kind-identity)", x: 1000, w: 240, h: 900, color: "#6D28D9", kind: "identity",
       nss: [
         { name: "auth", color: "#6D28D9", pods: [
-          { k: "id_kc", label: "keycloak 26.6 (SPI)" },
+          { k: "id_kc", label: "Spring IdP (DPoP, XFCC)" },
           { k: "id_pg", label: "postgres 16" },
         ] },
       ] },

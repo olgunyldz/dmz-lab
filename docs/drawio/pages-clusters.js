@@ -37,7 +37,7 @@ function dmzCluster() {
 
   // Zone dışı: iç cluster ve identity (bağlantı noktaları)
   p.node("ext_gwi", 1290, 140, 220, 70, "gw-internal\n(kind-internal)\nF2: mTLS + iç JWT", "internal", 10);
-  p.node("ext_kc", 1290, 300, 220, 70, "Keycloak\n(kind-identity)\ntoken exchange", "identity", 10);
+  p.node("ext_kc", 1290, 300, 220, 70, "IdP\n(kind-identity)\ntoken exchange", "identity", 10);
   p.node("ext_branch", 1290, 440, 220, 70, "Şube cluster (kind-branch)\nWAN · HAProxy yok · F10 mTLS", "branch", 10);
 
   p.edge("gw_web", "ext", "ext-authz");
@@ -79,7 +79,7 @@ function internalCluster() {
 
   p.ns(300, 120, 330, 190, "gw-internal", "#1D4ED8");
   p.node("gwi", 320, 160, 290, 80, "gw-internal pod (Envoy)\nlistener 443 · istemci sertifikası zorunlu\nRBAC: x-channel eşleşmesi", "internal", 10);
-  p.resource("gwi_r", 320, 250, 290, 50, "Secret gw-internal-tls · ConfigMap dmz-client-ca\nService identity-keycloak → 172.18.0.5:30080");
+  p.resource("gwi_r", 320, 250, 290, 50, "Secret gw-internal-tls · ConfigMap dmz-client-ca\nService identity-idp → 172.18.0.5:30081");
 
   p.ns(650, 120, 180, 190, "app-bff", "#1D4ED8");
   p.node("bff", 665, 160, 150, 80, "bff (svc.py)\nkanal şekillendirme\n:8080 · :9100", "internal", 10);
@@ -94,7 +94,7 @@ function internalCluster() {
 
   // Zone dışı bağlantılar
   p.node("x_dmz", 1100, 400, 200, 60, "DMZ gateway'leri\n(kind-dmz)", "dmz", 10);
-  p.node("x_kc", 1100, 520, 200, 60, "Keycloak\n(kind-identity)", "identity", 10);
+  p.node("x_kc", 1100, 520, 200, 60, "IdP\n(kind-identity)", "identity", 10);
   p.node("x_prom", 1100, 130, 200, 70, "Prometheus\n(kind-mgmt)\nscrape 30901 / 30902 / 30904", "mgmt", 10);
   p.node("x_tempo", 1100, 250, 200, 70, "Grafana Tempo\n(kind-mgmt)\nOTLP 30318", "mgmt", 10);
 
@@ -129,17 +129,17 @@ function identityCluster() {
   const p = new Page("6 Identity cluster içi");
   p.text(20, 12, 1300, 34, "Identity cluster içi: namespace ve pod'lar (kind-identity)",
     "text;html=1;fontStyle=1;fontSize=18;align=left;verticalAlign=middle;fontColor=#0F172A;");
-  p.text(20, 40, 1300, 22, "Node'lar: 172.18.0.5, .6, .7. Keycloak yalnız iç node'lardan ve DMZ'nin iç kanalından erişilir (F8).",
+  p.text(20, 40, 1300, 22, "Node'lar: 172.18.0.5, .6, .7. IdP yalnız iç node'lardan ve DMZ'nin iç kanalından erişilir (F8).",
     "text;html=1;fontSize=11;align=left;verticalAlign=middle;fontColor=#64748B;");
 
   p.zone(20, 70, 800, 500, "Identity cluster (kind-identity)", "identity");
   p.fw("f8", 36, 100, "F8");
 
   p.ns(40, 130, 740, 300, "auth", "#6D28D9");
-  p.node("kc", 60, 170, 380, 110, "Keycloak 26.6 pod\nimaj: dmz-lab/keycloak-dpop:26.6\nrealm bank · SPI · OTel · :8080", "identity", 10);
-  p.resource("kc_r", 60, 300, 380, 110, "Secret keycloak-db, keycloak-admin (Vault türevi)\nNodePort keycloak-nodeport 30080\nSPI: dmz-dpop-mobile-exchange (order 100)");
+  p.node("kc", 60, 170, 380, 110, "Spring IdP pod\nimaj: dmz-lab/spring-idp:0.1.0\nrealm bank · DPoP · XFCC · :8443 / :8080", "identity", 10);
+  p.resource("kc_r", 60, 300, 380, 110, "Secret idp-secrets, idp-tls\nNodePort spring-idp 30443 (HTTPS), 30081 (iç HTTP)\nDPoP: DpopRequiredFilter (mobile-app)");
   p.node("pg", 460, 170, 260, 110, "PostgreSQL 16 pod\nemptyDir (lab)\n:5432", "identity", 10);
-  p.resource("pg_r", 460, 300, 260, 110, "Secret keycloak-db (JDBC parolası)\nlab: restart'ta veri gider");
+  p.resource("pg_r", 460, 300, 260, 110, "Secret idp-secrets (JDBC parolası)\nlab: restart'ta veri gider");
 
   p.node("x_vault", 900, 130, 220, 70, "Vault 1.18\n(kind-mgmt)\nidentity secret bootstrap", "mgmt", 10);
   p.node("x_gwi", 900, 250, 220, 70, "gw-internal\n(kind-internal)\n/realms · JWKS · exchange", "internal", 10);
@@ -154,8 +154,8 @@ function identityCluster() {
 
   p.text(40, 590, 800, 150,
     "<b>Notlar</b><br>" +
-    "• Realm bank client'ları: web-app, mobile-app (PKCE + DPoP), branch-app, partner-acme (client credentials), dmz-exchange-{web,mobile,partner,branch} (client-x509), bff, core-svc, kgateway-internal.<br>" +
-    "• Kullanıcılar (lab): alice, teller. Parolalar keycloak-client-secrets secret'ında, repo'da yok.",
+    "• Realm bank client'ları: web-app, mobile-app (PKCE + DPoP), branch-app, partner-acme (client credentials), dmz-exchange-{web,mobile,partner,branch} (client-x509), bff, core-svc, .<br>" +
+    "• Kullanıcılar (lab): alice, teller. Parolalar idp/idp-secrets secret'ında, repo'da yok.",
     "text;html=1;fontSize=12;align=left;verticalAlign=top;fontColor=#1F2937;");
 
   return p.build(20);
@@ -187,8 +187,8 @@ function mgmtCluster() {
   p.resource("graf_r", 770, 300, 190, 80, "ConfigMap grafana-datasources, grafana-dashboards\nSecret grafana-admin");
 
   p.node("x_metrics", 1020, 130, 240, 90, "Metrik kaynakları\nbff 30901 · core 30902\next-authz 30903 · kube-state 30904", "internal", 10);
-  p.node("x_otlp", 1020, 250, 240, 80, "OTLP kaynakları\next-authz · bff · core · Keycloak · konsol", "client", 10);
-  p.node("x_identity", 1020, 360, 240, 70, "Keycloak (kind-identity)\nidentity secret alır", "identity", 10);
+  p.node("x_otlp", 1020, 250, 240, 80, "OTLP kaynakları\next-authz · bff · core · IdP · konsol", "client", 10);
+  p.node("x_identity", 1020, 360, 240, 70, "IdP (kind-identity)\nidentity secret alır", "identity", 10);
   p.node("x_host", 1020, 460, 240, 60, "Tarayıcı (host)\nGrafana :3000 port-forward", "host", 10);
 
   p.edge("vault", "x_identity", "identity secret (bootstrap)", "response");
@@ -246,7 +246,7 @@ function podDetail() {
 
   pod("p_gwi", 1, 0, "Pod: gw-internal-xxx (ns gw-internal, kind-internal)", "internal",
     ["envoy · kgateway v2.5.0 · listener :443 mTLS"],
-    "Secret gw-internal-tls (sunucu)\nConfigMap dmz-client-ca (istemci doğrulama)\nListenerPolicy: clientCertificateValidation, OTel tracing\nService identity-keycloak → 172.18.0.5:30080");
+    "Secret gw-internal-tls (sunucu)\nConfigMap dmz-client-ca (istemci doğrulama)\nListenerPolicy: clientCertificateValidation, OTel tracing\nService identity-idp → 172.18.0.5:30081");
   pod("p_bff", 1, 1, "Pod: bff-xxx (ns app-bff, kind-internal)", "internal",
     ["bff · svc.py · :8080 API · :9100 metrik"],
     "ConfigMap svc-code (svc.py, tracing.py, metrics.py)\nENV: CORE_URL, SERVICE_NAME=bff, OTLP_ENDPOINT\nİç JWT doğrulama: iss, aud, exp, kanal");
@@ -254,15 +254,15 @@ function podDetail() {
     ["core · svc.py · :8080 API · :9100 metrik"],
     "ConfigMap svc-code\nBellekte hesap ve işlem deposu (sub bazlı)\nIdempotency-Key kayıtları\nENV: SERVICE_NAME=core, OTLP_ENDPOINT");
 
-  pod("p_kc", 2, 0, "Pod: keycloak-xxx (ns auth, kind-identity)", "identity",
-    ["keycloak · dmz-lab/keycloak-dpop:26.6 · :8080"],
-    "Secret keycloak-db, keycloak-admin (Vault türevi)\nSPI: dmz-dpop-mobile-exchange · x509cert-lookup: envoy\nENV: KC_HOSTNAME, tracing → 172.18.0.12:30318\nNodePort 30080");
-  pod("p_pg", 2, 1, "Pod: postgres-xxx (ns auth, kind-identity)", "identity",
+  pod("p_kc", 2, 0, "Pod: spring-idp-xxx (ns idp, kind-identity)", "identity",
+    ["spring-idp · dmz-lab/spring-idp:0.1.0 · :8443 / :8080"],
+    "Secret idp-secrets, idp-tls\nDPoP + XFCC (yalnız iç port) · issuer https://id.bank.lab.local/realms/bank\nNodePort 30443 (HTTPS), 30081 (iç HTTP)");
+  pod("p_pg", 2, 1, "Pod: postgres-idp-xxx (ns idp, kind-identity)", "identity",
     ["postgres · 16 · :5432"],
-    "emptyDir (lab; restart'ta veri gider)\nSecret keycloak-db (parola)\nAğ kısıtı: F8 host firewall (lab)");
+    "emptyDir (lab; restart'ta veri gider)\nSecret idp-secrets (parola)\nAğ kısıtı: F8 host firewall (lab)");
   pod("p_vault", 2, 2, "Pod: vault-xxx (ns secrets, kind-mgmt)", "mgmt",
     ["vault · 1.18 · :8200"],
-    "emptyDir (lab)\nSecret vault-bootstrap (unseal anahtarı, root token)\nKV v2 · secret/ · politika keycloak\nNodePort 30200 (F9 ile sınırlı)");
+    "emptyDir (lab)\nSecret vault-bootstrap (unseal anahtarı, root token)\nKV v2 · secret/\nNodePort 30200 (F9 ile sınırlı)");
 
   // Pod'lar arası akış
   p.edge("p_gwweb", "p_ext", "ext-authz");
@@ -298,7 +298,7 @@ function branchCluster() {
 
   p.node("x_gwbr", 900, 160, 220, 80, "gw-branch (kind-dmz)\nmTLS cihaz doğrulama\n/bff/*, /realms/*", "dmz", 10);
   p.node("x_ext", 900, 280, 220, 70, "ext-authz (auth, kind-dmz)\nbranch profili · token exchange", "dmz", 10);
-  p.node("x_kc", 900, 390, 220, 70, "Keycloak (kind-identity)\nbranch-app PKCE · dmz-exchange-branch", "identity", 10);
+  p.node("x_kc", 900, 390, 220, 70, "IdP (kind-identity)\nbranch-app PKCE · dmz-exchange-branch", "identity", 10);
 
   p.edge("b_ui", "x_gwbr", "F10 · mTLS + /realms, /bff/*", "internal");
   p.edge("x_gwbr", "x_ext", "ext-authz (branch)");

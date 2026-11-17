@@ -5,7 +5,7 @@ Tasarımdaki (design.md, bölüm 4.1) DMZ Edge katmanının lab gerçeklemesi.
 | Katman | Lab bileşeni | Görev |
 |---|---|---|
 | Yük dengeleyici | HAProxy 3.0 | SNI yönlendirme, TLS sonlandırma, re-encrypt, sağlık kontrolü, host yönlendirme |
-| WAF | Coraza (coraza-spoa v0.9.1) + OWASP CRS | Uygulama katmanı saldırıları (SQLi, XSS, path traversal) |
+| WAF | **Mock (demo).** Coraza kaldırıldı; uygulama katmanı saldırı engelleme yok | Yalnız demo. Gerçek WAF kararı güvenlik ekibinde |
 | DDoS (L4) | HAProxy stick-table | IP başına bağlantı hızı ve eşzamanlı bağlantı sınırı |
 | DDoS (L7) | HAProxy stick-table | IP başına istek hızı sınırı (429) |
 | Slowloris koruması | HAProxy `timeout http-request` | Yarım kalan istekleri kesme (408) |
@@ -21,16 +21,22 @@ Kapsam dışı: hacimsel DDoS (ISP / bulut temizleme katmanı, lab'da simüle ed
 ## Kurulum
 
 ```bash
-# 1) WAF imajı: coraza-spoa v0.9.1 kaynaktan derlenir (bir kez)
-bash edge/scripts/build-waf.sh
-
-# 2) Sertifikalar (bir kez)
+# 1) Sertifikalar (bir kez)
 bash edge/scripts/gen-certs.sh
 
-# 3) Ortam
+# 2) Ortam
 cd edge
 docker compose up -d
 ```
+
+## WAF (demo: mock)
+
+Demo edge'de WAF **mock**'tur: Coraza (coraza-spoa) ve OWASP CRS kaldırıldı. HAProxy trafiği yalnızca yönlendirir, TLS sonlandırır ve L4/L7 hız sınırı uygular; SQLi, XSS veya path traversal engellemez.
+
+Sonuç:
+- `edge/tests/waf.sh` yalnızca normal isteği kontrol eder. Saldırı testleri `SKIP` olarak işaretlenir; `PASS` sayılmaz.
+- Mock çıktısı güvenlik kanıtı değildir. Prod'da kullanılmaz; gerçek WAF kararı güvenlik ekibindedir.
+- Uygulama katmanı koruması bu lab'da yoktur. Gerçek bir WAF eklenecekse design.md'deki WAF kararı ve güvenlik ekibinin onayı gerekir.
 
 ## Testler
 
@@ -38,7 +44,7 @@ docker compose up -d
 bash edge/tests/run-all.sh          # hepsi
 bash edge/tests/smoke.sh            # TLS, yönlendirme, LB, L7 rate limit, partner mTLS
 bash edge/tests/lb.sh               # gw-web-2 düşünce failover ve geri dönüş
-bash edge/tests/waf.sh              # WAF: normal 200, saldırılar 403
+bash edge/tests/waf.sh              # WAF (mock): normal 200; saldırı testleri SKIP
 bash edge/tests/ddos.sh             # L4 bağlantı hızı, slowloris
 ```
 
@@ -54,12 +60,12 @@ Client :8443
        ├─ SNI partner-api.lab.local ──passthrough──> gw-partner-1:443 (mTLS gw-partner'da)
        └─ diğer ──> fe_https (TLS, PROXY protocol)
                       ├─ IP başına istek sınırı (429)
-                      ├─ Coraza WAF (SPOE) ──> coraza-spoa:9000 (403)
+                      ├─ WAF: mock (demo, koruma yok)
                       ├─ web.lab.local     ──re-encrypt──> be_gw_web   (gw-web-1, gw-web-2)
                       └─ mobile-api.lab.local ──re-encrypt──> be_gw_mobile (gw-mobile-1)
 ```
 
-- `edge` ağı: haproxy, coraza-spoa.
+- `edge` ağı: haproxy.
 - `dmz` ağı: haproxy ve gateway'ler. Gateway'lere host'tan port açılmaz.
 - Lab'da gerçek firewall yoktur. Ayrımı docker ağları sağlar.
 

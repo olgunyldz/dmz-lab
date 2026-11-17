@@ -1,11 +1,11 @@
-"""İç STS (lab stub). Gerçekte iç Keycloak'un token-exchange endpoint'i olur (RFC 8693).
+"""İç STS (lab stub). Gerçekte iç IdP'un token-exchange endpoint'i olur (RFC 8693).
 
 Girdi : subject_token (dış token), channel, sub, partner_id
 Kontrol: X-Exchange-Client kanala eşleşmeli (dmz-exchange-<channel>),
          dış token'ın imzası ve channel claim'i kontrol edilir.
 Çıktı  : iç JWT (iss=lab-internal, aud=kgateway-internal), 300 sn ömürlü.
 
-LAB SINIRI: HS256 kullanılır. Üretimde iç Keycloak RS256/ES256 ile imzalar.
+LAB SINIRI: HS256 kullanılır. Üretimde iç IdP RS256/ES256 ile imzalar.
 """
 import base64
 import hashlib

@@ -2,10 +2,10 @@
 
 Her istek için:
   1. X-Dmz-Channel başlığından kanal profilini seç.
-  2. Dış token: RS256 imza (Keycloak JWKS), iss, aud, channel, exp.
+  2. Dış token: RS256 imza (IdP JWKS), iss, aud, channel, exp.
   3. Sender constraint (RFC 9449 DPoP): token cnf.jkt içeriyorsa veya kanal mobile ise,
      DPoP proof doğrulanır: imza, htm, htu, iat, jti tekrarı, ath, cnf.jkt eşleşmesi.
-  4. Token exchange: kanal sertifikasıyla (mTLS, Keycloak client-x509) iç JWT.
+  4. Token exchange: kanal sertifikasıyla (mTLS, IdP client-x509) iç JWT.
   5. 200 + Authorization: Bearer <iç JWT>. İç token istemciye dönmez.
 
 DPoP proof imzaları: RS256 (RSA-2048+) ve ES256 (P-256). İkisi de stdlib ile doğrulanır
@@ -47,7 +47,7 @@ def _tls_ctx(cert, key):
 
 # JWKS çağrısı: DMZ gateway kimliği (iç gateway mTLS ister)
 TLS_CTX = _tls_ctx(os.environ["CLIENT_CERT_FILE"], os.environ["CLIENT_KEY_FILE"])
-# Token exchange: her kanal kendi sertifikasıyla bağlanır (Keycloak client-x509, CN=dmz-exchange-<kanal>)
+# Token exchange: her kanal kendi sertifikasıyla bağlanır (IdP client-x509, CN=dmz-exchange-<kanal>)
 EXCHANGE_CTX = {
     c: _tls_ctx(os.environ[f"EXCHANGE_CERT_{c.upper()}"], os.environ[f"EXCHANGE_KEY_{c.upper()}"])
     for c in ("web", "mobile", "partner", "branch")
@@ -294,7 +294,7 @@ def exchange(subject_token, channel, span=None):
         "audience": INTERNAL_AUDIENCE,
     }).encode()
     child = tracing.start_client_span("ext-authz -> token exchange", span,
-                                      {"peer.service": "keycloak", "exchange.channel": channel}) if span else None
+                                      {"peer.service": "spring-idp", "exchange.channel": channel}) if span else None
     headers = {"Content-Type": "application/x-www-form-urlencoded"}
     if child:
         headers["traceparent"] = child.header()

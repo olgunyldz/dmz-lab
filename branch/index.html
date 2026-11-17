@@ -55,7 +55,7 @@
       <button class="primary" data-act="login">Giriş yap</button>
       <button data-act="logout">Çıkış yap</button>
     </div>
-    <div class="hint">Giriş: Keycloak PKCE (branch-app), çıkış: refresh token iptali.</div>
+    <div class="hint">Giriş: IdP PKCE (branch-app), çıkış: refresh token iptali.</div>
   </section>
 
   <section>
@@ -152,7 +152,7 @@ async function act(btn) {
       else addRow([now(), 'giriş', '-', 'evet', '-', r.status, { cls: 'fail', text: 'FAIL' }, r.data.error]);
     } else if (a === 'logout') {
       const r = await post('/api/logout', {});
-      addRow([now(), 'çıkış', '-', 'evet', '204', r.data.keycloak_status, { cls: r.data.ok ? 'pass' : 'fail', text: r.data.ok ? 'PASS' : 'FAIL' }, 'oturum kapatıldı']);
+      addRow([now(), 'çıkış', '-', 'evet', '204', r.data.idp_status, { cls: r.data.ok ? 'pass' : 'fail', text: r.data.ok ? 'PASS' : 'FAIL' }, 'oturum kapatıldı']);
     } else if (a === 'accounts') {
       const r = await post('/api/call', { method: 'GET', path: '/bff/accounts', auth: 'session', cert: true, expect: '200' });
       const d = r.data;

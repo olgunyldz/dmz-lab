@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ext-authz uçtan uca testi (gerçek Keycloak token'ları).
+# ext-authz uçtan uca testi (gerçek IdP token'ları).
 #   - Dış token DMZ'de RS256 (JWKS), iss, aud, channel, exp ile doğrulanır.
 #   - Geçerliyse ext-authz token exchange yapar, iç JWT yalnızca iç route'lara (/bff, /partner) iletilir.
 #   - İç token hiçbir zaman istemciye dönmez (sızıntı testi).
@@ -10,7 +10,8 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CERTS="$ROOT/../edge/certs"
 KD="kubectl --context kind-dmz"
 KI="kubectl --context kind-identity"
-ISSUER_BASE=http://127.0.0.1:18080/realms/bank/protocol/openid-connect/token
+ISSUER_BASE=https://id.bank.lab.local/realms/bank/protocol/openid-connect/token
+IDP_PORT=${IDP_PORT:-18447}
 
 pass=0
 fail=0
@@ -30,7 +31,15 @@ absent() { # <name> <needle> <haystack>
     fi
 }
 
-secret() { $KI -n auth get secret keycloak-client-secrets -o jsonpath="{.data.$1}" | base64 -d; }
+# Sırlar Spring IdP'nin secret'ından (idp/idp-secrets); test adları -> anahtar eşlemesi
+secret() {
+    local k
+    case "$1" in
+        alice-password) k=ALICE_PASSWORD ;; web-app) k=WEB_APP_SECRET ;; partner-acme) k=PARTNER_ACME_SECRET ;;
+        bff) k=BFF_SECRET ;; core-svc) k=CORE_SVC_SECRET ;; *) k=$1 ;;
+    esac
+    $KI -n idp get secret idp-secrets -o jsonpath="{.data.$k}" | base64 -d
+}
 b64u() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
 
 # DPoP (RFC 9449) proof: test için RSA anahtarı (geçici), RS256 imzalı
@@ -47,7 +56,7 @@ dpop_proof() { # <htm> <htu>
 }
 
 PF_PIDS=()
-$KI -n auth port-forward svc/keycloak 18080:8080 >/dev/null 2>&1 & PF_PIDS+=($!)
+$KI -n idp port-forward svc/spring-idp "$IDP_PORT:8443" >/dev/null 2>&1 & PF_PIDS+=($!)
 $KD -n gw-web     port-forward svc/gw-web     19443:443 >/dev/null 2>&1 & PF_PIDS+=($!)
 $KD -n gw-mobile  port-forward svc/gw-mobile  19444:443 >/dev/null 2>&1 & PF_PIDS+=($!)
 $KD -n gw-partner port-forward svc/gw-partner 19445:443 >/dev/null 2>&1 & PF_PIDS+=($!)
@@ -60,7 +69,8 @@ if curl -V 2>/dev/null | grep -qi schannel; then CURL=(curl --ssl-no-revoke); fi
 # Servis (client credentials) token'ı. Kullanıcı token'ları PKCE ile alınır (aşağıda); şifre grant'i yok.
 token_from() { # <client-id> <secret>
     local body
-    body=$(curl -s -X POST "$ISSUER_BASE" -d grant_type=client_credentials -d client_id="$1" -d "client_secret=$2")
+    body=$("${CURL[@]}" --cacert "$CERTS/internal-ca.crt" --connect-to "id.bank.lab.local:443:127.0.0.1:$IDP_PORT" \
+        -u "$1:$2" -X POST "$ISSUER_BASE" -d grant_type=client_credentials)
     echo "$body" | sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p'
 }
 
@@ -104,7 +114,9 @@ partner_get() { # <token-or-empty> <path>
 
 # Kullanıcı token'ları: Authorization Code + PKCE (web: Bearer, mobil: DPoP bağlı)
 source "$ROOT/../identity-cluster/tests/lib/pkce.sh"
-PKCE_BASE=http://127.0.0.1:18080
+PKCE_BASE=https://id.bank.lab.local
+# IdP TLS: sunucu sertifikası lab CA ile imzalı; yayın host'u port-forward'a yönlendirilir (schannel iptal kontrolü kapalı)
+PKCE_CURL_ARGS="${CURL[*]:1} --cacert $CERTS/internal-ca.crt --connect-to id.bank.lab.local:443:127.0.0.1:$IDP_PORT"
 WEB_TOKEN=$(pkce_token web-app https://web.lab.local:8443/callback alice "$(secret alice-password)" "$(secret web-app)" "")
 MOBILE_TOKEN=$(pkce_token mobile-app com.bank.app:/callback alice "$(secret alice-password)" "" \
     "$(dpop_proof POST "$ISSUER_BASE")")
@@ -140,7 +152,7 @@ wrong_key=$(make_proof "$OTHER_KEY" GET "$MOBILE_HTU" "$MOBILE_TOKEN")
 body=$(mobile_get "$MOBILE_TOKEN" /bff/accounts "$wrong_key")
 check "mobile /bff: anahtar cnf.jkt ile eşleşmiyor -> 401" "does not match" "$body"
 
-# 4d) Geçerli proof -> DPoP kontrolü geçer (401 değil). Token exchange SPI'ye kadar Keycloak reddedebilir.
+# 4d) Geçerli proof -> DPoP kontrolü geçer (401 değil). Token exchange SPI'ye kadar IdP reddedebilir.
 replay_jti="lab-$(openssl rand -hex 6)"
 good=$(make_proof "$DPOP_KEY" GET "$MOBILE_HTU" "$MOBILE_TOKEN" "$replay_jti")
 body=$(mobile_get "$MOBILE_TOKEN" /bff/accounts "$good")

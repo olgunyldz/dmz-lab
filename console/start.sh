@@ -7,9 +7,9 @@ PORT=9000
 
 fail() { echo "HATA: $1" >&2; exit 1; }
 
-# 1) Edge (HAProxy + WAF) ayakta mı?
-running=$(docker ps --format '{{.Names}}' | grep -c "dmz-edge-lab-haproxy-1\|dmz-edge-lab-coraza-spoa-1" || true)
-[[ "$running" -ge 2 ]] || fail "edge ayakta değil. Çalıştırın: cd edge && docker compose up -d"
+# 1) Edge (HAProxy) ayakta mı?
+running=$(docker ps --format '{{.Names}}' | grep -c "dmz-edge-lab-haproxy-1" || true)
+[[ "$running" -ge 1 ]] || fail "edge ayakta değil. Çalıştırın: cd edge && docker compose up -d"
 
 # 2) Gerekli cluster context'leri
 for c in identity dmz; do

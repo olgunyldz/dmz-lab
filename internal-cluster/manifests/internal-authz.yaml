@@ -3,7 +3,7 @@
 #  - /partner/*  : partner kanalı, iç JWT zorunlu
 #  - /public/*   : JWT yok, yalnızca GET (default deny dışında açık path)
 #  - diğer her şey: route tanımsız -> 404 (default deny)
-# JWT doğrulaması: iç Keycloak JWKS (identity-keycloak Service, gw-internal içinden).
+# JWT doğrulaması: iç IdP JWKS (identity-idp Service, gw-internal içinden).
 # claimsToHeaders: channel -> x-channel, sub -> x-user-id (RBAC ve upstream için).
 
 ---
@@ -53,7 +53,7 @@ spec:
       kind: Service
       name: core
 # ============================================================================
-# JWT provider: iç Keycloak (bank realm). JWKS, identity-keycloak Service'inden alınır.
+# JWT provider: iç IdP (bank realm). JWKS, identity-idp Service'inden alınır.
 # ============================================================================
 ---
 apiVersion: gateway.kgateway.dev/v1alpha1
@@ -73,9 +73,9 @@ spec:
           - kgateway-internal
         jwks:
           remote:
-            url: http://identity-keycloak/realms/bank/protocol/openid-connect/certs
+            url: http://identity-idp/realms/bank/protocol/openid-connect/certs
             backendRef:
-              name: identity-keycloak
+              name: identity-idp
               port: 80
             cacheDuration: 5m
         claimsToHeaders:

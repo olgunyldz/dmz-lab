@@ -24,19 +24,25 @@ check() {
     fi
 }
 
-secret() { $KI -n auth get secret keycloak-client-secrets -o jsonpath="{.data.$1}" | base64 -d; }
+# Sırlar Spring IdP'nin secret'ından (idp/idp-secrets); test adları -> anahtar eşlemesi
+secret() {
+    local k
+    case "$1" in
+        alice-password) k=ALICE_PASSWORD ;; teller-password) k=TELLER_PASSWORD ;;
+        web-app|branch-app) k=WEB_APP_SECRET ;; partner-acme) k=PARTNER_ACME_SECRET ;; *) k=$1 ;;
+    esac
+    $KI -n idp get secret idp-secrets -o jsonpath="{.data.$k}" | base64 -d
+}
 
 # probe <path> [bearer-token|-] [cert:yes|no] -> şube pod'undan gw-branch'e ham yanıt
 probe() {
     MSYS_NO_PATHCONV=1 $KB -n branch exec deploy/branch-ui -- python3 /app/probe.py "$1" "${2:--}" "${3:-yes}" 2>&1
 }
 
-# Token alımı: login, DMZ web gateway'in /realms route'u üzerinden https ile (identity port-forward yok).
-# Keycloak çerezleri Secure olduğu için test http değil https konuşur. Form action KC_HOSTNAME (id.bank.lab.local)
-# host'una işaret eder; yardımcı onu web.lab.local:8443 ile değiştirir.
+# Token alımı: login, DMZ web gateway'in /realms ve /login route'ları üzerinden https ile (identity port-forward yok).
+# Spring IdP çerezleri Secure olduğu için test https konuşur; host web.lab.local, edge 8443'e bağlanır.
 source "$ROOT/identity-cluster/tests/lib/pkce.sh"
 PKCE_BASE=https://web.lab.local
-PKCE_PUBLIC_HOST=https://id.bank.lab.local
 PKCE_CURL_ARGS="--cacert $CERTS/public-ca.crt --ssl-no-revoke --connect-to web.lab.local:443:127.0.0.1:8443"
 BRANCH_TOKEN=$(pkce_token branch-app https://teller.lab.local/callback teller "$(secret teller-password)" "$(secret branch-app)" "")
 WEB_TOKEN=$(pkce_token web-app https://web.lab.local:8443/callback alice "$(secret alice-password)" "$(secret web-app)" "")

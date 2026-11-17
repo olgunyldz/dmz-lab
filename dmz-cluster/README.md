@@ -57,9 +57,9 @@ Test: `bash dmz-cluster/tests/extauth.sh` (16 test: token yok, yanlış kanal, y
 
 ### Lab sınırları (üretimde değişecek)
 
-- **İmza doğrulaması HS256 ile yapılıyor** (lab anahtarı `ext-issuer-key`). Üretimde Keycloak JWKS'inden RS256/ES256 doğrulaması ve `kid` desteği olacak.
-- **Dış token'lar** test betiğinde üretiliyor (Keycloak yok). Gerçek akışta Keycloak `customer`/`partner` realm'lerinden çıkar.
-- **İç STS bir stub** (`sts-internal/sts`). Gerçekte iç Keycloak'un token-exchange endpoint'i olacak.
+- **İmza doğrulaması HS256 ile yapılıyor** (lab anahtarı `ext-issuer-key`). Üretimde IdP JWKS'inden RS256/ES256 doğrulaması ve `kid` desteği olacak.
+- **Dış token'lar** test betiğinde üretiliyor (IdP yok). Gerçek akışta IdP `customer`/`partner` realm'lerinden çıkar.
+- **İç STS bir stub** (`sts-internal/sts`). Gerçekte iç IdP'un token-exchange endpoint'i olacak.
 - **DPoP ve cihaz attestation doğrulanmıyor.** Mobil ve web için DPoP proof kontrolü sonraki adım.
 - **Partner `cnf` bağlaması** ext-authz'de kontrol edilmiyor, gateway'in mTLS doğrulaması ile sağlanıyor.
 - **Backend stub'ları `Authorization` başlığını yanıtta geri yazıyor** (`auth=...`). Bu yalnızca test içindir, üretimde hiçbir yanıtta token dönmez.

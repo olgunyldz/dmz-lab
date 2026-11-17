@@ -7,7 +7,8 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CERTS="$ROOT/../edge/certs"
 KD="kubectl --context kind-dmz"
 KI="kubectl --context kind-identity"
-ISSUER_BASE=http://127.0.0.1:18080/realms/bank/protocol/openid-connect/token
+ISSUER_BASE=https://id.bank.lab.local/realms/bank/protocol/openid-connect/token
+IDP_PORT=${IDP_PORT:-18451}
 
 pass=0
 fail=0
@@ -20,11 +21,19 @@ check() {
     fi
 }
 
-secret() { $KI -n auth get secret keycloak-client-secrets -o jsonpath="{.data.$1}" | base64 -d; }
+# Sırlar Spring IdP'nin secret'ından (idp/idp-secrets); test adları -> anahtar eşlemesi
+secret() {
+    local k
+    case "$1" in
+        alice-password) k=ALICE_PASSWORD ;; web-app) k=WEB_APP_SECRET ;; partner-acme) k=PARTNER_ACME_SECRET ;;
+        bff) k=BFF_SECRET ;; core-svc) k=CORE_SVC_SECRET ;; *) k=$1 ;;
+    esac
+    $KI -n idp get secret idp-secrets -o jsonpath="{.data.$k}" | base64 -d
+}
 json_token() { sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p'; }
 
 PF_PIDS=()
-$KI -n auth port-forward svc/keycloak 18080:8080 >/dev/null 2>&1 & PF_PIDS+=($!)
+$KI -n idp port-forward svc/spring-idp "$IDP_PORT:8443" >/dev/null 2>&1 & PF_PIDS+=($!)
 $KD -n gw-web     port-forward svc/gw-web     19443:443 >/dev/null 2>&1 & PF_PIDS+=($!)
 $KD -n gw-mobile  port-forward svc/gw-mobile  19444:443 >/dev/null 2>&1 & PF_PIDS+=($!)
 $KD -n gw-partner port-forward svc/gw-partner 19445:443 >/dev/null 2>&1 & PF_PIDS+=($!)
@@ -35,10 +44,11 @@ CURL=(curl)
 if curl -V 2>/dev/null | grep -qi schannel; then CURL=(curl --ssl-no-revoke); fi
 
 source "$ROOT/../identity-cluster/tests/lib/pkce.sh"
-PKCE_BASE=http://127.0.0.1:18080
+PKCE_BASE=https://id.bank.lab.local
+PKCE_CURL_ARGS="${CURL[*]:1} --cacert $CERTS/internal-ca.crt --connect-to id.bank.lab.local:443:127.0.0.1:$IDP_PORT"
 WEB_TOKEN=$(pkce_token web-app https://web.lab.local:8443/callback alice "$(secret alice-password)" "$(secret web-app)" "")
-PARTNER_TOKEN=$(curl -s -X POST "$ISSUER_BASE" -d grant_type=client_credentials -d client_id=partner-acme \
-    -d "client_secret=$(secret partner-acme)" | json_token)
+PARTNER_TOKEN=$(curl -s "${CURL[@]:1}" --cacert "$CERTS/internal-ca.crt" --connect-to "id.bank.lab.local:443:127.0.0.1:$IDP_PORT" \
+    -u "partner-acme:$(secret partner-acme)" -X POST "$ISSUER_BASE" -d grant_type=client_credentials | json_token)
 
 web_get() { # <token-or-empty> <path>
     local auth=()

@@ -16,7 +16,7 @@ Bankanın dış dünyaya açık kanallarını (web, mobil, partner) iç çekirde
 **Kapsam içinde:**
 - 3 katman: DMZ Edge, DMZ Cluster, Internal Cluster
 - Gateway katmanı (kgateway), JWT tabanlı yetkilendirme
-- Auth server (Keycloak): kimlik doğrulama ve token üretimi
+- Auth server (IdP): kimlik doğrulama ve token üretimi
 - Ağ izolasyonu, sertifika/sır yönetimi, Kubernetes güvenlik kontrolleri
 - Dağıtım (GitOps), gözlemlenebilirlik, yüksek erişilebilirlik
 
@@ -44,7 +44,7 @@ Bankanın dış dünyaya açık kanallarını (web, mobil, partner) iç çekirde
 | DMZ Edge | Ayrı VM/appliance veya cloud WAF | DDoS koruması, WAF, bot filtreleme, L4 filtreleme, public TLS sonlandırma |
 | DMZ Cluster | DMZ VLAN | Kanal bazlı gateway'ler (web, mobil, partner), rate limit, token'ın ön doğrulaması (JWKS), şema doğrulama |
 | Firewall (iç sınır) | DMZ ↔ İç | Yalnızca tanımlı kaynak/hedef/port izinleri |
-| Internal Cluster | İç VLAN | Internal kgateway (JWT authz), auth server (Keycloak), BFF, normal servis |
+| Internal Cluster | İç VLAN | Internal kgateway (JWT authz), auth server (IdP), BFF, normal servis |
 
 ### 3.1 Mimari Diyagram
 
@@ -69,7 +69,7 @@ flowchart LR
 
   subgraph INT["Internal Cluster"]
     IGW["kgateway internal<br/>JWT authz"]
-    AUTH["Auth Server<br/>Keycloak"]
+    AUTH["Auth Server<br/>IdP"]
     BFF["BFF"]
     CORE["Normal Servis"]
   end
@@ -109,7 +109,7 @@ flowchart LR
 | Katman | Üretim önerisi | Lab (`edge/`) |
 |---|---|---|
 | Yük dengeleyici ve TLS | HAProxy, iki instance, keepalived (VRRP) ile sanal IP | HAProxy 3.0, tek instance (HA çifti Docker'da test edilemez) |
-| WAF | Coraza + OWASP CRS, SPOE ile HAProxy'ye bağlı | coraza-spoa v0.9.1 + CRS |
+| WAF | Coraza + OWASP CRS, SPOE ile HAProxy'ye bağlı | Demo: **mock** (WAF yok, koruma yok). Coraza ve CRS lab'dan kaldırıldı |
 | L4 DDoS | HAProxy stick-table, kernel SYN cookies, upstream temizleme | stick-table ile IP başına bağlantı sınırı |
 | L7 DDoS | HAProxy istek hızı sınırı | stick-table ile IP başına 429 |
 | Hacimsel DDoS | ISP veya bulut DDoS servisi, BGP/anycast | Kapsam dışı (simüle edilemez) |
@@ -138,20 +138,20 @@ flowchart LR
 | `gw-web` | kgateway (web kanalı) + Gateway/HTTPRoute kaynakları |
 | `gw-mobile` | kgateway (mobil kanalı) + Gateway/HTTPRoute kaynakları |
 | `gw-partner` | kgateway (partner kanalı) + Gateway/HTTPRoute kaynakları |
-| `auth` | DMZ token exchange servisi (ext-authz). Anahtar ve kullanıcı verisi yok, yalnızca iç Keycloak'a exchange istemcisi |
+| `auth` | DMZ token exchange servisi (ext-authz). Anahtar ve kullanıcı verisi yok, yalnızca iç IdP'ye exchange istemcisi |
 | `platform-system` | cert-manager, External Secrets, Kyverno, Argo CD, monitoring agent'ları |
 
 **Tasarım kararları:**
 - **Her kanal için ayrı kgateway instance'ı.** Böylece kanal bazlı izolasyon, ayrı LoadBalancer IP, ayrı rate limit ve ayrı güncelleme penceresi sağlanır. Bir kanaldaki sorun diğerlerini etkilemez.
 - **Gateway katmanı görevleri:** TLS (DMZ tarafı), rate limit, şema/boyut kontrolü, access token'ın ön doğrulaması (JWKS ile imza, `exp`, `aud`, `iss`), başarısız istekleri DMZ'de reddetme.
-- **DMZ gateway'lerin token sınırları:** Token üretmez ve imzalamaz. Dış token'ı Keycloak'un JWKS'i ile doğrular. İç JWT'yi yalnızca DMZ `auth` servisi üzerinden alır.
+- **DMZ gateway'lerin token sınırları:** Token üretmez ve imzalamaz. Dış token'ı IdP'un JWKS'i ile doğrular. İç JWT'yi yalnızca DMZ `auth` servisi üzerinden alır.
 - **Login akışı proxy'si:** `/realms/*` yolları DMZ'de yalnızca iletilir (pass-through); kimlik bilgileri DMZ'de işlenmez.
 - **Partner gateway ek olarak:** İstemci sertifikası (mTLS) doğrulaması, partner bazlı kota, IP allowlist.
 
 **DMZ `auth` servisi (token exchange):**
 - Gateway'lerin ext-authz hedefidir. Dış token'ı alır, iç JWT'ye çevirir ve iç JWT'yi gateway'e döner. Gateway iç isteğe bu JWT'yi `Authorization` başlığı olarak ekler.
 - Önbellek: Dış token'ın hash'i anahtarıyla, iç JWT'nin `exp` değerine kadar tutulur. Her istekte exchange yapılmaz.
-- Anahtar tutmaz. Her kanal için ayrı exchange istemcisi kullanır (`dmz-exchange-web`, `dmz-exchange-mobile`, `dmz-exchange-partner`), iç Keycloak'a mTLS client cert ile bağlanır.
+- Anahtar tutmaz. Her kanal için ayrı exchange istemcisi kullanır (`dmz-exchange-web`, `dmz-exchange-mobile`, `dmz-exchange-partner`), iç IdP'ye mTLS client cert ile bağlanır.
 - Kanal profilini (sender constraint, attestation, IP allowlist) uygular. Profil ayrıntısı için bkz. 5.0.
 - Dış token içeriği ve iç JWT'nin üretimi denetim için SIEM'e loglanır.
 - Replika: en az 2, PDB ile.
@@ -177,19 +177,19 @@ flowchart LR
 
 **Dummy iş API'si (lab):** BFF kanal yollarını (`/bff/web/*`, `/bff/mobile/*`, `/bff/branch/*`) karşılar, kanalı token'dan doğrular ve core'a iç token ile iletir. Core `/api/v1/accounts`, `/api/v1/accounts/{id}`, `/api/v1/accounts/{id}/transactions` ve `POST /api/v1/transfers` uçlarını sunar. Hesaplar ve işlemler kullanıcının `sub` değerine göre deterministik üretilir ve bellekte tutulur (veritabanı yok). Transfer kuralları: `Idempotency-Key` zorunlu (aynı anahtar aynı sonucu döner), kanal başına tek işlem limiti (mobil 10.000, web 100.000, şube 50.000 TRY), bakiye ve para birimi kontrolü, partner salt okunur. Testler: `internal-cluster/tests/api.sh` (16 kontrol). Prod farkı: kalıcı çekirdek bankacılık servisi, mTLS (bff→core), idempotency kaydının kalıcı tutulması.
 
-### 4.4 Auth Server (Keycloak)
+### 4.4 Auth Server (IdP)
 
-**Karar (D-4):** Auth server olarak ayrı bir **identity cluster**'da (bkz. 4.5) çalışan **Keycloak** kullanılır. Keycloak, tüm access token'ların ve refresh token'ların tek issuer'ıdır.
+**Karar (D-4, güncel):** Lab'da auth server, Spring Authorization Server tabanlı IdP'dir (identity-cluster/spring-idp, ayrı identity cluster, idp namespace). Keycloak lab'dan kaldırıldı. Prod için IdP ürünü kararı açık: Keycloak, ticari IdP veya kurumsal IdP. Aşağıdaki IdP ifadeleri ürün-bağımsız tasarım gereksinimleridir.
 
 **Neden ayrı cluster?** Kullanıcı kimlik bilgileri (parola, OTP secret, MFA kayıtları) ve token imzalama anahtarları iç uygulama ortamından ayrı bir güven bölgesinde tutulur. DMZ yalnızca login isteklerini iletir; kimlik doğrulama identity cluster'da yapılır.
 
 **Dağıtım:**
-- Keycloak Operator ile yönetilir (`Keycloak` ve `KeycloakRealmImport` CRD'leri).
-- En az **3 replika**, Keycloak'un yerleşik cluster (Infinispan) modu ile.
+- Prod dağıtımı seçilen IdP ürününe göre (karar bekliyor).
+- En az **3 replika**, seçilen IdP ürününün cluster modu ile.
 - Veritabanı: PostgreSQL HA (Patroni veya operator tabanlı), yalnızca `auth` namespace'inden erişilebilir.
 - Admin konsolu ve yönetim portu (9000) yalnızca yönetim ağından erişilebilir; DMZ'den ve kullanıcı ağından erişim yoktur.
 
-**Realm modeli (karar):** Tek realm `bank`. Müşteri kullanıcıları, kanal client'ları (web, mobile, partner) ve iç servis client'ları aynı realm'de bulunur. Ayrım client, audience ve client role seviyesinde yapılır. Gerekçe: Keycloak'ta farklı realm'ler arası token exchange standart özelliklerle desteklenmez. Üç realm ayrı tutulursa dış→iç exchange deneysel özellik gerektirir.
+**Realm modeli (karar):** Tek realm `bank`. Müşteri kullanıcıları, kanal client'ları (web, mobile, partner) ve iç servis client'ları aynı realm'de bulunur. Ayrım client, audience ve client role seviyesinde yapılır. Gerekçe: IdP'ta farklı realm'ler arası token exchange standart özelliklerle desteklenmez. Üç realm ayrı tutulursa dış→iç exchange deneysel özellik gerektirir.
 
 | Bileşen | Tür | Amaç |
 |---|---|---|
@@ -228,11 +228,11 @@ flowchart LR
 | İmza algoritması | ES256 veya RS256 |
 | Claim'ler | `iss`, `aud`, `sub`, `scope`, `channel` (web/mobile/partner), `acr`, `cnf` (partner için sertifika thumbprint'i) |
 | Anahtar rotasyonu | 90 günde bir; eski anahtar, `kid` ile en az bir access token ömrü kadar birlikte yayınlanır |
-| Anahtar saklama | İmzalama anahtarları Vault / HSM üzerinde; Keycloak'a dış KMS ile bağlanır |
+| Anahtar saklama | İmzalama anahtarları Vault / HSM üzerinde; IdP'ye dış KMS ile bağlanır |
 
 **Doğrulama modeli (offline):**
-- DMZ gateway'ler, kgateway internal ve BFF, Keycloak'un JWKS endpoint'ini (`/realms/<realm>/protocol/openid-connect/certs`) periyodik olarak önbelleğe alır ve token'ları **kendileri** doğrular.
-- Her istekte Keycloak'a introspection çağrısı **yapılmaz**. Bu sayede gecikme düşük kalır ve Keycloak'un kısa kesintisi aktif oturumları düşürmez.
+- DMZ gateway'ler, kgateway internal ve BFF, IdP'un JWKS endpoint'ini (`/realms/<realm>/protocol/openid-connect/certs`) periyodik olarak önbelleğe alır ve token'ları **kendileri** doğrular.
+- Her istekte IdP'ye introspection çağrısı **yapılmaz**. Bu sayede gecikme düşük kalır ve IdP'un kısa kesintisi aktif oturumları düşürmez.
 - İptal (revocation): Kısa access token ömrü ana mekanizmadır. Kritik işlemler için (ör. hesap kapatma, şüpheli oturum) BFF üzerinden introspection yapılır.
 
 **Dışarıya açılan endpoint'ler (DMZ'den F2 ile geçen):**
@@ -248,8 +248,8 @@ flowchart LR
 Admin konsolu, `/admin/*` ve yönetim portu hiçbir zaman DMZ'ye açılmaz.
 
 **Yüksek erişilebilirlik ve arıza senaryosu:**
-- Keycloak tamamen erişilemez olursa mevcut access token'lar ömrü boyunca geçerli kalır; yeni login ve refresh yapılamaz.
-- Bu nedenle Keycloak için ayrı SLA, sağlık kontrolleri ve alarm tanımlanır.
+- IdP tamamen erişilemez olursa mevcut access token'lar ömrü boyunca geçerli kalır; yeni login ve refresh yapılamaz.
+- Bu nedenle IdP için ayrı SLA, sağlık kontrolleri ve alarm tanımlanır.
 
 **Audit ve izleme:** Login başarı/başarısızlık, MFA olayları, refresh reuse tespiti, admin işlemleri SIEM'e iletilir.
 
@@ -265,10 +265,10 @@ Admin konsolu, `/admin/*` ve yönetim portu hiçbir zaman DMZ'ye açılmaz.
 
 | Bileşen | Namespace | Görev | HA | Not |
 |---|---|---|---|---|
-| Keycloak | `auth` | Token üretimi, token exchange, login ve MFA akışları. Tek realm `bank` | En az 3 replika, Infinispan | Keycloak Operator ile yönetilir |
-| PostgreSQL | `auth-db` | Keycloak veritabanı | Senkron replika, otomatik failover | Şifreli yedek, ayrı konum |
-| Vault | **Management cluster'a taşındı** (bkz. 4.6) | Identity'nin sırları Vault'tan türetilir; Keycloak parola ve anahtar yönetimi | 3 node raft, HSM/KMS ile auto-unseal | Anahtarlar dışarı çıkarılamaz |
-| PostgreSQL | `auth-db` | Keycloak veritabanı (identity'de kalır, veri sahibi) | Senkron replika | Vault üzerinden kimlik bilgisi |
+| IdP | `auth` | Token üretimi, token exchange, login ve MFA akışları. Tek realm `bank` | En az 3 replika, Infinispan | IdP ürününe göre yönetilir |
+| PostgreSQL | `auth-db` | IdP veritabanı | Senkron replika, otomatik failover | Şifreli yedek, ayrı konum |
+| Vault | **Management cluster'a taşındı** (bkz. 4.6) | Identity'nin sırları Vault'tan türetilir; IdP parola ve anahtar yönetimi | 3 node raft, HSM/KMS ile auto-unseal | Anahtarlar dışarı çıkarılamaz |
+| PostgreSQL | `auth-db` | IdP veritabanı (identity'de kalır, veri sahibi) | Senkron replika | Vault üzerinden kimlik bilgisi |
 | MFA sağlayıcı | `mfa` | OTP üretimi ve doğrulama, push onay adaptörü | En az 2 replika | Dış SMS/push servislerine yalnızca izinli FQDN ile çıkış |
 | Yönetim araçları | `identity-ops` | Client ve partner onboarding, realm konfigürasyonu | Yönetim ağı | Kod ile (GitOps), manuel konsol değişikliği yok |
 | Yedekleme | `backup` | PostgreSQL ve Vault snapshot'ları | — | Şifreli, ayrı lokasyon |
@@ -282,8 +282,8 @@ Admin konsolu, `/admin/*` ve yönetim portu hiçbir zaman DMZ'ye açılmaz.
 **Güvenlik kontrolleri:**
 - Ayrı node pool, ayrı VLAN, en az 3 control plane ve 3 worker.
 - API server yalnızca yönetim ağından erişilebilir. RBAC, break-glass hesabı izlenir.
-- Keycloak admin erişimi yönetim ağı ve MFA ile sınırlı, admin işlemleri SIEM'e iletilir.
-- Vault audit log'u ve Keycloak event log'ları SIEM'e gider.
+- IdP admin erişimi yönetim ağı ve MFA ile sınırlı, admin işlemleri SIEM'e iletilir.
+- Vault audit log'u ve IdP event log'ları SIEM'e gider.
 - Exchange istemcileri (`dmz-exchange-*`) mTLS istemci sertifikası ile kimlik doğrular. Client secret DMZ'ye taşınmaz.
 - Partner `cnf` bağlaması için istemci sertifikası kaydı identity cluster'da tutulur.
 
@@ -297,7 +297,7 @@ Admin konsolu, `/admin/*` ve yönetim portu hiçbir zaman DMZ'ye açılmaz.
 
 ### 4.6 Management / Secrets Cluster (hedef durum)
 
-**Amaç:** Vault ve yönetim araçlarını (Argo CD, Kyverno, PKI) identity ve uygulama ortamlarından ayırmak. Vault birden fazla sistemin ortak secret kaynağı. Keycloak ile aynı cluster'da olursa Keycloak'a yapılan bir saldırı Vault'a da yaklaşır. Ayrı cluster bu sınırı çizer.
+**Amaç:** Vault ve yönetim araçlarını (Argo CD, Kyverno, PKI) identity ve uygulama ortamlarından ayırmak. Vault birden fazla sistemin ortak secret kaynağı. IdP ile aynı cluster'da olursa IdP'ye yapılan bir saldırı Vault'a da yaklaşır. Ayrı cluster bu sınırı çizer.
 
 **Bileşenler:**
 
@@ -314,7 +314,7 @@ Admin konsolu, `/admin/*` ve yönetim portu hiçbir zaman DMZ'ye açılmaz.
 - Management cluster'ın API sunucusu ve admin erişimi yalnız yönetim ağından, bastion + PAM ve MFA ile.
 
 **Vault kullanım alanları (hedef):**
-- Keycloak parolaları ve DB kimlik bilgileri (identity cluster, ESO ile).
+- IdP parolaları ve DB kimlik bilgileri (identity cluster, ESO ile).
 - Exchange, DMZ ve partner istemci sertifikaları (Vault PKI, kısa ömürlü).
 - Realm imzalama anahtarları (D-12 kararına bağlı: HSM/KMS veya Transit tabanlı imzalama).
 - Servis kimlik bilgileri (BFF, core, ileride DB kullanıcıları için dinamik secret).
@@ -337,8 +337,8 @@ Admin konsolu, `/admin/*` ve yönetim portu hiçbir zaman DMZ'ye açılmaz.
 | Şube gateway'i `gw-branch` | DMZ cluster (ns `gw-branch`) | Cihaz sertifikasını doğrular (ConfigMap `branch-ca`), `/bff/*` için ext-authz (X-Dmz-Channel: branch), `/realms/*` login |
 | Şube cluster'ı (`kind-branch`) | Şube ağı | Şube UI pod'u ve cihaz sertifiği. gw-branch'e doğrudan bağlanır (HAProxy yok, F10) |
 | `ext-authz` (branch profili) | DMZ auth | Bearer token doğrulama (aud `channel-branch`); DPoP yok (çalışan kanalı cihaz sertifikasıyla bağlanır) |
-| Token exchange `dmz-exchange-branch` | Identity (Keycloak client-x509) | İç JWT üretimi: channel=branch, auth_method=branch_cert |
-| `branch-app` (Keycloak client) | Identity | Authorization Code + PKCE, confidential; çalışan girişi (`teller`) |
+| Token exchange `dmz-exchange-branch` | Identity (IdP client-x509) | İç JWT üretimi: channel=branch, auth_method=branch_cert |
+| `branch-app` (IdP client) | Identity | Authorization Code + PKCE, confidential; çalışan girişi (`teller`) |
 
 Güvenlik kuralları:
 - **Çift faktör kanalı:** Çalışan erişimi hem cihaz sertifikası (cihaz kimliği, mTLS) hem de kullanıcı token'ı (çalışan kimliği) gerektirir. Biri eksikse istek reddedilir.
@@ -367,7 +367,9 @@ Her DMZ gateway'inde path'ler üç sınıfa ayrılır. Kimlik kontrolü yalnızc
 
 ### 5.0b Mobil Token Exchange: Bulgular ve Karar
 
-**Bulgu:** Keycloak 26.6, DPoP'a bağlı (`cnf`) subject token'larının token exchange'de kullanılmasını kabul etmiyor:
+> **Not (güncel):** Bu bölüm Keycloak döneminden kalan fizibilite bulgusudur. Lab'da Keycloak kaldırıldı; mobil DPoP kontrolü ve token exchange Spring IdP'de uygulanır (DpopRequiredFilter, TokenExchange); ayrı SPI yoktur.
+
+**Bulgu:** IdP 26.6, DPoP'a bağlı (`cnf`) subject token'larının token exchange'de kullanılmasını kabul etmiyor:
 `Sender-constrained tokens (RFC 7800) cannot be used as subject_token in Token Exchange`. Partner token'ları bu kısıtlamadan etkilenmiyor. **Web token'ları:** İlk yapılandırmada `web-app` DPoP bağlı token üretiyordu ve bu token exchange'de 400 ile reddediliyordu (ölçüm: `Sender-constrained tokens are not supported as subject_token`). Karar: web akışı DPoP'suz (PKCE + Bearer), mobil akışı DPoP'lu (SPI). Böylece web token'ları exchange'den geçer. D-10 (web için DPoP) prod'da yeniden değerlendirilmelidir. Mobil token'lar DPoP ile bağlandığı için mobil iç çağrılar şu an başarısız (güvenli taraftan başarısızlık).
 
 **Denenen çözüm (impersonation):** DMZ, DPoP'u kendisi doğrular, sonra mTLS ile kimliği belli `dmz-exchange-mobile` client'ı üzerinden kullanıcı adına impersonation ile iç token alır. Sonuç: başarısız.
@@ -381,11 +383,11 @@ Her DMZ gateway'inde path'ler üç sınıfa ayrılır. Kimlik kontrolü yalnızc
 
 **Önerilen yol (D-11):**
 1. **DMZ'de DPoP proof doğrulaması** (RFC 9449, bölüm 4.3). **Uygulandı (lab):** Token `cnf.jkt` içeriyorsa veya kanal mobile ise, ext-authz proof imzasını (proof içindeki `jwk`), `htm`, `htu`, `iat` tazeliğini (5 dk geçmiş, 1 dk gelecek toleransı), `jti` tekrarını, `ath` = base64url(SHA-256(access_token)) ve `cnf.jkt` = jwk thumbprint (RFC 7638) ile kontrol eder. Test: `dmz-cluster/tests/extauth.sh` (4a–4f). Lab sınırları: yalnızca RS256 proof (ES256 için kriptografi kütüphanesi gerekir); `jti` cache'i süreç içidir, bu yüzden ext-authz tek replikada çalışır. Üretimde jti store'u paylaşılan olmalıdır.
-2. **Keycloak'ta mobil için özel token exchange SPI:** Yalnızca mTLS ile kimliği doğrulanmış `dmz-exchange-mobile` isteğinde, DPoP'a bağlı subject token'ı kabul eder. Güven DMZ'nin proof doğrulamasına dayanır, SPI kanal ve `cnf` eşleşmesini tekrar kontrol eder. Keycloak yükseltmelerinde SPI yeniden test edilir.
+2. **IdP'ta mobil için özel token exchange SPI:** Yalnızca mTLS ile kimliği doğrulanmış `dmz-exchange-mobile` isteğinde, DPoP'a bağlı subject token'ı kabul eder. Güven DMZ'nin proof doğrulamasına dayanır, SPI kanal ve `cnf` eşleşmesini tekrar kontrol eder. IdP yükseltmelerinde SPI yeniden test edilir.
 
-**Karar ve uygulama (D-11, uygulandı):** Önerilen yol uygulandı. DMZ ext-authz DPoP proof'unu doğrular. Keycloak'ta `dmz-dpop-mobile-exchange` SPI'si, DMZ mobil exchange'inde (mTLS ile kimliği doğrulanmış `dmz-exchange-mobile`) subject token'ı Keycloak anahtarıyla bağlamasız olarak yeniden imzalar, sonra standart exchange çalışır. Test: `dmz-cluster/tests/extauth.sh` (mobil `200`, `channel=mobile`, `auth_method=dpop_device`) ve `internal-cluster/tests/authz.sh`. Kaynak ve sınırlar: `identity-cluster/keycloak-spi/README.md`. Güven modeli: DMZ DPoP doğrulamasına ve mTLS kimliğine dayanır. Standart exchange'in DPoP'a bağlı token'ları reddetmesi bu SPI ile bilinçli olarak aşılmıştır, bu yüzden Keycloak yükseltmelerinde yeniden gözden geçirilmelidir.
+**Karar ve uygulama (D-11, uygulandı):** Önerilen yol uygulandı. DMZ ext-authz DPoP proof'unu doğrular. Keycloak döneminde `dmz-dpop-mobile-exchange` SPI'si (lab'da kaldırıldı; Spring IdP'de DpopRequiredFilter), DMZ mobil exchange'inde (mTLS ile kimliği doğrulanmış `dmz-exchange-mobile`) subject token'ı IdP anahtarıyla bağlamasız olarak yeniden imzalar, sonra standart exchange çalışır. Test: `dmz-cluster/tests/extauth.sh` (mobil `200`, `channel=mobile`, `auth_method=dpop_device`) ve `internal-cluster/tests/authz.sh`. Kaynak ve sınırlar: `identity-cluster/keycloak-spi/README.md`. Güven modeli: DMZ DPoP doğrulamasına ve mTLS kimliğine dayanır. Standart exchange'in DPoP'a bağlı token'ları reddetmesi bu SPI ile bilinçli olarak aşılmıştır, bu yüzden IdP yükseltmelerinde yeniden gözden geçirilmelidir.
 
-**SPI fizibilite bulgusu (Keycloak 26.6.4):** Extension noktası `TokenExchangeProvider` / `TokenExchangeProviderFactory`. Sender-constrained kontrolü `StandardTokenExchangeProvider.tokenExchange()` içinde, private `isSenderConstrainedToken` ile yapılıyor. Kontrolü atlamak için token üretim akışının (imzalama, session, audience ve scope işleme) yeniden yazılması gerekir. Bu, güvenlik açısından kritik ve iç API'lere bağımlı bir değişiklik. SPI yolu teknik olarak mümkün, ama bakım maliyeti yüksek. Karar henüz verilmedi.
+**SPI fizibilite bulgusu (IdP 26.6.4):** Extension noktası `TokenExchangeProvider` / `TokenExchangeProviderFactory`. Sender-constrained kontrolü `StandardTokenExchangeProvider.tokenExchange()` içinde, private `isSenderConstrainedToken` ile yapılıyor. Kontrolü atlamak için token üretim akışının (imzalama, session, audience ve scope işleme) yeniden yazılması gerekir. Bu, güvenlik açısından kritik ve iç API'lere bağımlı bir değişiklik. SPI yolu teknik olarak mümkün, ama bakım maliyeti yüksek. Karar henüz verilmedi.
 
 **Alternatif (risk kabulü gerektirir):** Mobil token'ı DPoP'suz vermek. Çalınan token başka cihazda kullanılabilir. Tasarımın D-10 kararına aykırıdır.
 
@@ -413,8 +415,8 @@ Her kanalın kimlik doğrulama ve token bağlama modeli farklıdır. Bu farklar 
 1. Kullanıcı → Edge             HTTPS 443, WAF + DDoS kontrolü
 2. Edge → gw-web / gw-mobile    TLS (re-encrypt), host/path yönlendirme
 3. gw-web / gw-mobile           /realms/customer/* yolu pass-through (rate limit uygulanır)
-4. → kgateway internal → Keycloak   Login, MFA, PKCE doğrulaması
-5. Keycloak → kullanıcı         Access token (5 dk, aud=bff, channel=web) + refresh token
+4. → kgateway internal → IdP   Login, MFA, PKCE doğrulaması
+5. IdP → kullanıcı         Access token (5 dk, aud=bff, channel=web) + refresh token
 ```
 
 **B. İşlem çağrısı (her API isteğinde):**
@@ -424,7 +426,7 @@ Her kanalın kimlik doğrulama ve token bağlama modeli farklıdır. Bu farklar 
 2. Edge → gw-web / gw-mobile    TLS (re-encrypt), host/path yönlendirme
 3. gw-web / gw-mobile           Rate limit, şema kontrolü, dış token'ı JWKS ile doğrula (imza, iss, aud, exp)
 4. gw-web → DMZ auth (ext-authz) Dış token'ı ilet. Önbellekte iç JWT varsa 6'ya geç
-5. DMZ auth → iç Keycloak       Token exchange (RFC 8693, F3): dış token → iç JWT (aud=kgateway-internal, channel, sub, scope)
+5. DMZ auth → iç IdP       Token exchange (RFC 8693, F3): dış token → iç JWT (aud=kgateway-internal, channel, sub, scope)
 6. DMZ auth → gw-web            İç JWT'yi döndür (önbellek: iç JWT'nin exp'i kadar)
 7. gw-web → kgateway internal   Authorization: Bearer <iç JWT> (F2). Dış token iç ağa gitmez
 8. kgateway internal            İç JWT doğrulama (iss, aud, exp, imza) + route authz (scope, channel, metod)
@@ -433,7 +435,7 @@ Her kanalın kimlik doğrulama ve token bağlama modeli farklıdır. Bu farklar 
 11. Normal servis               İç JWT doğrulama + iş kuralı yetkisi (sahiplik, limit vb.)
 ```
 
-**Token refresh:** Access token süresi dolunca istemci refresh token ile `/token` endpoint'ine gider (gw-web → kgateway internal → Keycloak). Yeni access token üretilir.
+**Token refresh:** Access token süresi dolunca istemci refresh token ile `/token` endpoint'ine gider (gw-web → kgateway internal → IdP). Yeni access token üretilir.
 
 ### 5.2 Partner
 
@@ -444,7 +446,7 @@ Her kanalın kimlik doğrulama ve token bağlama modeli farklıdır. Bu farklar 
 2. Edge → gw-partner            TLS + client cert
 3. gw-partner                   Client cert doğrulama (partner CA), kota
 4. gw-partner → kgateway int.   /realms/partner/.../token (F2)
-5. Keycloak → partner           Access token (5–10 dk, cnf = sertifika thumbprint'i)
+5. IdP → partner           Access token (5–10 dk, cnf = sertifika thumbprint'i)
 ```
 
 **B. API çağrısı:**
@@ -454,7 +456,7 @@ Her kanalın kimlik doğrulama ve token bağlama modeli farklıdır. Bu farklar 
 2. Edge → gw-partner            TLS + client cert
 3. gw-partner                   Client cert doğrulama (partner CA), cnf eşleşmesi, dış token JWKS ile, kota
 4. gw-partner → DMZ auth        Dış token'ı ilet (önbellekte iç JWT yoksa exchange)
-5. DMZ auth → iç Keycloak       Token exchange (F3): dış token → iç JWT (aud=kgateway-internal, channel=partner, partner_id)
+5. DMZ auth → iç IdP       Token exchange (F3): dış token → iç JWT (aud=kgateway-internal, channel=partner, partner_id)
 6. gw-partner → kgateway int.   Authorization: Bearer <iç JWT> (F2)
 7. kgateway internal            İç JWT doğrulama, partner route'ları için scope kontrolü
 8. kgateway internal → Core     /partner/* route'ları normal servise gider      [D-2]
@@ -469,19 +471,19 @@ Her kanalın kimlik doğrulama ve token bağlama modeli farklıdır. Bu farklar 
 
 | Token | Üreten | Kullanan | Doğrulayan | Ömür |
 |---|---|---|---|---|
-| Dış access token (customer) | Keycloak (`customer`), aud=kanal | Web, mobil | gw-web/gw-mobile (JWKS), DMZ auth | 5 dk |
-| Dış access token (partner) | Keycloak (`partner`), aud=kanal, `cnf` | Partner | gw-partner (JWKS, cnf), DMZ auth | 5–10 dk |
-| Dış refresh token | Keycloak (`customer`) | Web, mobil | Sadece Keycloak | Her kullanımda rotate |
-| **İç JWT** | Keycloak (`internal`), token exchange ile | DMZ gateway → kgateway internal → BFF / servis | kgateway int., BFF, normal servis (JWKS) | 1–5 dk |
-| Servis token'ı | Keycloak (`internal`), client credentials | BFF, normal servis | kgateway int., normal servis | 5 dk |
+| Dış access token (customer) | IdP (`customer`), aud=kanal | Web, mobil | gw-web/gw-mobile (JWKS), DMZ auth | 5 dk |
+| Dış access token (partner) | IdP (`partner`), aud=kanal, `cnf` | Partner | gw-partner (JWKS, cnf), DMZ auth | 5–10 dk |
+| Dış refresh token | IdP (`customer`) | Web, mobil | Sadece IdP | Her kullanımda rotate |
+| **İç JWT** | IdP (`internal`), token exchange ile | DMZ gateway → kgateway internal → BFF / servis | kgateway int., BFF, normal servis (JWKS) | 1–5 dk |
+| Servis token'ı | IdP (`internal`), client credentials | BFF, normal servis | kgateway int., normal servis | 5 dk |
 
 **İlkeler:**
 - **İç token dışarı verilmez:** Dış istemciden gelen her kimlik doğrulama DMZ'de iç token'a çevrilir. İç token yalnızca DMZ→iç bağlantıda ve iç ağda dolaşır. Hiçbir istemci yanıtında, yanıt başlığında, yanıt gövdesinde veya DMZ stub/backend'ine iletilen istekte bulunmaz. DMZ'de tanımlı olmayan yollar iç token üretilmeden 404 ile reddedilir (default deny).
 - **İki ayrı token, iki ayrı issuer kuralı:** Dış token yalnızca DMZ'de doğrulanır ve iç ağa geçmez. İç ağda yalnızca iç JWT dolaşır.
-- **Dönüşüm yalnızca DMZ `auth` servisinde** yapılır (RFC 8693). DMZ hiçbir anahtar imzalamaz; iç JWT iç Keycloak'ta imzalanır.
+- **Dönüşüm yalnızca DMZ `auth` servisinde** yapılır (RFC 8693). DMZ hiçbir anahtar imzalamaz; iç JWT iç IdP'ta imzalanır.
 - İç JWT claim'leri: `iss` (internal realm), `aud` (`kgateway-internal`, `bff`, `core`), `sub`, `scope`, `channel` (web/mobile/partner), `auth_method` (`pwd_otp`, `dpop_device`, `mtls_partner`), `acr`, `partner_id` (partner için).
 - Her katman, kendi token'ını offline JWKS ile doğrular. Güven, ağ konumuna değil iç JWT'ye dayanır.
-- Kısa ömür ve `kid` ile anahtar rotasyonu. JWKS, Keycloak'un standart endpoint'inden yayınlanır.
+- Kısa ömür ve `kid` ile anahtar rotasyonu. JWKS, IdP'un standart endpoint'inden yayınlanır.
 
 ### 5.4 Yetkilendirme Modeli
 
@@ -505,12 +507,12 @@ Her kanalın kimlik doğrulama ve token bağlama modeli farklıdır. Bu farklar 
 |---|---|---|---|---|---|
 | F1 | Edge | gw-web, gw-mobile, gw-partner | TCP 443 (lab: NodePort 30446–30448, yalnız edge IP'si) | Public giriş | Edge → DMZ |
 | F2 | gw-web, gw-mobile, gw-partner | kgateway internal | TCP 443 (TLS) | API çağrıları, login/token endpoint'leri | DMZ → İç |
-| F3 | DMZ `auth` servisi | Iç Keycloak token endpoint (kgateway internal üzerinden) | TCP 443 (mTLS) | Token exchange (RFC 8693), JWKS önbellek yenileme | DMZ → İç |
+| F3 | DMZ `auth` servisi | Iç IdP token endpoint (kgateway internal üzerinden) | TCP 443 (mTLS) | Token exchange (RFC 8693), JWKS önbellek yenileme | DMZ → İç |
 | F4 | Internal cluster | DMZ | — | **Yasak** (başlatılan bağlantı yok) | İç → DMZ |
-| F5 | DMZ | Internal DB/servis/Keycloak admin | — | **Yasak** (yalnızca F2/F3 üzerinden) | DMZ → İç |
+| F5 | DMZ | Internal DB/servis/IdP admin | — | **Yasak** (yalnızca F2/F3 üzerinden) | DMZ → İç |
 | F6 | Tüm DMZ ve iç cluster | Git / registry | Yalnızca pull, onaylı transfer | GitOps, image | Tek yönlü |
 | F7 | Tüm cluster'lar | Log/SIEM | Syslog/TLS | Gözlem | Tek yönlü |
-| F8 | kgateway internal (iç cluster) | Identity cluster (Keycloak) | TCP 443 (mTLS) | `/realms/*`, `/.well-known/*`, JWKS, token exchange | İç → Identity |
+| F8 | kgateway internal (iç cluster) | Identity cluster (IdP) | TCP 443 (mTLS) | `/realms/*`, `/.well-known/*`, JWKS, token exchange | İç → Identity |
 | F9 | Identity ve iç cluster'lar | Management cluster (Vault API) | TCP 8200 (mTLS, prod) | Secret okuma, PKI sertifika üretimi (Kubernetes auth ile) | Identity/İç → Mgmt |
 | F10 | Şube cluster'ı (`kind-branch`) | DMZ gw-branch (NodePort 30449) | TCP 443 (mTLS, cihaz sertifikası) | Şube iş istasyonundan gw-branch'e doğrudan erişim; HAProxy yok | Şube → DMZ |
 
@@ -524,7 +526,7 @@ Not: F4 ve F5 kuralları "yasak" olarak firewall'da açıkça tanımlanır (defa
 | `app-bff` | `gw-internal` |
 | `app-core` | `app-bff`, `gw-internal` (yalnızca `/partner/*` ve `/public/*` yolları için) |
 
-**Identity cluster'a giden akış (F8):** İç cluster'dan yalnızca `gw-internal` identity cluster'a bağlanır. İzinli yollar `/realms/*`, `/.well-known/*`, JWKS ve token exchange uçlarıdır. Bağlantı mTLS ile yapılır. Identity cluster'daki Keycloak'un DB bağlantısı (PostgreSQL) yalnızca `auth-db` namespace'inden kabul edilir (bkz. 4.5).
+**Identity cluster'a giden akış (F8):** İç cluster'dan yalnızca `gw-internal` identity cluster'a bağlanır. İzinli yollar `/realms/*`, `/.well-known/*`, JWKS ve token exchange uçlarıdır. Bağlantı mTLS ile yapılır. Identity cluster'daki IdP'un DB bağlantısı (PostgreSQL) yalnızca `auth-db` namespace'inden kabul edilir (bkz. 4.5).
 
 ---
 
@@ -532,7 +534,7 @@ Not: F4 ve F5 kuralları "yasak" olarak firewall'da açıkça tanımlanır (defa
 
 - **Sertifika:** cert-manager + bankanın internal CA'sı (PKI). Gateway TLS sertifikaları ve servis sertifikaları **en fazla 90 gün**, otomatik yenilenir.
 - **Partner CA:** Partner istemci sertifikaları ayrı bir CA'dan çıkar; gw-partner yalnızca bu CA'yı güvenir.
-- **Sır (secret) yönetimi:** HashiCorp Vault (veya kurumsal KMS) + External Secrets Operator. Git'te düz `Secret` **bulunmaz**. Keycloak admin ve DB şifreleri Vault'ta tutulur.
+- **Sır (secret) yönetimi:** HashiCorp Vault (veya kurumsal KMS) + External Secrets Operator. Git'te düz `Secret` **bulunmaz**. IdP admin ve DB şifreleri Vault'ta tutulur.
 - **JWT imzalama anahtarları:** Vault/HSM'de tutulur, 90 günde bir rotate edilir (bkz. 4.4).
 - **etcd:** Şifreleme at rest açık.
 
@@ -555,27 +557,27 @@ Not: F4 ve F5 kuralları "yasak" olarak firewall'da açıkça tanımlanır (defa
 
 ## 9. Dağıtım (GitOps) ve Ortamlar
 
-- **Git:** Kurumsal Git sunucusu (iç ağda). Manifest'ler, Helm chart'lar ve Keycloak realm/client tanımları burada tutulur.
+- **Git:** Kurumsal Git sunucusu (iç ağda). Manifest'ler, Helm chart'lar ve IdP realm/client tanımları burada tutulur.
 - **Argo CD:** Her cluster'da kendi ajanı. İç Argo CD iç cluster'ı, DMZ Argo CD'si DMZ cluster'ı yönetir.
 - **DMZ'ye veri aktarımı (F6):** Manifest ve image'lar, onaylı tek yönlü transfer ile DMZ'deki mirror'a (Git mirror + registry replica) aktarılır. DMZ'den iç sisteme bağlantı açılmaz.
 - **Ortamlar:** `staging` ve `prod`. Her ortamın kendi DMZ ve iç cluster'ı olur. Geliştirme ortamı izole bir test kümesidir.
 - **Değişiklik süreci:** Pull request + en az iki onay + otomatik policy kontrolü (Kyverno/Conftest) + prod'a manuel onaylı sync.
-- **Keycloak yapılandırması:** Realm ve client'lar kod olarak (`KeycloakRealmImport`) tutulur; konsoldan manuel değişiklik yapılmaz.
+- **IdP yapılandırması:** Realm ve client tanımları kod olarak tutulur (lab: identity-cluster/spring-idp Seeder); konsoldan manuel değişiklik yapılmaz.
 
 ---
 
 ## 10. Gözlemlenebilirlik
 
-**Dağıtık izleme (lab):** Grafana Tempo (tek binary, mgmt cluster `observability` ns; OTLP HTTP NodePort 30318, gRPC 30317; sorgu Grafana'da, Tempo veri kaynağı). Jaeger yerine kullanılıyor. Her çağrı konsol kök span'i ile başlar ve W3C `traceparent` başlığıyla taşınır: konsol → edge → DMZ gateway (`traceparent`, `x-request-id` headersToForward) → ext-authz (span + token exchange alt span'i) → iç gateway → BFF (span + core'a alt span) → core. Servisler `shared/tracing.py` ile (stdlib, OTLP/HTTP JSON) span üretir. Kapsam: konsol, ext-authz, BFF, core, **Keycloak** (yerleşik OpenTelemetry, build zamanında `opentelemetry` özelliği; token exchange span'leri) ve **kgateway/Envoy** gateway'leri (ListenerPolicy `httpSettings.tracing`, OTLP/gRPC 4317 → Jaeger NodePort 30317; gw-web, gw-mobile, gw-partner, gw-branch, gw-internal). HAProxy OTel desteği olmadan derlenmiş (`-OT`) olduğu için edge span üretmez; edge `x-request-id` ile korele edilir (prod: OTel'li HAProxy imajı veya OTel destekli edge). Span özniteliklerinde token, parola ve kimlik değeri yoktur; kullanıcı yalnız hash'lenmiş `user.hash` olarak görünür.
+**Dağıtık izleme (lab):** Grafana Tempo (tek binary, mgmt cluster `observability` ns; OTLP HTTP NodePort 30318, gRPC 30317; sorgu Grafana'da, Tempo veri kaynağı). Jaeger yerine kullanılıyor. Her çağrı konsol kök span'i ile başlar ve W3C `traceparent` başlığıyla taşınır: konsol → edge → DMZ gateway (`traceparent`, `x-request-id` headersToForward) → ext-authz (span + token exchange alt span'i) → iç gateway → BFF (span + core'a alt span) → core. Servisler `shared/tracing.py` ile (stdlib, OTLP/HTTP JSON) span üretir. Kapsam: konsol, ext-authz, BFF, core, **IdP** (yerleşik OpenTelemetry, build zamanında `opentelemetry` özelliği; token exchange span'leri) ve **kgateway/Envoy** gateway'leri (ListenerPolicy `httpSettings.tracing`, OTLP/gRPC 4317 → Jaeger NodePort 30317; gw-web, gw-mobile, gw-partner, gw-branch, gw-internal). HAProxy OTel desteği olmadan derlenmiş (`-OT`) olduğu için edge span üretmez; edge `x-request-id` ile korele edilir (prod: OTel'li HAProxy imajı veya OTel destekli edge). Span özniteliklerinde token, parola ve kimlik değeri yoktur; kullanıcı yalnız hash'lenmiş `user.hash` olarak görünür.
 
 **Metrikler (Prometheus, lab):** Merkezi Prometheus mgmt cluster `observability` ns'de (UI NodePort 30090). İki katman: (1) **cluster metrikleri** `kube-state-metrics` (internal, secret okumaz; `cluster` etiketi) ve (2) **namespace bazlı uygulama metrikleri** — her servis kendi `/metrics` endpoint'ini ayrı bir porttan (9100) sunar: `app-bff`, `app-core` (istek sayısı ve süre, transfer sonucu ve tutarı), `auth` (karar sayısı allow/deny, exchange sonucu, karar süresi). Etiketler düşük kardinalitelidir (route şablonu, kanal, durum); kullanıcı ve hesap kimlikleri etiket olmaz. Her kazıma hedefine `cluster` ve `namespace` statik etiketi verilir. Modül: `shared/metrics.py` (stdlib). Prod farkı: her cluster'da yerel Prometheus + remote_write, kalıcı depolama, Alertmanager ve Grafana.
 
 - **Metrik:** Her cluster'da Prometheus; merkezi Grafana (iç ağda).
-- **Log:** Loki veya ELK; kgateway erişim logları, Keycloak event logları ve uygulama logları. 401/403 logları ayrıca izlenir.
+- **Log:** Loki veya ELK; kgateway erişim logları, IdP event logları ve uygulama logları. 401/403 logları ayrıca izlenir.
 - **Trace:** OpenTelemetry; kgateway'den BFF ve servislere `traceparent` yayılımı.
 - **Correlation ID:** Edge'de üretilir, tüm katmanlarda taşınır.
-- **Uyarılar:** Anormal 401/403 artışı, JWT doğrulama hatası oranı, gateway 5xx, Keycloak login hata oranı ve gecikmesi, refresh token reuse tespiti, sertifika süresi dolmak üzere, JWKS yenileme hatası.
-- **Güvenlik olayları:** Admission reddi, RBAC ihlali, beklenmeyen ağ bağlantısı (Cilium/Hubble), Keycloak admin işlemleri SIEM'e gider.
+- **Uyarılar:** Anormal 401/403 artışı, JWT doğrulama hatası oranı, gateway 5xx, IdP login hata oranı ve gecikmesi, refresh token reuse tespiti, sertifika süresi dolmak üzere, JWKS yenileme hatası.
+- **Güvenlik olayları:** Admission reddi, RBAC ihlali, beklenmeyen ağ bağlantısı (Cilium/Hubble), IdP admin işlemleri SIEM'e gider.
 
 ---
 
@@ -583,7 +585,7 @@ Not: F4 ve F5 kuralları "yasak" olarak firewall'da açıkça tanımlanır (defa
 
 - Her cluster: en az **3 control plane** düğümü, en az **3 worker** düğümü, farklı rack/zone'larda.
 - kgateway: kanal başına en az **2 replika**, `PodDisruptionBudget`, HPA (CPU/RPS bazlı).
-- Keycloak: en az **3 replika**, PDB, zone'lara dağıtılmış; PostgreSQL HA (senkron replika + otomatik failover).
+- IdP: en az **3 replika**, PDB, zone'lara dağıtılmış; PostgreSQL HA (senkron replika + otomatik failover).
 - BFF ve normal servis: en az 2 replika, topology spread constraints ile zone dağılımı.
 - Gateway LB: DMZ ve iç için ayrı, yük dengeleyici sağlık kontrolleri açık.
 
@@ -595,17 +597,17 @@ Aşağıdaki maddeler onay bekler. Varsayılan öneri her madde için verilmişt
 
 | # | Konu | Varsayılan öneri | Alternatif |
 |---|---|---|---|
-| D-1 | Token modeli | **İki token + DMZ'de token exchange (RFC 8693).** Dış token DMZ'de doğrulanır, DMZ `auth` servisi iç Keycloak'tan iç JWT alır. İç yetkilendirme iç JWT ile yapılır. | Dış token'ı aynen iç ağa iletmek: dış token iç ağa girer, iç doğrulama dış issuer'a bağlanır. Reddedildi. |
+| D-1 | Token modeli | **İki token + DMZ'de token exchange (RFC 8693).** Dış token DMZ'de doğrulanır, DMZ `auth` servisi iç IdP'den iç JWT alır. İç yetkilendirme iç JWT ile yapılır. | Dış token'ı aynen iç ağa iletmek: dış token iç ağa girer, iç doğrulama dış issuer'a bağlanır. Reddedildi. |
 | D-2 | Partner istekleri nereye gider? | **Doğrudan normal servis** (`/partner/*`), BFF yalnızca web/mobil için. | Partner de BFF üzerinden geçer (tek giriş, daha fazla katman). |
 | D-3 | Edge ürünü | **HAProxy** (LB, TLS, L4/L7 rate limit) + **Coraza WAF** (OWASP CRS) + upstream DDoS temizleme (ISP veya bulut) | F5 BIG-IP (LTM + ASM + AFM) veya cloud WAF. Aynı katmanı karşılar; lisans ve işletim maliyeti farklı |
-| D-4 | Auth server | **Keycloak** (Operator ile, ayrı identity cluster, 3 replika, HA PostgreSQL, Vault/HSM ile anahtar yönetimi) | Bankanın mevcut merkezi IdP'si (varsa) veya ticari IdP |
+| D-4 | Auth server | **Lab: Spring Authorization Server IdP**; prod ürün kararı açık (Keycloak / ticari / kurumsal IdP); ayrı identity cluster, 3 replika, HA PostgreSQL, Vault/HSM ile anahtar yönetimi | Bankanın mevcut merkezi IdP'si (varsa) veya ticari IdP |
 | D-5 | Kubernetes dağıtımı | **RKE2** veya **OpenShift** (kurumsal destek ve güvenlik sertleştirmesi için) | Vanilla kubeadm (daha fazla kendi sorumluluk) |
 | D-6 | CNI | **Cilium** (L7 policy, Hubble) | Calico |
 | D-7 | Partner kimlik modeli | **mTLS + client credentials** (sertifika bağlı token, `cnf`) | Yalnızca client secret (daha zayıf) |
 | D-8 | İkinci lokasyon / DR | Ayrı doküman; bu tasarımda aktif-pasif öneri | Aktif-aktif (karmaşıklık yüksek) |
-| D-9 | Müşteri MFA yöntemi | **OTP + push onayı** (Keycloak'ta yapılandırılır) | Donanım token (FIDO2/WebAuthn) — daha güçlü, daha pahalı |
+| D-9 | Müşteri MFA yöntemi | **OTP + push onayı** (IdP'ta yapılandırılır) | Donanım token (FIDO2/WebAuthn) — daha güçlü, daha pahalı |
 | D-10 | Web sender constraint | **DPoP önerilir** (access token cihaz/tarayıcı anahtarına bağlı). Mobil için DPoP zorunlu | Web için yalnızca bearer + kısa ömür (daha basit, daha zayıf) |
-| D-11 | Mobil token exchange (DPoP'lu token) | **DMZ'de DPoP proof doğrulaması + mobil için Keycloak token exchange SPI'si** (bkz. 5.0b) | DPoP'u kaldırmak (risk kabulü) veya mobil için farklı kimlik modeli |
+| D-11 | Mobil token exchange (DPoP'lu token) | **DMZ'de DPoP proof doğrulaması + mobil için IdP token exchange SPI'si** (bkz. 5.0b) | DPoP'u kaldırmak (risk kabulü) veya mobil için farklı kimlik modeli |
 
 ---
 
@@ -615,11 +617,11 @@ Aşağıdaki maddeler onay bekler. Varsayılan öneri her madde için verilmişt
 |---|---|---|
 | Service mesh olmaması nedeniyle servisler arası mTLS otomatik değil | Doğu-batı trafikte şifreleme ve kimlik boşluğu | Kritik servislerde servis bazlı TLS (cert-manager); NetworkPolicy ile erişim daraltma; token'ın servis seviyesinde yeniden doğrulanması |
 | kgateway tek giriş noktası | Gateway arızası tüm kanalları etkiler | Kanal bazlı ayrı instance'lar, çok replika, PDB, sağlık kontrolleri |
-| Keycloak arızası | Yeni login ve refresh yapılamaz | HA (3 replika, HA PostgreSQL), ayrı SLA, access token ömrü kadar mevcut oturumlar devam eder |
-| Keycloak ele geçirilmesi | Tüm token'ların sahteciliği | Anahtarların Vault/HSM'de tutulması, admin erişiminin yönetim ağıyla sınırlanması, MFA'lı admin girişi, admin olaylarının SIEM'e iletilmesi |
+| IdP arızası | Yeni login ve refresh yapılamaz | HA (3 replika, HA PostgreSQL), ayrı SLA, access token ömrü kadar mevcut oturumlar devam eder |
+| IdP ele geçirilmesi | Tüm token'ların sahteciliği | Anahtarların Vault/HSM'de tutulması, admin erişiminin yönetim ağıyla sınırlanması, MFA'lı admin girişi, admin olaylarının SIEM'e iletilmesi |
 | Token iptalinin gecikmesi | Çalınmış access token kısa süre geçerli kalır | 5 dk'lık access token ömrü; kritik işlemlerde introspection; refresh reuse tespiti |
 | DMZ `dmz-exchange` istemci kimliğinin ele geçirilmesi | DMZ'den sahte iç JWT üretimi (DMZ'den iç yetkiye geçiş) | İstemci yalnızca exchange izni ve kanal audience'ları ile sınırlı; mTLS client cert kısa ömürlü ve workload'a bağlı; exchange olayları SIEM'de; hız sınırı ve anomali uyarısı |
-| Token exchange gecikmesi ve iç Keycloak bağımlılığı | Yeni oturumlar gecikir veya düşer | İç JWT `exp`'ine kadar önbellek; DMZ `auth` en az 2 replika; Keycloak SLA |
+| Token exchange gecikmesi ve iç IdP bağımlılığı | Yeni oturumlar gecikir veya düşer | İç JWT `exp`'ine kadar önbellek; DMZ `auth` en az 2 replika; IdP SLA |
 | Kanallar arası güvenlik seviyesi tutarsızlığı | Bir kanal zayıf sender constraint ile geçebilir | Kanal profili tek tabloda (5.0); kanal başına exchange istemcisi; exchange politikası kod olarak (GitOps) ve test ile doğrulanır |
 | Mobil cihazın ele geçirilmesi veya klonlanması | Çalınmış dış token başka cihazda kullanılır | DPoP (cihaz anahtarına bağlı token), cihaz attestation, kısa access token ömrü, refresh rotate ve reuse tespiti |
 | Partner `cnf` bağlamasının iç ağda taşınmaması | İç servis sertifika bağlamasını doğrulayamaz | DMZ→iç mTLS ile güven; `partner_id` ve `channel` claim'leri; iç servis yalnızca gw-partner kimliğinden çağrı kabul eder |
@@ -634,10 +636,10 @@ Aşağıdaki maddeler onay bekler. Varsayılan öneri her madde için verilmişt
 1. **Faz 0 — Kararlar:** D-1 ile D-9 arasındaki maddelerin onayı, IP/CIDR planı, sertifika PKI'si.
 2. **Faz 1 — Temel altyapı:** İki cluster kurulumu, CNI, cert-manager, Vault/ESO, Kyverno, Argo CD, monitoring.
 3. **Faz 2 — Ağ:** Firewall kuralları (F1–F7), default deny NetworkPolicy, DNS ayrımı.
-4. **Faz 3 — Auth server:** PostgreSQL HA, Keycloak Operator kurulumu, realm'ler (`customer`, `partner`, `internal`), client tanımları, MFA ve token politikaları, JWT imzalama anahtarları ve rotasyonu, JWKS önbellek testleri.
+4. **Faz 3 — Auth server:** PostgreSQL HA, IdP Operator kurulumu, realm'ler (`customer`, `partner`, `internal`), client tanımları, MFA ve token politikaları, JWT imzalama anahtarları ve rotasyonu, JWKS önbellek testleri.
 5. **Faz 4 — Gateway:** kgateway (DMZ: web/mobil/partner, iç: internal), login ve token endpoint route'ları, DMZ dış token doğrulaması (JWKS), DMZ `auth` token exchange servisi ve kgateway ext-authz bağlantısı, iç JWT authz politikaları.
 6. **Faz 5 — Uygulamalar:** BFF, normal servis, uçtan uca akış testleri (web giriş ve işlem, mobil, partner token ve API).
-7. **Faz 6 — Sertleştirme ve gözlem:** Güvenlik testleri, yük testleri, alarmlar, runbook'lar (Keycloak arızası dahil), penetrasyon testi.
+7. **Faz 6 — Sertleştirme ve gözlem:** Güvenlik testleri, yük testleri, alarmlar, runbook'lar (IdP arızası dahil), penetrasyon testi.
 8. **Faz 7 — Canlıya geçiş:** Kademeli trafik aktarımı, izleme, geri dönüş planı.
 
 ---
@@ -650,16 +652,16 @@ Bu bölüm lab'da gerçekten doğrulanan durumu ve prod'da değişmesi gereken n
 
 | Bileşen | Durum | Doğrulama |
 |---|---|---|
-| DMZ kanal gateway'leri (web, mobile, partner), default deny route'lar. `/public/*` ve `/realms/*` route'ları iç gateway üzerinden gerçek servislere gider (core, Keycloak); stub yok | Çalışıyor | `smoke.sh` 4/4, `route-classes.sh` 10/10 |
+| DMZ kanal gateway'leri (web, mobile, partner), default deny route'lar. `/public/*` ve `/realms/*` route'ları iç gateway üzerinden gerçek servislere gider (core, IdP); stub yok | Çalışıyor | `smoke.sh` 4/4, `route-classes.sh` 10/10 |
 | Ext-authz: RS256 (JWKS), DPoP proof, token exchange (mTLS, kanal sertifikası) | Çalışıyor | `extauth.sh` 25/25 |
-| Mobil token exchange (DPoP'lu token, Keycloak SPI `dmz-dpop-mobile-exchange`) | Çalışıyor | `extauth.sh` mobil testleri |
+| Mobil token exchange (DPoP'lu token, IdP SPI `dmz-dpop-mobile-exchange`) | Çalışıyor | `extauth.sh` mobil testleri |
 | İç gateway: iç JWT doğrulaması, kanal RBAC, DMZ kimliğine mTLS, default deny | Çalışıyor | `authz.sh` 16/16 |
 | BFF ve core: iç JWT'yi kendileri doğrular, gateway'i atlayan çağrılar reddedilir | Çalışıyor | `service-verify.sh` 9/9 |
 | DMZ → iç uçtan uca yol (`/bff/*`, `/partner/*`) | Çalışıyor | `internal-path.sh` 8/8 |
 | Edge HAProxy → DMZ NodePort'ları (F1) | Çalışıyor. DMZ node'larında host firewall: 30446–30448 yalnız edge IP'si ve DMZ node'ları; 30449 (şube) F10 ile yalnız şube cluster'ının node'ları, diğerleri DROP (`dmz-cluster/scripts/host-firewall.sh`) | `dmz-cluster/tests/firewall.sh` 4/4 (F10 eklendikten sonra yeniden çalıştırılmalı) |
-| Edge WAF (Coraza v0.9.1 + OWASP CRS) ve edge uçtan uca testleri | Çalışıyor. SQLi, XSS ve path traversal 403 (`waf-block`), L7 rate limit 429, L4 bağlantı sınırı, slowloris 408, be_gw_web iki backend UP | `edge/tests/run-all.sh` 25/25 (failover dahil) |
-| Management cluster: Vault 1.18 (init/unseal, KV v2, Keycloak parolaları), NodePort 30200, F9 firewall | Çalışıyor | `identity-cluster/scripts/load-vault.sh` |
-| Identity cluster: Keycloak 26.6 + SPI, PostgreSQL 16 (kindnet üzerinde) | Çalışıyor | `extauth.sh` 25/25 ve `internal-path.sh` 8/8 üzerinden dolaylı |
+| Edge uçtan uca testleri (WAF mock). L7 rate limit 429, L4 bağlantı sınırı, slowloris 408. SQLi, XSS ve path traversal bu lab'da engellenmez (mock) | Önceki 25/25 sonucu Coraza döneminden; WAF kaldırıldıktan sonra yeniden çalıştırılmalı | `edge/tests/run-all.sh` (WAF testleri SKIP) |
+| Management cluster: Vault 1.18 (init/unseal, KV v2, IdP parolaları), NodePort 30200, F9 firewall | Çalışıyor | `identity-cluster/scripts/load-vault.sh` |
+| Identity cluster: IdP 26.6 + SPI, PostgreSQL 16 (kindnet üzerinde) | Çalışıyor | `extauth.sh` 25/25 ve `internal-path.sh` 8/8 üzerinden dolaylı |
 | Identity cluster: erişim kısıtı (F8, host iptables) | Çalışıyor. Cilium bırakıldı, kısıt host firewall ile sağlandı | `identity-cluster/tests/firewall.sh` 3/3 |
 | Realm, client ve exchange kurulumu (`setup-realm.sh`) | Çalıştırıldı | `setup-realm.sh` tamamlandı, token exchange yetkileri ayarlandı |
 | Şube cluster'ı (`kind-branch`), şube UI pod'u, F10 (WAN benzeri doğrudan bağlantı, HAProxy yok) | Kuruldu (`up.sh` adım 6), uçtan uca doğrulama bekliyor | `dmz-cluster/tests/branch.sh` 9 kontrol |
@@ -676,24 +678,24 @@ Aşağıdaki her satır prod'da değişmesi gereken bir noktayı gösterir. Süt
 | Cluster arası bağlantı | Statik node IP ve NodePort (`172.18.0.x:300xx`) | Kurumsal iç ağ yönlendirmesi, firewall kuralları F2/F3/F7/F8 |
 | Şube bağlantısı | Şube cluster'ı (`kind-branch`) kind ağı üzerinden gw-branch:30449'a bağlanır (WAN simülasyonu, F10) | Gerçek WAN/SD-WAN, şube edge cihazı, şube-DMZ ayrı firewall (F10), şube başına cihaz kaydı |
 | Edge LB | HAProxy, tek instance, Docker | HAProxy HA çifti (keepalived/VRRP), sanal IP; ya da F5/cloud WAF (D-3) |
-| WAF | Coraza `v0.9.1`, yerel derleme | Pinli imaj, kurumsal registry, cosign imzası; CRS PL1 ile başla, DetectionOnly, sonra blok |
+| WAF | Demo: mock, gerçek WAF yok | Gerçek WAF kararı güvenlik ekibinde. Seçilen WAF için pinli imaj, kurumsal registry, imza; CRS PL1 ile başla, DetectionOnly, sonra blok |
 | DDoS | HAProxy stick-table (IP başına limit) | Upstream temizleme (ISP/bulut, BGP), DDoS runbook'u |
 | DMZ sağlık kontrolü | TLS el sıkışması (`check-ssl`) | DMZ'de HTTP sağlık route'u, HAProxy HTTP aktif kontrolü |
 | kgateway dış erişim | Ayrı NodePort servisleri | LoadBalancer (MetalLB veya BGP) |
-| Keycloak dağıtımı | Düz Deployment, tek replika | Keycloak Operator, en az 3 replika, Infinispan |
-| Keycloak veritabanı | PostgreSQL, emptyDir (kalıcı değil) | HA PostgreSQL (senkron replika, failover), şifreli yedek |
-| Keycloak imajı | `dmz-lab/keycloak-dpop:26.6` (yerel) | Kurumsal registry, imzalı imaj, yükseltme regresyon testleri (SPI) |
-| Keycloak erişimi | NodePort 30080 (dış ağdan da açık) | Yalnız iç gateway'den (NetworkPolicy / firewall), yönetim ağı |
-| Keycloak X509 provider | `envoy` + `trust-proxy-verification=true` | Aynı mekanizma; trust-proxy-verification yalnız doğrulanmış proxy ile |
-| Realm imzalama anahtarları | Keycloak DB'sinde | HSM/KMS (D-12 kararı bekliyor, bkz. 15.4) |
+| IdP dağıtımı | Düz Deployment, tek replika | IdP Operator, en az 3 replika, Infinispan |
+| IdP veritabanı | PostgreSQL, emptyDir (kalıcı değil) | HA PostgreSQL (senkron replika, failover), şifreli yedek |
+| IdP imajı | `dmz-lab/spring-idp:0.1.0` (yerel) | Kurumsal registry, imzalı imaj, yükseltme regresyon testleri |
+| IdP erişimi | NodePort 30080 (dış ağdan da açık) | Yalnız iç gateway'den (NetworkPolicy / firewall), yönetim ağı |
+| IdP X509 provider | `envoy` + `trust-proxy-verification=true` | Aynı mekanizma; trust-proxy-verification yalnız doğrulanmış proxy ile |
+| Realm imzalama anahtarları | IdP DB'sinde | HSM/KMS (D-12 kararı bekliyor, bkz. 15.4) |
 | Vault | Management cluster'da, tek düğüm, emptyDir, TLS kapalı, root token mgmt cluster'da `vault-bootstrap` secret'ında | Management cluster'da 3 düğüm raft, HSM/KMS auto-unseal, TLS, kısa ömürlü token, root token kapatılır |
 | Vault'a erişim (F9) | Host iptables (mgmt node'larında yalnız identity ve internal node IP'leri), HTTP | mTLS, Kubernetes auth ile workload bazlı politikalar, ESO |
 | Vault PKI | Yok, sertifikalar elle üretilmiş | Exchange, DMZ ve partner istemci sertifikaları Vault PKI ile kısa ömürlü |
 | Secret dağıtımı | Vault → Kubernetes secret (betik) | External Secrets Operator, namespace bazlı, Vault politikalarıyla |
-| Exchange kimlik doğrulama | Keycloak `client-x509`, sertifikalar elle | Vault PKI, rotasyon, kısa ömür |
+| Exchange kimlik doğrulama | IdP `client-x509`, sertifikalar elle | Vault PKI, rotasyon, kısa ömür |
 | Test client'ları | Lab'da `lab-cli` kaldırıldı; `mobile-app` ve `web-app` üzerinde `directAccessGrants` kapalı. Testler kullanıcı token'ını Authorization Code + PKCE ile alır (`identity-cluster/tests/lib/pkce.sh`) | Prod'da test kullanıcısı ve test client'ı yok; yalnız PKCE ve client credentials |
 | Test kullanıcısı | `alice` | Yok |
-| DPoP | RS256 ve ES256 (P-256) proof, stdlib ile doğrulanır (ES256: `ec_p256_verify`, Keycloak ES256 proof'unu kabul eder, `extauth.sh` 29/29). `jti` cache süreç içi | Paylaşılan replay store (ör. Redis), kütüphane tabanlı doğrulama |
+| DPoP | RS256 ve ES256 (P-256) proof, stdlib ile doğrulanır (ES256: `ec_p256_verify`, IdP ES256 proof'unu kabul eder, `extauth.sh` 29/29). `jti` cache süreç içi | Paylaşılan replay store (ör. Redis), kütüphane tabanlı doğrulama |
 | Ext-authz replika | 1 (replay cache tutarlılığı için) | En az 2, paylaşılan store ile |
 | İç servis JWT doğrulaması | Stdlib RS256 (`svc.py`) | Olgun JWT kütüphanesi, JWKS önbellek ve rotasyon politikası |
 | NetworkPolicy | Cilium (lab'da çalışmıyor, 15.3) | Cilium veya Calico, default deny, egress FQDN allowlist (MFA) |
@@ -705,12 +707,12 @@ Aşağıdaki her satır prod'da değişmesi gereken bir noktayı gösterir. Süt
 
 ### 15.3 Lab'da açık kalan engeller
 
-- **Cilium kernel uyumsuzluğu:** Identity cluster'daki Cilium agent, iptables `mangle` kurallarını yükleyemiyor (`socket --transparent` için `xt_socket` modülü eksik). Sonuç: pod'lar cluster dışına (API sunucusu, node IP, internet) erişemiyor, CoreDNS hazır olmuyor, Keycloak PostgreSQL'e bağlanamıyor. Çözüm adayları: kernel modülünü içeren bir Linux ortamı, ya da Cilium'u `kube-proxy` ve tam iptables desteğiyle çalıştırmak. Bu, bu makinede yapılamadı.
-- **Alternatif F8 uygulaması (uygulandı):** identity cluster kindnet ile yeniden kuruldu. NetworkPolicy yerine identity node'larında host iptables kuralları ile Keycloak NodePort'una yalnız iç node IP'lerinden erişim izin veriliyor (`filter` tablosu, `mangle` gerekmez). Lab'da F8 kuralının karşılığı budur.
-- **WAF imajı:** `edge/scripts/build-waf.sh` ile yerel olarak derlendi (`dmz-lab/coraza-spoa:0.9.1`). Otomatik izin sistemi ilk denemede bu derlemeyi engellemişti; kullanıcı tarafından çalıştırıldıktan sonra edge testleri geçti.
+- **Cilium kernel uyumsuzluğu:** Identity cluster'daki Cilium agent, iptables `mangle` kurallarını yükleyemiyor (`socket --transparent` için `xt_socket` modülü eksik). Sonuç: pod'lar cluster dışına (API sunucusu, node IP, internet) erişemiyor, CoreDNS hazır olmuyor, IdP PostgreSQL'e bağlanamıyor. Çözüm adayları: kernel modülünü içeren bir Linux ortamı, ya da Cilium'u `kube-proxy` ve tam iptables desteğiyle çalıştırmak. Bu, bu makinede yapılamadı.
+- **Alternatif F8 uygulaması (uygulandı):** identity cluster kindnet ile yeniden kuruldu. NetworkPolicy yerine identity node'larında host iptables kuralları ile IdP NodePort'una yalnız iç node IP'lerinden erişim izin veriliyor (`filter` tablosu, `mangle` gerekmez). Lab'da F8 kuralının karşılığı budur.
+- **WAF kaldırıldı (demo mock):** Coraza (coraza-spoa 0.9.1), OWASP CRS ve ilgili betikler lab'dan kaldırıldı. Demo edge'de mock WAF var; uygulama katmanı saldırı engelleme yoktur. CRS 4.25.2 ile 4.30.0'a geçiş denemesinde kural dosyası `web-shells-php.data` kurumsal Defender tarafından engellendi; gerçek WAF kararı güvenlik ekibine bağlı.
 - **Edge testlerinde düzeltilen hata:** Testler `--resolve` ile `Host: web.lab.local:8443` gönderiyordu; HAProxy host ACL'i tam host adını beklediği için istekler WAF'a hiç ulaşmadan 404 dönüyordu. Testler `--connect-to` ile port'suz Host gönderecek şekilde değiştirildi (gerçek istemci davranışı). Bu değişiklikten sonra WAF'ın gerçekten engellediği doğrulandı.
 - **Failover (lab):** `lb.sh` bir DMZ node'unda yalnız gw-web NodePort'unu (30446) geçici olarak düşürüyor. Backend DOWN oluyor, 10/10 istek ikinci node'dan 200 dönüyor, kural kaldırılınca UP oluyor. Node ve cluster ayakta kalır.
-- **WAF 500 gözlemi:** Yüksek eşzamanlılıkta bir SPOE çağrısı 688 ms sürdü, `timeout processing` (500 ms) aşıldı (`st=1`) ve HAProxy isteği fail-closed olarak 500 ile reddetti. Zaman aşımı 2 s'ye çıkarıldı; sonrasında üç burst'te (1200 istek) 500 görülmedi. Örnek sayı küçük; prod'da SPOE gecikme metriği ile izlenmeli.
+- **WAF 500 gözlemi (Coraza döneminden, artık geçerli değil):** Yüksek eşzamanlılıkta bir SPOE çağrısı 688 ms sürdü, `timeout processing` (500 ms) aşıldı (`st=1`) ve HAProxy isteği fail-closed olarak 500 ile reddetti. Zaman aşımı 2 s'ye çıkarıldı; sonrasında üç burst'te (1200 istek) 500 görülmedi. Örnek sayı küçük; prod'da SPOE gecikme metriği ile izlenmeli.
 
 - **Konsol şube kanalı:** `console/app.py` şube kanalını hâlâ `teller.lab.local` (HAProxy) üzerinden çağırıyor. Şube artık HAProxy'den geçmediği için bu kanal çalışmaz. Düzeltme: şube kanalını şube cluster'ındaki pod üzerinden çağırmak.
 - **Şube kurulumu doğrulaması:** `up.sh` adım 6, `branch.sh` ve F10 uçtan uca henüz çalıştırılmadı.
@@ -718,7 +720,7 @@ Aşağıdaki her satır prod'da değişmesi gereken bir noktayı gösterir. Süt
 
 ### 15.4 Karar bekleyen konular
 
-- **D-12 (realm imzalama anahtarları):** Keycloak anahtarları DB'de mi kalsın (lab), HSM/KMS'ten mi gelsin (prod, tasarım), yoksa Vault Transit ile imzalayan özel bir SPI mi yazılsın. Tasarımdaki "anahtarlar dışarı çıkarılamaz" kuralı ile çakışıyor.
+- **D-12 (realm imzalama anahtarları):** IdP anahtarları DB'de mi kalsın (lab), HSM/KMS'ten mi gelsin (prod, tasarım), yoksa Vault Transit ile imzalayan özel bir SPI mi yazılsın. Tasarımdaki "anahtarlar dışarı çıkarılamaz" kuralı ile çakışıyor.
 - **Cilium alternatifi:** Kindnet + host iptables yolu seçildi ve uygulandı (F8). Uyumlu kernel ile Cilium denemesi lab'da yapılmadı; prod'da Cilium/Calico NetworkPolicy hedeflenir.
 - **Test client'larının kaldırılması:** Prod'a geçiş öncesi `lab-cli` ve `mobile-app` üzerindeki `directAccessGrants` kapatılacak.
 

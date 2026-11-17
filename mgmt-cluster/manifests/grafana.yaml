@@ -484,7 +484,7 @@ data:
         {
           "id": 6,
           "type": "table",
-          "title": "keycloak (token exchange)",
+          "title": "IdP (token exchange)",
           "gridPos": {
             "x": 16,
             "y": 10,
@@ -503,7 +503,7 @@ data:
                 "uid": "tempo"
               },
               "queryType": "traceqlSearch",
-              "query": "{ resource.service.name = \"keycloak\" }",
+              "query": "{ resource.service.name = \"spring-idp\" }",
               "limit": 20,
               "filters": [
                 {
@@ -512,7 +512,7 @@ data:
                   "operator": "=",
                   "scope": "resource",
                   "value": [
-                    "keycloak"
+                    "spring-idp"
                   ],
                   "valueType": "string"
                 }
@@ -1151,7 +1151,7 @@ data:
           "icon": "external link"
         },
         {
-          "title": "Keycloak admin (port-forward 18080 gerekir)",
+          "title": "IdP (port-forward 18080, https)",
           "type": "link",
           "url": "http://127.0.0.1:18080/admin/",
           "targetBlank": true,
@@ -1178,7 +1178,7 @@ spec:
         fsGroup: 472
       containers:
         - name: grafana
-          image: grafana/grafana:11.3.0
+          image: grafana/grafana:11.6.10
           imagePullPolicy: IfNotPresent
           env:
             - name: GF_SECURITY_ADMIN_USER

@@ -16,7 +16,7 @@ Son güncelleme: 2026-11-11.
 | Betik | Görev |
 |---|---|
 | `bash up.sh --check` | Yalnız ön kontroller: araçlar, Docker, repo dosyaları, kind ağı (172.18.0.0/16), portlar, internet, sertifikalar. FAIL varsa kurulum yapılmaz |
-| `bash up.sh` | Ön kontroller, sonra sırayla: sertifikalar ve imajlar → mgmt (Vault) → edge → identity (Keycloak, realm) → internal → DMZ (gateway'ler, F1, iç backend, ext-authz) → **şube cluster'ı** (F10) |
+| `bash up.sh` | Ön kontroller, sonra sırayla: sertifikalar ve imajlar → mgmt (Vault) → edge → identity (IdP, realm) → internal → DMZ (gateway'ler, F1, iç backend, ext-authz) → **şube cluster'ı** (F10) |
 | `bash down.sh` | Ters sırada kaldırır: port-forward'lar → kind cluster'ları (branch, dmz, internal, identity, mgmt) → edge. `--purge` ile sertifika ve imajlar da silinir. Onay ister, `--yes` ile atlanır |
 
 Ortam durumu: son kontrolde kind cluster'ları ve edge container'ları yoktu (sertifikalar ve repo yerinde). Sıfırdan `up.sh` çalıştırıldı. **Durum: identity adımında durdu (EXIT 2).** Hata: `load-vault.sh` içinde Vault unseal, `'key' must be a valid hex or base64 string` ile reddedildi. Vault başlatılmış (`Initialized: true`) ve mühürlü. Olası neden: `vault-bootstrap` secret'ındaki unseal anahtarının init çıktısından yanlış ayrıştırılması. Doğrulanmadı. Mgmt cluster ve `vault-bootstrap` yeniden oluşturulmadan düzeltilemez. Kalan adımlar (identity, internal, DMZ, şube) çalıştırılmadı.
@@ -27,8 +27,8 @@ Ortam durumu: son kontrolde kind cluster'ları ve edge container'ları yoktu (se
 
 | Bileşen | Görev | Yapılandırma | Durum |
 |---|---|---|---|
-| **HAProxy 3.0** | Tek dış giriş (443). SNI'ye göre **TCP passthrough**: yalnız `partner-api.lab.local`. Diğer host'lar TLS sonlandırır, WAF'a SPOE ile gider, DMZ gateway'lerine re-encrypt eder. L4 ve L7 IP başına hız sınırı. Aktif sağlık kontrolü: `GET /public/branches` (200). **Şube (`teller.lab.local`) HAProxy'den geçmez** | `edge/haproxy/haproxy.cfg`, `coraza.cfg` (SPOE processing 2 s) | Doğrulandı: edge 25/25 (önceki çalıştırma). Şube kuralının kaldırılması: doğrulama bekliyor |
-| **Coraza WAF** (coraza-spoa v0.9.1) | OWASP CRS: SQLi, XSS, path traversal → 403 (`waf-block`) | İmaj `dmz-lab/coraza-spoa:0.9.1` (`edge/scripts/build-waf.sh`) | Doğrulandı (edge testleri) |
+| **HAProxy 3.0** | Tek dış giriş (443). SNI'ye göre **TCP passthrough**: yalnız `partner-api.lab.local`. Diğer host'lar TLS sonlandırır, (demo'da mock) WAF'tan geçer, DMZ gateway'lerine re-encrypt eder. L4 ve L7 IP başına hız sınırı. Aktif sağlık kontrolü: `GET /public/branches` (200). **Şube (`teller.lab.local`) HAProxy'den geçmez** | `edge/haproxy/haproxy.cfg` (WAF yok, mock) | Doğrulandı: edge 25/25 (önceki çalıştırma). Şube kuralının kaldırılması: doğrulama bekliyor |
+| **WAF (demo: mock)** | Yok. Coraza ve OWASP CRS lab'dan kaldırıldı. SQLi, XSS ve path traversal engellenmez | Yok | Gerçek WAF kararı güvenlik ekibinde |
 
 Edge testleri (`edge/tests/run-all.sh`): smoke, lb (failover dahil), waf, ddos → **25 kontrol**.
 
@@ -64,7 +64,7 @@ Tracing: her gateway `ListenerPolicy` ile OTLP/gRPC span gönderir (Tempo, 30317
 
 | Bileşen | Görev | Durum |
 |---|---|---|
-| **ext-authz** (Python, stdlib) | Dış token: RS256 (Keycloak JWKS), iss, aud, kanal, exp. Mobil ve DPoP bağlı token'da **RS256 ve ES256 (P-256)** DPoP proof doğrulaması. Ardından kanal sertifikasıyla **token exchange** (mTLS, `dmz-exchange-<kanal>`) → iç JWT. Kanal profilleri: web, mobile, partner, branch | Doğrulandı: `extauth.sh` 29/29 (önceki çalıştırma). Branch profili: doğrulama bekliyor |
+| **ext-authz** (Python, stdlib) | Dış token: RS256 (IdP JWKS), iss, aud, kanal, exp. Mobil ve DPoP bağlı token'da **RS256 ve ES256 (P-256)** DPoP proof doğrulaması. Ardından kanal sertifikasıyla **token exchange** (mTLS, `dmz-exchange-<kanal>`) → iç JWT. Kanal profilleri: web, mobile, partner, branch | Doğrulandı: `extauth.sh` 29/29 (önceki çalıştırma). Branch profili: doğrulama bekliyor |
 | Hata gövdesi | 4xx/5xx JSON: `error`, `error_description`, `layer: dmz-ext-authz`, `status`; 401'de `WWW-Authenticate` | Doğrulandı |
 | Tracing | Karar ve token exchange span'leri (Tempo) | Doğrulandı |
 | Metrikler | `authz_decisions_total{channel,decision,status}`, `authz_exchange_total`, `authz_decision_duration_seconds` (port 9100, NodePort 30903) | Doğrulandı |
@@ -122,10 +122,9 @@ Tracing: BFF ve core span üretir (`bff → core` alt span'i dahil).
 
 | Bileşen | Görev | Yapılandırma | Durum |
 |---|---|---|---|
-| **Keycloak 26.6** | Login, token üretimi, token exchange (standart V2 + SPI), realm `bank` | `manifests/keycloak.yaml`: `--spi-x509cert-lookup--provider=envoy`, `KC_HOSTNAME=https://id.bank.lab.local` (issuer), `--hostname-admin=http://127.0.0.1:18080`, OpenTelemetry tracing (Tempo) | Doğrulandı (önceki çalıştırma) |
-| **SPI `dmz-dpop-mobile-exchange`** | Mobil DPoP bağlı subject token'ı yeniden imzalayıp standart exchange'e sokar | `keycloak-spi/` (Java), imaj `dmz-lab/keycloak-dpop:26.6` | Doğrulandı |
-| **PostgreSQL 16** | Keycloak veritabanı | emptyDir (lab) | Doğrulandı |
-| **F8 host firewall** | Keycloak'a yalnız iç node'lardan ve pod ağından erişim | `identity-cluster/scripts/host-firewall.sh` | Doğrulandı: 3/3 |
+| **Spring IdP** (Spring Authorization Server 7.1.2) | Login (Authorization Code + PKCE, CSRF'li login formu), client_credentials, token exchange (RFC 8693, mTLS `tls_client_auth`), DPoP (`cnf.jkt`), realm yolları `/realms/bank/...`, claim'ler (`channel`, `auth_method`, `partner_id`, `aud`) | `identity-cluster/spring-idp/` (Java), imaj `dmz-lab/spring-idp:0.1.0`, `identity-cluster/manifests/spring-idp.yaml` (ns `idp`), NodePort 30443 (HTTPS), 30081 (iç HTTP) | Doğrulandı: tüm test süitleri (97 kontrol) |
+| **PostgreSQL 16** | IdP veritabanı | PVC `postgres-idp-data` (1Gi, local-path; lab tek replika) | Doğrulandı |
+| **F8 host firewall** | IdP'ye yalnız iç node'lardan ve pod ağından erişim | `identity-cluster/scripts/host-firewall.sh` | Doğrulandı: 3/3 |
 
 **Realm `bank` client'ları:**
 
@@ -150,7 +149,7 @@ Cilium denemesi (WSL2 kernel'de `xt_socket` eksik) başarısız oldu ve kaldır�
 
 | Bileşen | Görev | Yapılandırma | Durum |
 |---|---|---|---|
-| **Vault 1.18** (ns `secrets`) | KV v2 (`secret/`), identity secret'ları, Keycloak parolaları | `manifests/vault.yaml`, NodePort 30200, `identity-cluster/scripts/load-vault.sh` (init, unseal, secret türetme). F9 host firewall: yalnız identity ve internal node'lar | Doğrulandı (önceki çalıştırma) |
+| **Vault 1.18** (ns `secrets`) | KV v2 (`secret/`), identity secret'ları, IdP parolaları | `manifests/vault.yaml`, NodePort 30200, `identity-cluster/scripts/load-vault.sh` (init, unseal, secret türetme). F9 host firewall: yalnız identity ve internal node'lar | Doğrulandı (önceki çalıştırma) |
 | **Grafana 11.3** (ns `observability`) | Dashboard ve iz sorgusu. Veri kaynakları: Prometheus (uid `prometheus`), Tempo (uid `tempo`) | `manifests/grafana.yaml`, NodePort 30300, admin parolası `grafana-admin` secret'ında | Çalışıyor |
 | Dashboard: **DMZ Lab – Genel Bakış** | İstek hızı, gecikme, yetkilendirme kararları, transfer sonuçları | `lab-overview.json` | Çalışıyor |
 | Dashboard: **DMZ Lab – Dağıtık İzleme** | Servis bazlı son izler, hata izleri (TraceQL), iz kimliğiyle arama | `lab-tracing.json` | Çalışıyor |
@@ -168,7 +167,7 @@ Trace ve metrik kalıcılığı lab'da emptyDir'dir; yeniden başlatmada veri gi
 | **`console/app.py`** (port 9000) | Organizer ve kanal sayfaları (`organizer.html`, `channel.html`). Giriş ve çıkış her zaman görünür. Her çağrı kök bir console span'i ve Tempo izi üretir | Doğrulandı (önceki çalıştırma) |
 | **Şube kanalı** | `app.py` hâlâ şube kanalını `teller.lab.local` üzerinden edge'e gönderiyor. Bu yol artık çalışmaz (bölüm 10) | **Güncellenmedi, açık** |
 | **Operasyon tablosu** (`console/ops.js`) | Kanal bazında işlem matrisi: yapılabilen (✓) ve yapılamayan (✗) işlemler | Tek kaynak tablo |
-| Port-forward'lar | Identity Keycloak `18081`, Tempo OTLP `14318`, Grafana `3000` | `app.py` içinde `kubectl port-forward` |
+| Port-forward'lar | Identity IdP `18081`, Tempo OTLP `14318`, Grafana `3000` | `app.py` içinde `kubectl port-forward` |
 
 Ayrıntılı kullanım: `console/README.md`.
 
@@ -191,7 +190,7 @@ Ayrıntılı kullanım: `console/README.md`.
 
 ## 9. Test Özeti
 
-Tam koşu: `bash run-all.sh` (kök dizin), 11 süit. Son tam koşu Tempo ve Keycloak izleme değişikliklerinden önce yapıldı. Şube cluster'ı ve F10 eklendiğinden beri tam koşu yapılmadı.
+Tam koşu: `bash run-all.sh` (kök dizin), 11 süit. Son tam koşu Tempo ve IdP izleme değişikliklerinden önce yapıldı. Şube cluster'ı ve F10 eklendiğinden beri tam koşu yapılmadı.
 
 | Süit | Kontrol | Durum |
 |---|---|---|
@@ -220,8 +219,8 @@ Tam koşu: `bash run-all.sh` (kök dizin), 11 süit. Son tam koşu Tempo ve Keyc
 - **Kalıcılık:** Trace, metrik, PostgreSQL ve dummy veriler lab'da emptyDir/bellek.
 - **Vault PKI ve ESO:** Exchange, DMZ, partner ve şube sertifikaları henüz Vault'tan değil; identity secret'ları bootstrap betiğiyle.
 - **Argo CD ve Kyverno:** kurulmadı (planlı).
-- **D-12 (realm imzalama anahtarları):** Keycloak DB, HSM/KMS veya Vault Transit kararı bekleniyor.
+- **D-12 (realm imzalama anahtarları):** IdP DB, HSM/KMS veya Vault Transit kararı bekleniyor.
 - **Partner CRL/OCSP:** kgateway v2.5 desteklemiyor; kısa ömürlü sertifika ile sınırlanacak.
 - **ext-authz replika > 1:** Paylaşılan replay store gerekiyor.
 - **Lab kullanıcıları:** `alice` ve `teller` test kullanıcıları; prod öncesi kaldırılacak.
-- **Admin konsolu iframe uyarısı:** Keycloak admin konsolunda "3rd party check iframe" zaman aşımı; hosts dosyası ve HTTPS çözümü onay bekliyor.
+- **Admin konsolu iframe uyarısı:** IdP admin konsolunda "3rd party check iframe" zaman aşımı; hosts dosyası ve HTTPS çözümü onay bekliyor.

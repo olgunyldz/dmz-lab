@@ -85,9 +85,9 @@ const OPS = [
 
   { id: 'logout', label: 'Çıkış', desc: 'Oturum kapatma (menüde bilgi)',
     per: {
-      web:     { ok: true, note: 'Keycloak oturumu kapanır (204)' },
+      web:     { ok: true, note: 'IdP oturumu kapanır (204)' },
       mobile:  { ok: true, note: 'Refresh token iptali (revoke)' },
-      branch:  { ok: true, note: 'Keycloak oturumu kapanır (204)' },
+      branch:  { ok: true, note: 'IdP oturumu kapanır (204)' },
       partner: { ok: true, note: 'Yerel token silinir' },
       public:  { ok: false, reason: 'Public kanalda oturum yok.' } } },
 ];

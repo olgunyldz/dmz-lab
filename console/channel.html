@@ -192,7 +192,7 @@ function setupPage(channels) {
   if (KEY === 'partner') $('hint').textContent = 'Partner girişi client credentials ile (mTLS). Çıkış yerel token siler.';
   if (KEY === 'branch') $('hint').textContent = 'Şube girişi: şube UI pod’u (branch-cluster, cihaz sertifikası pod’da). Giriş: teller kullanıcısı.';
   if (KEY === 'mobile') $('hint').textContent = 'Mobil girişte DPoP anahtarı üretilir; çıkış refresh token\'ı iptal eder.';
-  if (KEY === 'web') $('hint').textContent = 'Web girişi PKCE ile. Çıkış Keycloak oturumunu kapatır.';
+  if (KEY === 'web') $('hint').textContent = 'Web girişi PKCE ile. Çıkış IdP oturumunu kapatır.';
 
   renderMenu($('menu'), KEY, (op, cfg, res) => {
     const ok = res.pass === true || String(res.status) === String(cfg.expect || '200');
@@ -243,7 +243,7 @@ async function logout() {
   try {
     const r = await post('/api/logout', { channel: KEY });
     const note = r.data.note || '';
-    addRow([now(), KEY, 'çıkış', '-', '200/204', r.data.keycloak_status ?? '-',
+    addRow([now(), KEY, 'çıkış', '-', '200/204', r.data.idp_status ?? '-',
       { cls: r.data.ok ? 'pass' : 'fail', text: r.data.ok ? 'PASS' : 'FAIL' }, note || 'oturum kapatıldı']);
   } catch (e) { addRow([now(), KEY, 'çıkış', '-', '-', 'hata', { cls: 'fail', text: 'FAIL' }, String(e)]); }
   finally { btn.disabled = false; await refreshState(); }

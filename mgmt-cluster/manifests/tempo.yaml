@@ -1,6 +1,6 @@
 # Grafana Tempo (mgmt cluster, ns observability): trace depolama ve sorgu. Jaeger'ın yerini alır.
 # OTLP alımı Jaeger ile aynı NodePort'larda: HTTP 30318 (/v1/traces), gRPC 30317. Böylece istemci tarafında
-# (servisler, ext-authz, gateway'ler, Keycloak) yapılandırma değişmez.
+# (servisler, ext-authz, gateway'ler, IdP) yapılandırma değişmez.
 # Sorgu: Grafana Tempo veri kaynağı (TraceQL), HTTP 3200.
 # Depolama: local disk (emptyDir, lab). Prod: object storage (S3/MinIO), retention ve replikasyon.
 ---
@@ -50,7 +50,7 @@ spec:
       automountServiceAccountToken: false
       containers:
         - name: tempo
-          image: grafana/tempo:2.6.1
+          image: grafana/tempo:2.10.2
           imagePullPolicy: IfNotPresent
           args:
             - -config.file=/etc/tempo/tempo.yaml

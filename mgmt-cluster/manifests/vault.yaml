@@ -44,7 +44,7 @@ spec:
       automountServiceAccountToken: false
       containers:
         - name: vault
-          image: hashicorp/vault:1.18
+          image: hashicorp/vault:1.20.1
           # Image entrypoint'ini atla: entrypoint salt okunur ConfigMap'te chown dener ve sunucuyu ikinci kez açar
           command: ["vault", "server", "-config=/vault/config/vault.hcl"]
           ports:

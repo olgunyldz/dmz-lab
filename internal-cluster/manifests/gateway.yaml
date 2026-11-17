@@ -1,5 +1,5 @@
 # İç kgateway (north-south ingress). DMZ ext-authz buraya TLS ile bağlanır (F2).
-# Identity cluster'daki Keycloak, selector'sız Service + Endpoints ile bağlanır (cluster dışı backend).
+# Identity cluster'daki IdP, selector'sız Service + Endpoints ile bağlanır (cluster dışı backend).
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
@@ -33,25 +33,25 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: identity-keycloak
+  name: identity-idp
   namespace: gw-internal
 spec:
   ports:
     - name: http
       port: 80
-      targetPort: 30080
+      targetPort: 30081
 ---
 apiVersion: v1
 kind: Endpoints
 metadata:
-  name: identity-keycloak
+  name: identity-idp
   namespace: gw-internal
 subsets:
   - addresses:
       - ip: __IDENTITY_NODE_IP__
     ports:
       - name: http
-        port: 30080
+        port: 30081   # Spring IdP iç HTTP NodePort
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -69,6 +69,9 @@ spec:
         - path:
             type: PathPrefix
             value: /.well-known/
+        - path:
+            type: Exact
+            value: /login
       backendRefs:
-        - name: identity-keycloak
+        - name: identity-idp
           port: 80

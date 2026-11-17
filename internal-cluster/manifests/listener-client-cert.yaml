@@ -1,4 +1,4 @@
-# İç gateway: DMZ istemci sertifikasını doğrula ve upstream'e (Keycloak) XFCC ile ilet.
+# İç gateway: DMZ istemci sertifikasını doğrula ve upstream'e (IdP) XFCC ile ilet.
 # SanitizeSet: istemcinin gönderdiği x-forwarded-client-cert başlığı silinir, doğrulanmış sertifika yazılır.
 apiVersion: gateway.kgateway.dev/v1alpha1
 kind: ListenerPolicy

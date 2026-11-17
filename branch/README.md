@@ -56,7 +56,7 @@ Host'ta (kind olmadan, geliştirme amaçlı) `branch/server.py` çalıştırıla
 
 | Düğme | Beklenen | Anlamı |
 |---|---|---|
-| Giriş yap | token alındı | Keycloak PKCE (branch-app), kullanıcı `teller` |
+| Giriş yap | token alındı | IdP PKCE (branch-app), kullanıcı `teller` |
 | Hesapları listele | 200 | `/bff/accounts`, iç servis `channel=branch` görür |
 | Cihaz sertifikasız bağlan | TLS red | Gateway istemci sertifikası ister |
 | Token yok | 401 | ext-authz bearer ister |
@@ -73,7 +73,7 @@ Host'ta (kind olmadan, geliştirme amaçlı) `branch/server.py` çalıştırıla
 ## Lab sınırları
 
 - Cihaz sertifikası tek bir iş istasyonu için (`branch-ws-01`). Şube başına cihaz kaydı ve sertifika yaşam döngüsü yok (prod: Vault PKI, kısa ömür).
-- Çalışan kimliği Keycloak'taki yerel `teller` kullanıcısı. Prod: kurumsal dizin federasyonu (AD/LDAP).
+- Çalışan kimliği önceki IdP'deki yerel `teller` kullanıcısı. Prod: kurumsal dizin federasyonu (AD/LDAP).
 - Şube CA'sının özel anahtarı `edge/certs/` içinde (git'e girmez). Prod: HSM/KMS.
 - WAN lab'da kind ağı ile simüle edilir. Prod'da şube ile DMZ arasında gerçek WAN, şube edge'i ve ayrı firewall (F10) olur.
 - Şube UI bir gerçek istemci değildir; iş istasyonunun yerine geçer.

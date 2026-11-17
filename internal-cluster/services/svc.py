@@ -1,7 +1,7 @@
 """İç servis (BFF / core): gelen isteğin iç JWT'sini KENDİSİ doğrular (savunma derinliği, design.md 4.3).
 
 - Gateway başlıklarına (x-channel, x-user-id vb.) GÜVENMEZ. Kanal, kullanıcı ve yöntem yalnızca token claim'lerinden alınır.
-- İmza: iç Keycloak JWKS (RS256). iss, aud (kgateway-internal), exp ve kanal kontrol edilir.
+- İmza: iç IdP JWKS (RS256). iss, aud (kgateway-internal), exp ve kanal kontrol edilir.
 - PUBLIC_PATHS=1 ise GET /public/* token gerektirmez (design 5.0a).
 
 Dummy iş API'si (LAB, veritabanı YOK):

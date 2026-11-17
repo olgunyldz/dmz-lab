@@ -6,7 +6,7 @@
 #   4) ConfigMap branch-code (server.py, probe.py, index.html) ve şube UI pod'u
 #   5) BRANCH_GW_HOST: DMZ node IP'si (gw-branch NodePort 30449, WAN üzerinden)
 #   6) DMZ F10 kuralı: 30449'a yalnız bu cluster'ın node IP'lerinden erişim (dmz-cluster/scripts/host-firewall.sh)
-# Ön koşul: DMZ ve identity kurulu; edge/certs (gen-branch-certs.sh); identity'de keycloak-client-secrets.
+# Ön koşul: DMZ ve identity kurulu; edge/certs (gen-branch-certs.sh); identity'de idp-secrets.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -49,8 +49,9 @@ $K -n branch create secret generic branch-device-tls \
     --dry-run=client -o yaml | $K apply -f -
 
 # Identity'deki client secret'ları (branch-app, teller parolası) şube pod'una kopyalanır. Repo'da tutulmaz.
-BRANCH_APP_SECRET=$(kubectl --context kind-identity -n auth get secret keycloak-client-secrets -o jsonpath='{.data.branch-app}' | base64 -d)
-TELLER_PASSWORD=$(kubectl --context kind-identity -n auth get secret keycloak-client-secrets -o jsonpath='{.data.teller-password}' | base64 -d)
+# Spring IdP (idp/idp-secrets): branch-app istemcisi WEB_APP_SECRET ile kayıtlı; teller parolası TELLER_PASSWORD
+BRANCH_APP_SECRET=$(kubectl --context kind-identity -n idp get secret idp-secrets -o jsonpath='{.data.WEB_APP_SECRET}' | base64 -d)
+TELLER_PASSWORD=$(kubectl --context kind-identity -n idp get secret idp-secrets -o jsonpath='{.data.TELLER_PASSWORD}' | base64 -d)
 $K -n branch create secret generic branch-app-secrets \
     --from-literal=BRANCH_APP_SECRET="$BRANCH_APP_SECRET" \
     --from-literal=TELLER_PASSWORD="$TELLER_PASSWORD" \
