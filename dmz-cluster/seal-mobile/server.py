@@ -52,8 +52,6 @@ ISSUER = os.environ.get("SM_ISSUER", "https://id.bank.lab.local/realms/bank")
 AUDIENCE = os.environ.get("SM_AUDIENCE", "channel-mobile")
 CHANNEL = os.environ.get("SM_CHANNEL", "mobile")
 CLIENT_ID = "seal-mobile"  # IdP istemcisi (SM_MOBILE_SECRET): yalnız introspection
-IDP_IP, IDP_PORT = os.environ.get("SM_IDP_URL", "127.0.0.1:8443").rsplit(":", 1)
-IDP_HOST = os.environ.get("SM_IDP_HOST", "id.bank.lab.local")
 FLOWS = {}   # flowId -> {device, userId, created}
 JWKS = {"set": None, "exp": 0}
 LOCK = threading.Lock()
@@ -68,20 +66,6 @@ def tls_socket(host, port, server_name, ca):
     ctx = ssl.create_default_context(cafile=ca)
     ctx.minimum_version = ssl.TLSVersion.TLSv1_2
     return ctx, socket.create_connection((host, int(port)), timeout=10), server_name
-
-
-def https_get_json(host, port, server_name, path, ca, client=None):
-    ctx = ssl.create_default_context(cafile=ca)
-    ctx.minimum_version = ssl.TLSVersion.TLSv1_2
-    if client:
-        ctx.load_cert_chain(client[0], client[1])
-    conn = http.client.HTTPSConnection(host, int(port), timeout=10)
-    conn.sock = ctx.wrap_socket(socket.create_connection((host, int(port)), timeout=10), server_hostname=server_name)
-    conn.request("GET", path, headers={"Host": server_name})
-    resp = conn.getresponse()
-    data = json.loads(resp.read() or b"{}")
-    conn.close()
-    return resp.status, data
 
 
 def https_post_json(host, port, server_name, path, body, headers, ca, client=None):
@@ -99,44 +83,44 @@ def https_post_json(host, port, server_name, path, body, headers, ca, client=Non
     return resp.status, data
 
 
+def gw_request(method, path, headers, body):
+    """DMZ -> gw-internal (mTLS, DMZ istemci sertifikası). IdP'ye doğrudan bağlantı YOK: yol gateway üzerinden."""
+    host, port = INTERNAL.rsplit(":", 1)
+    ctx = ssl.create_default_context(cafile=os.environ["SM_CA"])
+    ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+    ctx.load_cert_chain(os.environ["SM_CLIENT_CERT"], os.environ["SM_CLIENT_KEY"])
+    conn = http.client.HTTPSConnection(host, int(port), timeout=10)
+    conn.sock = ctx.wrap_socket(socket.create_connection((host, int(port)), timeout=10), server_hostname="gw-internal")
+    conn.request(method, path, body=body, headers={"Host": "gw-internal", **headers})
+    resp = conn.getresponse()
+    data = resp.read()
+    conn.close()
+    return resp.status, data
+
+
 def idp_keys():
-    """IdP JWKS (önbellekli, 300 sn). Yalnız iç CA ile doğrulanmış HTTPS."""
+    """IdP JWKS (önbellekli, 300 sn): gw-internal -> IdP (HTTPS)."""
     with LOCK:
         if JWKS["set"] and time.time() < JWKS["exp"]:
             return JWKS["set"]
-    st, data = https_get_json(IDP_IP, IDP_PORT, IDP_HOST, "/realms/bank/protocol/openid-connect/certs",
-                              os.environ["SM_CA"])
+    st, data = gw_request("GET", "/realms/bank/protocol/openid-connect/certs", {}, None)
     if st != 200:
         raise Unauthorized("IdP anahtarları alınamadı")
-    keyset = jwt.PyJWKSet.from_dict(data)
+    keyset = jwt.PyJWKSet.from_dict(json.loads(data))
     with LOCK:
         JWKS.update(set=keyset, exp=time.time() + 300)
     return keyset
 
 
 def idp_active(token):
-    """IdP introspection (RFC 7662): oturum hâlâ aktif mi? Tek aktif giriş kuralı burada uygulanır.
-    seal-mobile istemcisiyle kimlik doğrulanır (yalnız introspection yetkisi)."""
+    """IdP introspection (RFC 7662) gw-internal üzerinden: oturum hâlâ aktif mi (tek aktif giriş)."""
     basic = base64.b64encode(f"{CLIENT_ID}:{os.environ['SM_MOBILE_SECRET']}".encode()).decode()
-    body = urllib.parse.urlencode({"token": token, "token_type_hint": "access_token"})
-    st, data = https_post_form(IDP_IP, IDP_PORT, IDP_HOST, "/realms/bank/protocol/openid-connect/token/introspect",
-                               body, {"Authorization": "Basic " + basic}, os.environ["SM_CA"])
+    body = urllib.parse.urlencode({"token": token, "token_type_hint": "access_token"}).encode()
+    st, data = gw_request("POST", "/realms/bank/protocol/openid-connect/token/introspect",
+                          {"Authorization": "Basic " + basic, "Content-Type": "application/x-www-form-urlencoded"}, body)
     if st != 200:
         raise Unauthorized("introspection başarısız")
-    return bool(data.get("active"))
-
-
-def https_post_form(host, port, server_name, path, body, headers, ca):
-    ctx = ssl.create_default_context(cafile=ca)
-    ctx.minimum_version = ssl.TLSVersion.TLSv1_2
-    conn = http.client.HTTPSConnection(host, int(port), timeout=10)
-    conn.sock = ctx.wrap_socket(socket.create_connection((host, int(port)), timeout=10), server_hostname=server_name)
-    conn.request("POST", path, body=body,
-                 headers={"Host": server_name, "Content-Type": "application/x-www-form-urlencoded", **headers})
-    resp = conn.getresponse()
-    data = json.loads(resp.read() or b"{}")
-    conn.close()
-    return resp.status, data
+    return bool(json.loads(data or b"{}").get("active"))
 
 
 def b64u(data):

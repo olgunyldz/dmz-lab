@@ -57,7 +57,7 @@ function v2Architecture() {
   p.node("gi", 1070, 125, 250, 80, "gw-internal (ns gw-internal)\nmTLS (DMZ kimliği) · iç JWT · /bff /realms /internal/auth /seal-pm", "internal");
   p.node("bff", 1070, 225, 160, 70, "app-bff (core mobile iş)\n/bff/{web,mobile,branch}", "internal");
   p.node("core", 1240, 225, 160, 70, "core (app-core)\nhesap · işlem · transfer", "internal");
-  p.node("int_note", 1070, 410, 490, 60, "Kimlik süreçleri (OTP, aktivasyon, throttling, login durumu) IdP'de. bank-backend kaldırıldı. Düz HTTP: bff → core (mevcut açık).", "note");
+  p.node("int_note", 1070, 410, 490, 60, "Kimlik süreçleri (OTP, aktivasyon, throttling, login durumu) IdP'de. bank-backend kaldırıldı. Iç bağlantılar HTTPS (iç CA); düz HTTP yok.", "note");
 
   // Identity
   p.node("idp", 530, 660, 250, 90, "spring-idp (ns idp)\nparola · token · PKCE/DPoP · exchange · tek aktif giriş\nOTP · aktivasyon · throttling · akış durumu · kısıtlı token", "identity");
@@ -87,19 +87,18 @@ function v2Architecture() {
   E("gw_web", "ext", "ext-authz");
   E("gw_mob", "ext", "ext-authz");
   E("gw_br", "ext", "ext-authz (branch)");
-  E("ext", "idp", "token exchange · introspection (mTLS)", "response");
+  E("ext", "idp", "token exchange (HTTPS, XFCC ile istemci sertifikası)", "response");
   E("gw_web", "gi", "mTLS (BackendTLSPolicy)", "internal");
   E("gw_mob", "gi", "mTLS (BackendTLSPolicy)", "internal");
   E("gw_par", "gi", "mTLS", "internal");
   E("gw_seal", "seal_mob", "TLS passthrough (cihaz mTLS)", "internal");
   E("seal_mob", "gi", "/internal/auth · /seal-pm (DMZ mTLS)", "internal");
-  E("gi", "bff", "HTTP (mevcut açık)");
-  E("bff", "core", "HTTP (mevcut açık)");
+  E("gi", "bff", "HTTPS (iç CA)");
+  E("bff", "core", "HTTPS (iç CA)", "internal");
   E("gi", "idp", "/internal/auth (HTTPS, CN=gw-internal)", "internal");
   E("gi", "pm", "/seal-pm (HTTPS)", "internal");
   E("idp", "si", "timestamp · aktivasyon token'ı (HTTPS, seal-b2b JWT)");
   E("si", "idp", "JWKS (HTTPS, küme içi)");
-  E("seal_mob", "idp", "introspection (HTTPS)");
   E("idp", "pg", "JDBC");
 
   flows.forEach((f, i) => p.edgeMarker(f[0], f[1], i + 1));
@@ -146,14 +145,14 @@ function v2Namespaces() {
   p.zone(600, 70, 560, 450, "İç cluster (kind-internal)", "internal");
   p.ns(620, 100, 240, 110, "ns gw-internal", "#1D4ED8");
   p.node("i_gi", 632, 124, 216, 26, "gw-internal (kgateway proxy)", "internal", 9);
-  p.node("i_gpm", 632, 186, 216, 18, "route: /internal/auth · /seal-pm → identity", "note", 8);
+  p.node("i_gpm", 632, 186, 216, 18, "route: /realms · /internal/auth · /seal-pm → identity (HTTPS)", "note", 8);
   p.ns(880, 100, 260, 60, "ns app-bff", "#1D4ED8");
   p.node("i_bff", 892, 124, 236, 26, "app-bff (core mobile iş API'leri)", "internal", 9);
   p.ns(880, 175, 260, 60, "ns app-core", "#1D4ED8");
   p.node("i_core", 892, 199, 236, 26, "core", "internal", 9);
   p.text(620, 300, 520, 150,
     "<b>Notlar</b><br>• bank-backend kaldırıldı; kimlik süreçleri IdP'de.<br>" +
-    "• app-bff ve core arasında düz HTTP sürüyor (mevcut açık).<br>" +
+    "• Tüm iç bağlantılar HTTPS (iç CA): gateway → servisler, servisler → IdP JWKS, BFF → core.<br>" +
     "• gw-internal, DMZ'den yalnız mTLS istemci sertifikasıyla kabul eder; IdP'ye kendi sertifikasıyla gider.",
     "text;html=1;fontSize=11;align=left;verticalAlign=top;fontColor=#1F2937;");
 

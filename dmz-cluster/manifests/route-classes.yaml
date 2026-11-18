@@ -75,6 +75,9 @@ spec:
         - path:
             type: PathPrefix
             value: /realms/
+        - path:
+            type: Exact
+            value: /login
       backendRefs:
         - name: internal-gw
           port: 443

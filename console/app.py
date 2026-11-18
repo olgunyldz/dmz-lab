@@ -495,7 +495,8 @@ def branch_call(sess, ch, method, path, auth, cert, body):
                "cert": bool(cert)}
     st, _, resp = branch_ui_req("POST", "/api/call", entry.get("cookie") if entry else None, payload)
     res = json.loads(resp) if resp.startswith("{") else {"status": st, "body": resp[:600]}
-    return {"status": res.get("status"), "body": str(res.get("body", ""))[:600], "trace_id": None, "trace_url": None}
+    return {"status": res.get("status"), "body": str(res.get("body", ""))[:600],
+            "trace_id": _req.tid, "trace_url": trace_link(_req.tid)}
 
 
 def state_of(sess):
@@ -568,7 +569,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     info = do_login(sess, ch, req.get("username"), req.get("password"))
                 finally:
                     span.end()
-                return self._json(200, {"ok": True, "token": info}, sid, new)
+                return self._json(200, {"ok": True, "token": info, "trace_id": span.trace_id,
+                                        "trace_url": trace_link(span.trace_id)}, sid, new)
             if self.path == "/api/register/start":
                 try:
                     code = register_start((req.get("username") or "").strip().lower(), req.get("password") or "")
@@ -586,15 +588,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return self._json(200, {"ok": True, "username": user}, sid, new)
             if self.path == "/api/logout":
                 ch = req.get("channel")
-                if not sess["channels"].get(ch):
-                    return self._json(200, {"ok": True, "idp_status": None, "note": "oturum yoktu"}, sid, new)
                 span = tracing.start_server_span(f"console logout {ch}", child_traceparent(_req.tid),
                                                  {"channel": ch, "http.target": "/api/logout"})
+                if not sess["channels"].get(ch):
+                    span.end(http_status=200)
+                    return self._json(200, {"ok": True, "idp_status": None, "note": "oturum yoktu",
+                                            "trace_id": span.trace_id, "trace_url": trace_link(span.trace_id)}, sid, new)
                 try:
                     kc = do_logout(sess, ch)
                 finally:
                     span.end(http_status=200)
-                return self._json(200, {"ok": kc in (200, 204, None), "idp_status": kc}, sid, new)
+                return self._json(200, {"ok": kc in (200, 204, None), "idp_status": kc,
+                                        "trace_id": span.trace_id, "trace_url": trace_link(span.trace_id)}, sid, new)
             if self.path == "/api/call":
                 res = do_call(sess, req.get("channel"), req.get("method", "GET"), req.get("path", "/"),
                               req.get("auth", "session"), bool(req.get("dpop")), req.get("cert", True),

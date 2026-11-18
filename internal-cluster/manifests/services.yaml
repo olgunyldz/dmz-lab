@@ -1,5 +1,5 @@
 # İç servisler (BFF, core): iç JWT'yi kendileri doğrular. Kod: services/svc.py (ConfigMap svc-code).
-# IdP JWKS: identity-idp Service'i ile identity cluster'daki NodePort'a (lab sapması).
+# IdP JWKS: HTTPS, id.bank.lab.local -> identity node (hostAliases; iç CA). Düz HTTP yok.
 # Kod ConfigMap'i scripts/load-services.sh ile yüklenir.
 ---
 apiVersion: apps/v1
@@ -28,7 +28,9 @@ spec:
             - name: OTLP_ENDPOINT
               value: http://__MGMT_NODE_IP__:30318
             - name: CORE_URL
-              value: http://core.app-core.svc.cluster.local
+              value: https://core.app-core.svc.cluster.local
+            - name: CORE_CA
+              value: /ca/ca.crt
             - name: ALLOWED_CHANNELS
               value: web,mobile,branch
             - name: EXPECTED_ISSUER
@@ -36,13 +38,19 @@ spec:
             - name: AUDIENCE
               value: kgateway-internal
             - name: JWKS_URL
-              value: http://identity-idp.app-bff.svc.cluster.local/realms/bank/protocol/openid-connect/certs
+              value: https://id.bank.lab.local:30443/realms/bank/protocol/openid-connect/certs
+            - name: JWKS_CA
+              value: /ca/ca.crt
             - name: PUBLIC_PATHS
               value: "0"
             - name: PORT
-              value: "8080"
+              value: "8443"
+            - name: TLS_CERT
+              value: /tls/server.crt
+            - name: TLS_KEY
+              value: /tls/server.key
           ports:
-            - containerPort: 8080
+            - containerPort: 8443
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -53,10 +61,25 @@ spec:
             - name: app
               mountPath: /app
               readOnly: true
+            - name: ca
+              mountPath: /ca
+              readOnly: true
+            - name: tls
+              mountPath: /tls
+              readOnly: true
+      hostAliases:
+        - ip: __IDENTITY_NODE_IP__
+          hostnames: ["id.bank.lab.local"]
       volumes:
         - name: app
           configMap:
             name: svc-code
+        - name: ca
+          configMap:
+            name: internal-ca-backend
+        - name: tls
+          secret:
+            secretName: svc-bff-tls
 ---
 apiVersion: v1
 kind: Service
@@ -66,8 +89,27 @@ metadata:
 spec:
   selector: { app: bff }
   ports:
-    - port: 80
-      targetPort: 8080
+    - name: https
+      port: 443
+      targetPort: 8443
+---
+# gw-internal -> BFF: arka uç TLS (iç CA)
+apiVersion: gateway.networking.k8s.io/v1
+kind: BackendTLSPolicy
+metadata:
+  name: bff
+  namespace: app-bff
+spec:
+  targetRefs:
+    - group: ""
+      kind: Service
+      name: bff
+  validation:
+    hostname: bff.app-bff.svc.cluster.local
+    caCertificateRefs:
+      - group: ""
+        kind: ConfigMap
+        name: internal-ca-backend
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -101,13 +143,19 @@ spec:
             - name: AUDIENCE
               value: kgateway-internal
             - name: JWKS_URL
-              value: http://identity-idp.app-core.svc.cluster.local/realms/bank/protocol/openid-connect/certs
+              value: https://id.bank.lab.local:30443/realms/bank/protocol/openid-connect/certs
+            - name: JWKS_CA
+              value: /ca/ca.crt
             - name: PUBLIC_PATHS
               value: "1"
             - name: PORT
-              value: "8080"
+              value: "8443"
+            - name: TLS_CERT
+              value: /tls/server.crt
+            - name: TLS_KEY
+              value: /tls/server.key
           ports:
-            - containerPort: 8080
+            - containerPort: 8443
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -118,10 +166,25 @@ spec:
             - name: app
               mountPath: /app
               readOnly: true
+            - name: tls
+              mountPath: /tls
+              readOnly: true
+            - name: ca
+              mountPath: /ca
+              readOnly: true
+      hostAliases:
+        - ip: __IDENTITY_NODE_IP__
+          hostnames: ["id.bank.lab.local"]
       volumes:
         - name: app
           configMap:
             name: svc-code
+        - name: ca
+          configMap:
+            name: internal-ca-backend
+        - name: tls
+          secret:
+            secretName: svc-core-tls
 ---
 apiVersion: v1
 kind: Service
@@ -131,52 +194,24 @@ metadata:
 spec:
   selector: { app: core }
   ports:
-    - port: 80
-      targetPort: 8080
+    - name: https
+      port: 443
+      targetPort: 8443
 ---
-# identity-idp: app-bff ve app-core'dan IdP JWKS'ine (identity cluster NodePort 30081)
-apiVersion: v1
-kind: Service
+# gw-internal -> core (partner, public yolları) ve BFF -> core: arka uç TLS (iç CA)
+apiVersion: gateway.networking.k8s.io/v1
+kind: BackendTLSPolicy
 metadata:
-  name: identity-idp
-  namespace: app-bff
-spec:
-  ports:
-    - name: http
-      port: 80
-      targetPort: 30081
----
-apiVersion: v1
-kind: Endpoints
-metadata:
-  name: identity-idp
-  namespace: app-bff
-subsets:
-  - addresses:
-      - ip: __IDENTITY_NODE_IP__
-    ports:
-      - name: http
-        port: 30081   # Spring IdP iç HTTP NodePort
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: identity-idp
+  name: core
   namespace: app-core
 spec:
-  ports:
-    - name: http
-      port: 80
-      targetPort: 30081
----
-apiVersion: v1
-kind: Endpoints
-metadata:
-  name: identity-idp
-  namespace: app-core
-subsets:
-  - addresses:
-      - ip: __IDENTITY_NODE_IP__
-    ports:
-      - name: http
-        port: 30081   # Spring IdP iç HTTP NodePort
+  targetRefs:
+    - group: ""
+      kind: Service
+      name: core
+  validation:
+    hostname: core.app-core.svc.cluster.local
+    caCertificateRefs:
+      - group: ""
+        kind: ConfigMap
+        name: internal-ca-backend

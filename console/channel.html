@@ -232,7 +232,8 @@ async function login() {
   const btn = $('btn-login'); btn.disabled = true;
   try {
     const r = await post('/api/login', { channel: KEY, username: $('u').value.trim(), password: $('p').value });
-    if (r.ok) addRow([now(), KEY, 'giriş', '-', '-', 'token alındı', { cls: 'pass', text: 'PASS' }, 'oturum açıldı']);
+    if (r.ok) addRow([now(), KEY, 'giriş', '-', '-', 'token alındı', { cls: 'pass', text: 'PASS' }, 'oturum açıldı'],
+      { url: r.data.trace_url, id: r.data.trace_id });
     else addRow([now(), KEY, 'giriş', '-', '-', r.status, { cls: 'fail', text: 'FAIL' }, r.data.error]);
   } catch (e) { addRow([now(), KEY, 'giriş', '-', '-', 'hata', { cls: 'fail', text: 'FAIL' }, String(e)]); }
   finally { btn.disabled = false; await refreshState(); }
@@ -244,7 +245,8 @@ async function logout() {
     const r = await post('/api/logout', { channel: KEY });
     const note = r.data.note || '';
     addRow([now(), KEY, 'çıkış', '-', '200/204', r.data.idp_status ?? '-',
-      { cls: r.data.ok ? 'pass' : 'fail', text: r.data.ok ? 'PASS' : 'FAIL' }, note || 'oturum kapatıldı']);
+      { cls: r.data.ok ? 'pass' : 'fail', text: r.data.ok ? 'PASS' : 'FAIL' }, note || 'oturum kapatıldı'],
+      { url: r.data.trace_url, id: r.data.trace_id });
   } catch (e) { addRow([now(), KEY, 'çıkış', '-', '-', 'hata', { cls: 'fail', text: 'FAIL' }, String(e)]); }
   finally { btn.disabled = false; await refreshState(); }
 }

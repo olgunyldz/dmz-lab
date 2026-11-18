@@ -73,10 +73,11 @@ spec:
           - kgateway-internal
         jwks:
           remote:
-            url: http://identity-idp/realms/bank/protocol/openid-connect/certs
+            # JWKS: HTTPS (identity-idp-https, BackendTLSPolicy: iç CA, hostname id.bank.lab.local)
+            url: https://id.bank.lab.local/realms/bank/protocol/openid-connect/certs
             backendRef:
-              name: identity-idp
-              port: 80
+              name: identity-idp-https
+              port: 443
             cacheDuration: 5m
         claimsToHeaders:
           - name: channel
@@ -106,7 +107,7 @@ spec:
       backendRefs:
         - name: bff
           namespace: app-bff
-          port: 80
+          port: 443
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -124,7 +125,7 @@ spec:
       backendRefs:
         - name: core
           namespace: app-core
-          port: 80
+          port: 443
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -143,7 +144,7 @@ spec:
       backendRefs:
         - name: core
           namespace: app-core
-          port: 80
+          port: 443
 # ============================================================================
 # Politikalar: JWT zorunlu + kanal bazlı RBAC
 # ============================================================================
@@ -192,7 +193,7 @@ spec:
       backendRefs:
         - name: bff
           namespace: app-bff
-          port: 80
+          port: 443
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -210,7 +211,7 @@ spec:
       backendRefs:
         - name: bff
           namespace: app-bff
-          port: 80
+          port: 443
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -228,7 +229,7 @@ spec:
       backendRefs:
         - name: bff
           namespace: app-bff
-          port: 80
+          port: 443
 ---
 apiVersion: gateway.kgateway.dev/v1alpha1
 kind: TrafficPolicy

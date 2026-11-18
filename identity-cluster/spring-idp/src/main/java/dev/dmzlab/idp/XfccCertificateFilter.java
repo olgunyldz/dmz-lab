@@ -19,8 +19,8 @@ import java.util.regex.Pattern;
  * İç gateway'den (kgateway/Envoy) gelen istemci sertifikasını XFCC başlığından okur.
  * önceki IdP'deki x509cert-lookup=envoy + trust-proxy-verification karşılığı.
  *
- * GÜVEN: Yalnız İÇ PORTTA (düz HTTP, trustedPort) çalışır. Bu port yalnız iç gateway ve iç düğümlerden erişilebilir
- * (F8 host firewall). HTTPS portunda (dış/istemci yolu) başlık tamamen yok sayılır: istemci sahte XFCC gönderemez.
+ * GÜVEN: İç portta (düz HTTP, trustedPort; yalnız iç gateway ve iç düğümler, F8) veya TLS eşi iç gateway (CN=gw-internal)
+ * ise çalışır. Diğer HTTPS istemcileri XFCC gönderemez: başlık yok sayılır.
  * Gateway, dış istemciden gelen XFCC'yi silmeli (Envoy SanitizeSet); bu lab'da listener-client-cert.yaml ile yapılır.
  */
 final class XfccCertificateFilter extends OncePerRequestFilter {
@@ -44,13 +44,25 @@ final class XfccCertificateFilter extends OncePerRequestFilter {
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {
-        if (request.getLocalPort() == trustedPort && request.getAttribute(CERT_ATTRIBUTE) == null) {
+        Object peer = request.getAttribute(CERT_ATTRIBUTE);
+        boolean fromInternalPort = request.getLocalPort() == trustedPort && peer == null;
+        // HTTPS portu: yalnız TLS eşi iç gateway (CN=gw-internal) ise XFCC'ye güvenilir (gateway istemci sertifikasını iletir)
+        boolean fromGateway = request.getLocalPort() != trustedPort && isGateway(peer);
+        if (fromInternalPort || fromGateway) {
             X509Certificate leaf = parse(request.getHeader(HEADER));
             if (leaf != null && verifiedBy(leaf, trustedCa)) {
                 request.setAttribute(CERT_ATTRIBUTE, new X509Certificate[] {leaf, trustedCa});
             }
         }
         chain.doFilter(request, response);
+    }
+
+    /** TLS eşi iç gateway mi? (sertifika CN=gw-internal) */
+    static boolean isGateway(Object peer) {
+        if (!(peer instanceof X509Certificate[] certs) || certs.length == 0) {
+            return false;
+        }
+        return certs[0].getSubjectX500Principal().getName().matches("(?s).*(^|,\s*)CN=gw-internal(,.*)?");
     }
 
     /** Yaprak, CA tarafından imzalanmış ve geçerlilik süresi içinde mi? */

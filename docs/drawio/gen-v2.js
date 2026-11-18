@@ -6,6 +6,7 @@ const fs = require("fs");
 const path = require("path");
 const { mxfile } = require("./builder.js");
 const v2 = require("./pages-v2.js");
+const v2ns = require("./pages-v2-ns.js");
 const { sequencePage } = require("./gen-sequence.js");
 const v2Sequences = require("./sequence-defs-v2.js");
 
@@ -54,6 +55,7 @@ function ordered(order) {
 }
 
 const pages = [
+  v2ns.v2NorthSouth(),
   v2.v2Architecture(),
   v2.v2Namespaces(),
   stackPage("Mobil akışlar", ordered(MOBILE_ORDER)),

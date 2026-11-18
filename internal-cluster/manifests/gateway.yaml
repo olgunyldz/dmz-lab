@@ -56,9 +56,10 @@ subsets:
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
-  name: identity-realms
+  name: identity-https
   namespace: gw-internal
 spec:
+  # Giriş sayfaları, JWKS, introspection, discovery: HTTPS (identity-idp-https, iç CA, BackendTLSPolicy)
   parentRefs:
     - name: gw-internal
   rules:
@@ -73,5 +74,5 @@ spec:
             type: Exact
             value: /login
       backendRefs:
-        - name: identity-idp
-          port: 80
+        - name: identity-idp-https
+          port: 443

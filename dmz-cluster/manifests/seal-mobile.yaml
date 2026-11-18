@@ -41,11 +41,7 @@ spec:
               value: /client/client.key
             - name: SM_INTERNAL
               value: internal-gw.seal-mobile.svc:443
-            # IdP token doğrulaması (JWKS): identity HTTPS NodePort, iç CA, SNI id.bank.lab.local
-            - name: SM_IDP_URL
-              value: __IDENTITY_NODE_IP__:30443
-            - name: SM_IDP_HOST
-              value: id.bank.lab.local
+            # IdP token doğrulaması (JWKS, introspection) gw-internal üzerinden (IdP'ye doğrudan bağlantı yok)
             - name: SM_ISSUER
               value: https://id.bank.lab.local/realms/bank
             - name: SM_AUDIENCE

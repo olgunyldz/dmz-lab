@@ -22,6 +22,7 @@ import json
 import os
 import re
 import secrets
+import ssl
 import threading
 import time
 import urllib.error
@@ -50,9 +51,13 @@ ALLOWED = set(os.environ["ALLOWED_CHANNELS"].split(","))
 EXPECTED_ISSUER = os.environ["EXPECTED_ISSUER"]
 AUDIENCE = os.environ.get("AUDIENCE", "kgateway-internal")
 JWKS_URL = os.environ["JWKS_URL"]
+# IdP JWKS: HTTPS, iç CA ile doğrulama (JWKS_CA)
+JWKS_TLS = ssl.create_default_context(cafile=os.environ["JWKS_CA"]) if os.environ.get("JWKS_CA") else None
 PUBLIC_PATHS = os.environ.get("PUBLIC_PATHS", "0") == "1"
 PORT = int(os.environ.get("PORT", "8080"))
 CORE_URL = os.environ.get("CORE_URL", "")
+# BFF -> core: HTTPS, iç CA ile doğrulama (CORE_CA). Düz HTTP yok.
+CORE_TLS = ssl.create_default_context(cafile=os.environ["CORE_CA"]) if os.environ.get("CORE_CA") else None
 # /api/v1 ve /bff/* kanalları: BFF ve core aynı iş kanallarını kabul eder. Partner salt okunur (kodda kontrol).
 API_CHANNELS = set(os.environ.get("API_CHANNELS", "web,mobile,branch,partner").split(","))
 
@@ -86,7 +91,7 @@ def rsa_verify(n, e, signing_input, sig):
 
 def load_jwks():
     global _jwks
-    with urllib.request.urlopen(JWKS_URL, timeout=5) as resp:
+    with urllib.request.urlopen(JWKS_URL, timeout=5, context=JWKS_TLS) as resp:
         data = json.loads(resp.read())
     _jwks = {
         k["kid"]: (int.from_bytes(b64url_decode(k["n"]), "big"), int.from_bytes(b64url_decode(k["e"]), "big"))
@@ -291,7 +296,7 @@ def _call_core(method, path, auth, body=None, idem=None, tp=None):
     if body is not None:
         req.add_header("Content-Type", "application/json")
     try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
+        with urllib.request.urlopen(req, timeout=10, context=CORE_TLS) as resp:
             return resp.status, json.loads(resp.read() or b"{}")
     except urllib.error.HTTPError as e:
         try:
@@ -478,4 +483,11 @@ class Handler(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     metrics.start_metrics_server(int(os.environ.get("METRICS_PORT", "9100")))  # metrikler API portundan ayrı
-    ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
+    httpd = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
+    if os.environ.get("TLS_CERT") and os.environ.get("TLS_KEY"):
+        # Servis TLS: iç CA sertifikası (core ve BackendTLSPolicy ile doğrulanır)
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+        ctx.load_cert_chain(os.environ["TLS_CERT"], os.environ["TLS_KEY"])
+        httpd.socket = ctx.wrap_socket(httpd.socket, server_side=True)
+    httpd.serve_forever()

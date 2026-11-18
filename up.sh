@@ -171,6 +171,10 @@ if [[ ! -f "$CERTS/internal-ca.crt" ]]; then
 fi
 bash "$ROOT/edge/scripts/gen-branch-certs.sh"
 bash "$ROOT/edge/scripts/gen-internal-certs.sh"
+# Cihaz CA'sı ve cihaz sertifikaları (Seal Mobile cihaz mTLS; yalnızca yoksa üretilir)
+if [[ ! -f "$CERTS/device/device-ca.crt" ]]; then
+    bash "$ROOT/edge/scripts/gen-device-certs.sh"
+fi
 
 # 1) mgmt cluster (Vault). kind ağı bu adımda oluşur.
 step "1/5 mgmt cluster (Vault, F9)"
