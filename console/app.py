@@ -220,6 +220,29 @@ def location_path(hdrs):
     return loc, (p.path + ("?" + p.query if p.query else ""))
 
 
+class ApprovalPending(Exception):
+    # Web girişi mobil cihaz onayı bekliyor (IdP kapısı: 403 approval_required). Oturum durumu saklanır.
+    def __init__(self, approval_id, jar, target, verifier):
+        super().__init__("onay bekleniyor")
+        self.approval_id = approval_id
+        self.jar = jar
+        self.target = target
+        self.verifier = verifier
+
+
+def _token_from_code(req, cfg, code, verifier, client_secret=None):
+    form = {"grant_type": "authorization_code", "client_id": cfg["client"], "code": code,
+            "redirect_uri": cfg["redirect"], "code_verifier": verifier}
+    headers = {"Content-Type": "application/x-www-form-urlencoded"}
+    if client_secret:
+        headers["Authorization"] = "Basic " + base64.b64encode(f"{cfg['client']}:{client_secret}".encode()).decode()
+    st, _, body = req("POST", f"{REALM}/token", headers, urllib.parse.urlencode(form))
+    tok = json.loads(body)
+    if "access_token" not in tok:
+        raise RuntimeError(f"token alınamadı (HTTP {st}): {tok.get('error_description', tok.get('error'))}")
+    return tok
+
+
 def idp_pkce(req, cfg, username, password, client_secret=None):
     """Authorization Code + PKCE (Spring IdP): yetkilendirme -> /login (CSRF) -> devam -> code -> token."""
     verifier, challenge = pkce_pair()
@@ -242,22 +265,15 @@ def idp_pkce(req, cfg, username, password, client_secret=None):
     _, target = location_path(hdrs)
     if not target or "/login" in target:
         raise RuntimeError(f"giriş başarısız (HTTP {st}); kullanıcı veya parola hatalı olabilir")
-    # Yetkilendirmeye devam: redirect_uri?code=...
-    st, hdrs, _ = req("GET", target, {"Cookie": cookie_header(jar)}, None)
+    # Yetkilendirmeye devam: redirect_uri?code=... (onay kapısı: kayıtlı mobil cihaz varsa 403 approval_required)
+    st, hdrs, body = req("GET", target, {"Cookie": cookie_header(jar)}, None)
+    if st == 403 and "approval_required" in body:
+        raise ApprovalPending(json.loads(body).get("approval_id", ""), jar, target, verifier)
     loc, _ = location_path(hdrs)
     code = urllib.parse.parse_qs(urllib.parse.urlparse(loc).query).get("code", [None])[0]
     if not code:
         raise RuntimeError(f"code alınamadı (HTTP {st})")
-    form = {"grant_type": "authorization_code", "client_id": cfg["client"], "code": code,
-            "redirect_uri": cfg["redirect"], "code_verifier": verifier}
-    headers = {"Content-Type": "application/x-www-form-urlencoded"}
-    if client_secret:
-        headers["Authorization"] = "Basic " + base64.b64encode(f"{cfg['client']}:{client_secret}".encode()).decode()
-    st, _, body = req("POST", f"{REALM}/token", headers, urllib.parse.urlencode(form))
-    tok = json.loads(body)
-    if "access_token" not in tok:
-        raise RuntimeError(f"token alınamadı (HTTP {st}): {tok.get('error_description', tok.get('error'))}")
-    return tok
+    return _token_from_code(req, cfg, code, verifier, client_secret)
 
 
 # ---------------------------------------------------------------------------
@@ -340,6 +356,32 @@ def register_verify(username, code):
     if st != 201:
         raise RuntimeError(f"IdP kayıt hatası (HTTP {st}): {data[:120]}")
     return username
+
+
+def do_login_poll(sess, ch):
+    # Onay bekleyen web girişini yoklar; APPROVED ise kodu alır ve tokenı kurar.
+    pend = (sess.get("pending") or {}).get(ch)
+    if not pend:
+        return {"ok": False, "status": "NONE"}
+    cfg = CHANNELS[ch]
+    req = request_for(cfg)
+    st, _, body = req("GET", "/realms/bank/approval/status", {"Cookie": cookie_header(pend["jar"])}, None)
+    state = json.loads(body).get("state", "NONE") if st == 200 else "NONE"
+    if state == "PENDING":
+        return {"ok": False, "status": "PENDING", "approvalId": pend["approvalId"]}
+    if state != "APPROVED":
+        sess["pending"].pop(ch, None)
+        return {"ok": False, "status": state}
+    st, hdrs, _ = req("GET", pend["target"], {"Cookie": cookie_header(pend["jar"])}, None)
+    loc, _ = location_path(hdrs)
+    code = urllib.parse.parse_qs(urllib.parse.urlparse(loc).query).get("code", [None])[0]
+    if not code:
+        raise RuntimeError(f"onay sonrası code alınamadı (HTTP {st})")
+    secret = SECRETS.get(cfg["secret"]) if cfg["secret"] else None
+    tok = _token_from_code(req, cfg, code, pend["verifier"], secret)
+    sess["pending"].pop(ch, None)
+    sess["channels"][ch] = {"access": tok["access_token"], "refresh": tok.get("refresh_token"), "user": pend.get("user")}
+    return {"ok": True, "status": "APPROVED", "token": summarize(tok["access_token"])}
 
 
 def do_logout(sess, ch):
@@ -530,6 +572,34 @@ def do_seal(sess, req):
                 seal_store(sess, seal_token_full(pend["user"], pend["pw"]), pend["user"])
             return done("ACTIVATED" if ok else "ACTIVATION_FAILED")
 
+        if action == "approvals":
+            tokm = ((sess.get("channels") or {}).get("mobile") or {}).get("access")
+            dev = st.get("device")
+            if not (tokm and dev and dev.get("enrolled")):
+                rec("bekleyen onaylar", "-", False, "önce mobil cihaz girişi (Seal) yapın")
+                return done("NO_SESSION")
+            s, b = seal_call(dev, tokm, "POST", "/seal/mobile/v1/approval/pending", {})
+            items = b.get("approvals", []) if s == 200 else []
+            rec("bekleyen onaylar", s, s == 200, f"{len(items)} bekleyen onay", "200")
+            return done("OK", approvals=items)
+
+        if action == "decide":
+            tokm = ((sess.get("channels") or {}).get("mobile") or {}).get("access")
+            dev = st.get("device")
+            if not (tokm and dev and dev.get("enrolled")):
+                rec("onay kararı", "-", False, "önce mobil cihaz girişi (Seal) yapın")
+                return done("NO_SESSION")
+            aid = str(req.get("approvalId", ""))
+            dec = str(req.get("decision", ""))
+            if dec not in ("APPROVE", "DENY") or not aid:
+                rec("onay kararı", "-", False, "approvalId ve decision gerekli")
+                return done("BAD_REQUEST")
+            sig = seal_sign(dev["key"], f"{aid}:{dec}")
+            s, b = seal_call(dev, tokm, "POST", "/seal/mobile/v1/approval/decide",
+                             {"approvalId": aid, "decision": dec, "signature": sig})
+            rec(f"onay kararı ({dec})", s, s == 200, b.get("status") or b.get("error", b), "200")
+            return done("DECIDED" if s == 200 else "DECIDE_FAILED", decision=dec)
+
         rec("bilinmeyen işlem", "-", False, action)
         return done("UNKNOWN_ACTION")
     except Exception as e:  # ağ/TLS/IdP hatası: adım listesiyle birlikte döner
@@ -691,7 +761,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                                  {"channel": ch, "http.target": "/api/login"})
                 _TP.value = span.header()
                 try:
-                    info = do_login(sess, ch, req.get("username"), req.get("password"))
+                    try:
+                        info = do_login(sess, ch, req.get("username"), req.get("password"))
+                    except ApprovalPending as e:
+                        sess.setdefault("pending", {})[ch] = {"jar": e.jar, "target": e.target, "verifier": e.verifier,
+                                                              "approvalId": e.approval_id,
+                                                              "user": req.get("username") or CHANNELS[ch]["user"]}
+                        return self._json(200, {"ok": False, "status": "APPROVAL_PENDING", "approvalId": e.approval_id,
+                                                "trace_id": span.trace_id, "trace_url": trace_link(span.trace_id)},
+                                          sid, new)
                 finally:
                     _TP.value = None
                     span.end()
@@ -712,6 +790,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 except RuntimeError as e:
                     return self._json(502, {"error": str(e)}, sid, new)
                 return self._json(200, {"ok": True, "username": user}, sid, new)
+            if self.path == "/api/login/poll":
+                return self._json(200, do_login_poll(sess, req.get("channel")), sid, new)
             if self.path == "/api/logout":
                 ch = req.get("channel")
                 span = tracing.start_server_span(f"console logout {ch}", child_traceparent(_req.tid),

@@ -249,7 +249,40 @@ class Handler(BaseHTTPRequestHandler):
             st, _ = internal_call("POST", "/seal-pm/v1/pin/set",
                                   {"userId": user, "deviceId": dev, "pin": pin_hash(req["pin"])},
                                   {"X-Seal-Key": PM_KEY})
-            return self._json(200 if st == 200 else 502, {"status": "ENROLLED" if st == 200 else "FAILED"})
+            if st != 200:
+                return self._json(502, {"status": "FAILED"})
+            # Cihaz kaydı IdP'ye bildirilir: bu kullanıcının web girişleri artık bu cihaza onay ister
+            rst, _ = internal_call("POST", "/internal/auth/device/register", {"username": user, "deviceId": dev}, {})
+            if rst != 200:
+                return self._json(502, {"status": "FAILED", "error": "cihaz IdP'ye bildirilemedi"})
+            return self._json(200, {"status": "ENROLLED"})
+
+        if self.path == "/seal/mobile/v1/approval/pending":
+            # Cihaza gelen bekleyen web girişi onayları (IdP'den, cihaz + kullanıcı kapsamında)
+            st, d = internal_call("POST", "/internal/auth/approval/pending",
+                                  {"username": user, "deviceId": dev}, {})
+            if st != 200:
+                return self._json(502, {"error": "onaylar alınamadı"})
+            return self._json(200, d)
+
+        if self.path == "/seal/mobile/v1/approval/decide":
+            # Onay kararı: cihaz "<approvalId>:<decision>" metnini kendi anahtarıyla imzalar
+            decision = req.get("decision", "")
+            approval_id = str(req.get("approvalId", ""))
+            if decision not in ("APPROVE", "DENY") or not approval_id:
+                return self._json(400, {"error": "approvalId ve decision (APPROVE|DENY) gerekli"})
+            try:
+                sig = base64.b64decode(req.get("signature", ""))
+                device_public_key(self.connection).verify(sig, f"{approval_id}:{decision}".encode(),
+                                                          padding.PKCS1v15(), hashes.SHA256())
+            except (InvalidSignature, ValueError, TypeError):
+                return self._json(401, {"error": "cihaz imzası geçersiz"})
+            st, d = internal_call("POST", "/internal/auth/approval/decide",
+                                  {"username": user, "deviceId": dev, "approvalId": approval_id,
+                                   "decision": decision}, {})
+            if st != 200:
+                return self._json(st if st in (404, 409) else 502, {"error": d.get("error", "karar iletilemedi")})
+            return self._json(200, {"status": "OK", "decision": decision})
 
         if self.path == "/seal/mobile/v1/login/begin":
             flow = str(uuid.uuid4())

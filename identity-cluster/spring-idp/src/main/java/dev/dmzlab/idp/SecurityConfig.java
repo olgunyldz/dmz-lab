@@ -33,7 +33,8 @@ public class SecurityConfig {
                                                  JwtEncoder jwtEncoder,
                                                  @Value("${idp.issuer}") String issuer,
                                                  @Value("${idp.internal-port}") int internalPort,
-                                                 X509Certificate labCa) throws Exception {
+                                                 X509Certificate labCa,
+                                                 dev.dmzlab.idp.auth.AuthStateRepository approvals) throws Exception {
         OAuth2AuthorizationServerConfigurer authorizationServer = new OAuth2AuthorizationServerConfigurer();
         // Discovery'de Spring issuer yolunu uç noktaların önüne bir kez daha ekliyor (/realms/bank/realms/bank/...).
         // Gerçek uçlar /realms/bank/... altında; discovery'yi bu gerçek yollara sabitliyoruz.
@@ -41,6 +42,7 @@ public class SecurityConfig {
         String realm = URI.create(issuer).getPath();
         http.securityMatcher(authorizationServer.getEndpointsMatcher())
                 .addFilterBefore(new XfccCertificateFilter(internalPort, labCa), SecurityContextHolderFilter.class)
+                .addFilterAfter(new dev.dmzlab.idp.auth.ApprovalGateFilter(approvals), SecurityContextHolderFilter.class)
                 .with(authorizationServer, as -> as
                         .oidc(oidc -> oidc.providerConfigurationEndpoint(p -> p.providerConfigurationCustomizer(b -> {
                             b.authorizationEndpoint(origin + realm + "/protocol/openid-connect/auth");

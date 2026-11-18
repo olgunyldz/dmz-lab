@@ -18,6 +18,7 @@ import javax.naming.ldap.Rdn;
 import java.security.cert.X509Certificate;
 import java.time.Duration;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
@@ -175,6 +176,50 @@ class InternalAuthController {
     // --- yardımcılar ---
 
     /** İstemci sertifikasının CN'i allowlist'te mi? (Tomcat mTLS: certificateVerification=optional; yoksa reddet.) */
+    /** Seal: cihaz kaydı tamamlandı (enroll). IdP cihazı kullanıcıya bağlı tutar. */
+    @PostMapping("/device/register")
+    ResponseEntity<Map<String, Object>> deviceRegister(@RequestBody Map<String, Object> body, HttpServletRequest req) {
+        if (!callerAllowed(req)) return unauthorized();
+        String user = String.valueOf(body.getOrDefault("username", ""));
+        String device = String.valueOf(body.getOrDefault("deviceId", ""));
+        if (!USERNAME.matcher(user).matches() || device.isBlank()) return bad("username, deviceId gerekli");
+        state.registerDevice(user, device);
+        return ResponseEntity.ok(Map.of("status", "ok"));
+    }
+
+    /** Seal mobil ekranı: cihaza gelen bekleyen web girişi onayları. */
+    @PostMapping("/approval/pending")
+    ResponseEntity<Map<String, Object>> approvalPending(@RequestBody Map<String, Object> body, HttpServletRequest req) {
+        if (!callerAllowed(req)) return unauthorized();
+        String user = String.valueOf(body.getOrDefault("username", ""));
+        String device = String.valueOf(body.getOrDefault("deviceId", ""));
+        if (!USERNAME.matcher(user).matches() || device.isBlank()) return bad("username, deviceId gerekli");
+        List<Map<String, Object>> items = new java.util.ArrayList<>();
+        for (Map<String, Object> r : state.pendingApprovals(user, device)) {
+            items.add(Map.of("approvalId", String.valueOf(r.get("approval_id")),
+                    "expiresAt", ((java.sql.Timestamp) r.get("expires_at")).getTime()));
+        }
+        return ResponseEntity.ok(Map.of("approvals", items));
+    }
+
+    /** Seal mobil ekranı: onay kararı (cihaz imzası seal-mobile'da doğrulanmış olmalı). */
+    @PostMapping("/approval/decide")
+    ResponseEntity<Map<String, Object>> approvalDecide(@RequestBody Map<String, Object> body, HttpServletRequest req) {
+        if (!callerAllowed(req)) return unauthorized();
+        String user = String.valueOf(body.getOrDefault("username", ""));
+        String device = String.valueOf(body.getOrDefault("deviceId", ""));
+        String id = String.valueOf(body.getOrDefault("approvalId", ""));
+        String decision = String.valueOf(body.getOrDefault("decision", ""));
+        if (!USERNAME.matcher(user).matches() || device.isBlank() || id.isBlank()) {
+            return bad("username, deviceId, approvalId gerekli");
+        }
+        if (!decision.equals("APPROVE") && !decision.equals("DENY")) return bad("decision APPROVE veya DENY olmalı");
+        if (!state.decideApproval(id, user, device, decision)) {
+            return error(HttpStatus.CONFLICT, "onay bulunamadı, süresi doldu veya karara bağlandı");
+        }
+        return ResponseEntity.ok(Map.of("status", "ok", "decision", decision));
+    }
+
     boolean callerAllowed(HttpServletRequest req) {
         Object attr = req.getAttribute(CERT_ATTR);
         if (!(attr instanceof X509Certificate[] certs) || certs.length == 0) return false;

@@ -154,4 +154,61 @@ public class AuthStateRepository {
             throw new IllegalStateException(e);
         }
     }
+
+    // --- Cihaz kaydı ve web girişi onayı ---
+
+    static final long APPROVAL_TTL_SECONDS = 60;
+
+    /** Seal'de cihaz kaydı tamamlanınca çağrılır (idempotent). */
+    public void registerDevice(String user, String device) {
+        jdbc.update("INSERT INTO device_registry (username, device_id) VALUES (?, ?) ON CONFLICT DO NOTHING", user, device);
+    }
+
+    public List<String> devicesFor(String user) {
+        return jdbc.queryForList("SELECT device_id FROM device_registry WHERE username = ?", String.class, user);
+    }
+
+    /** Onay isteği: kullanıcının her kayıtlı cihazına bir satır. Dönüş: onay kimliği. */
+    public String createApproval(String user, List<String> devices) {
+        String id = java.util.UUID.randomUUID().toString();
+        Timestamp exp = Timestamp.from(Instant.now().plusSeconds(APPROVAL_TTL_SECONDS));
+        for (String device : devices) {
+            jdbc.update("INSERT INTO device_approval (approval_id, device_id, username, state, expires_at) "
+                    + "VALUES (?, ?, ?, 'PENDING', ?)", id, device, user, exp);
+        }
+        return id;
+    }
+
+    /** Onay durumu: APPROVED (herhangi bir cihaz onayladı) > DENIED > PENDING (süresi dolmamış) > EXPIRED; bilinmiyorsa null. */
+    public String approvalState(String id) {
+        List<Map<String, Object>> rows = jdbc.queryForList(
+                "SELECT state, expires_at FROM device_approval WHERE approval_id = ?", id);
+        if (rows.isEmpty()) return null;
+        boolean approved = false, denied = false, pending = false;
+        for (Map<String, Object> r : rows) {
+            String st = (String) r.get("state");
+            if ("APPROVED".equals(st)) approved = true;
+            else if ("DENIED".equals(st)) denied = true;
+            else if ("PENDING".equals(st)
+                    && Instant.now().isBefore(((Timestamp) r.get("expires_at")).toInstant())) pending = true;
+        }
+        if (approved) return "APPROVED";
+        if (denied) return "DENIED";
+        return pending ? "PENDING" : "EXPIRED";
+    }
+
+    /** Cihaza gelen bekleyen onaylar (süresi dolmamış, PENDING). */
+    public List<Map<String, Object>> pendingApprovals(String user, String device) {
+        return jdbc.queryForList("SELECT approval_id, expires_at FROM device_approval "
+                + "WHERE username = ? AND device_id = ? AND state = 'PENDING' AND expires_at > now() "
+                + "ORDER BY expires_at", user, device);
+    }
+
+    /** Karar yalnız bu cihaza gelmiş, PENDING ve süresi dolmamış onaya uygulanır. */
+    public boolean decideApproval(String id, String user, String device, String approve) {
+        String state = approve.equals("APPROVE") ? "APPROVED" : "DENIED";
+        return jdbc.update("UPDATE device_approval SET state = ?, decided_at = now() "
+                + "WHERE approval_id = ? AND username = ? AND device_id = ? AND state = 'PENDING' AND expires_at > now()",
+                state, id, user, device) == 1;
+    }
 }

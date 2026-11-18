@@ -57,6 +57,10 @@
       <button id="btn-logout">Çıkış yap</button>
     </div>
     <div class="hint" id="hint"></div>
+    <div id="web-approval" style="display:none">
+      <div class="state" id="wa-st"></div>
+      <div class="row"><button class="primary" id="btn-wa-poll">Onayı kontrol et</button></div>
+    </div>
   </section>
 
   <section id="seal-sec" style="display:none">
@@ -81,6 +85,8 @@
     </div>
     <div class="state" id="seal-st">Bir sekme seçin. Sonuç log tablosunda adım adım görünür.</div>
     <div class="row"><button id="btn-seal-reset">Cihazı sıfırla</button></div>
+    <div class="row"><button id="btn-seal-approvals">Bekleyen onayları getir</button></div>
+    <div id="seal-approvals"></div>
   </section>
 
   <section>
@@ -256,7 +262,12 @@ async function login() {
   const btn = $('btn-login'); btn.disabled = true;
   try {
     const r = await post('/api/login', { channel: KEY, username: $('u').value.trim(), password: $('p').value });
-    if (r.ok) addRow([now(), KEY, 'giriş', '-', '-', 'token alındı', { cls: 'pass', text: 'PASS' }, 'oturum açıldı'],
+    if (r.data.status === 'APPROVAL_PENDING') {
+      showWebApproval(r.data);
+      addRow([now(), KEY, 'giriş', '-', '-', 'onay bekleniyor', { cls: 'none', text: 'BEKLİYOR' },
+        'mobil cihazda onay: ' + (r.data.approvalId || '-')], { url: r.data.trace_url, id: r.data.trace_id });
+    }
+    else if (r.ok) addRow([now(), KEY, 'giriş', '-', '-', 'token alındı', { cls: 'pass', text: 'PASS' }, 'oturum açıldı'],
       { url: r.data.trace_url, id: r.data.trace_id });
     else addRow([now(), KEY, 'giriş', '-', '-', r.status, { cls: 'fail', text: 'FAIL' }, r.data.error]);
   } catch (e) { addRow([now(), KEY, 'giriş', '-', '-', 'hata', { cls: 'fail', text: 'FAIL' }, String(e)]); }
@@ -333,6 +344,60 @@ $('btn-again').addEventListener('click', () => sealStart('again'));
 $('btn-otp').addEventListener('click', sealOtp);
 $('btn-seal-reset').addEventListener('click', sealReset);
 
+// Web onayı: giriş mobil cihaz onayı bekliyorsa kutu gösterilir; "Onayı kontrol et" durumu sorgular.
+function showWebApproval(d) {
+  $('web-approval').style.display = '';
+  $('wa-st').textContent = 'Mobil cihazda onay bekleniyor (onay no: ' + (d.approvalId || '-') +
+    '). Mobil sayfada "Bekleyen onayları getir" ile onaylayın, sonra kontrol edin.';
+}
+async function webPoll() {
+  const btn = $('btn-wa-poll'); btn.disabled = true;
+  try {
+    const r = await post('/api/login/poll', { channel: KEY });
+    const d = r.data;
+    if (d.status === 'PENDING') { $('wa-st').textContent = 'Hâlâ onay bekleniyor.'; return; }
+    $('web-approval').style.display = 'none';
+    if (d.status === 'APPROVED') {
+      addRow([now(), KEY, 'giriş (onaylı)', '-', '-', 'token alındı', { cls: 'pass', text: 'PASS' }, 'mobil onayı alındı; oturum açıldı']);
+    } else {
+      addRow([now(), KEY, 'giriş (onaylı)', '-', '-', d.status, { cls: 'fail', text: 'FAIL' }, 'onay tamamlanmadı: ' + d.status]);
+    }
+  } catch (e) { addRow([now(), KEY, 'giriş (onaylı)', '-', '-', 'hata', { cls: 'fail', text: 'FAIL' }, String(e)]); }
+  finally { btn.disabled = false; await refreshState(); }
+}
+
+// Mobil onaylar: bekleyenleri listeler; Onayla/Reddet cihaz imzasıyla karar gönderir.
+async function sealApprovals() {
+  const d = await sealRun({ action: 'approvals' }, $('btn-seal-approvals'));
+  if (!d) return;
+  renderApprovals(d.approvals || []);
+}
+function renderApprovals(list) {
+  const box = $('seal-approvals'); box.textContent = '';
+  if (!list.length) {
+    const p = document.createElement('div'); p.className = 'hint'; p.textContent = 'Bekleyen onay yok.';
+    box.appendChild(p); return;
+  }
+  list.forEach((a) => {
+    const row = document.createElement('div'); row.className = 'row';
+    const label = document.createElement('span'); label.className = 'flag';
+    label.textContent = 'onay ' + String(a.approvalId).slice(0, 8);
+    const ok = document.createElement('button'); ok.className = 'primary'; ok.textContent = 'Onayla';
+    ok.addEventListener('click', () => sealDecide(a.approvalId, 'APPROVE'));
+    const no = document.createElement('button'); no.textContent = 'Reddet';
+    no.addEventListener('click', () => sealDecide(a.approvalId, 'DENY'));
+    row.append(label, ok, no);
+    box.appendChild(row);
+  });
+}
+async function sealDecide(approvalId, decision) {
+  const d = await sealRun({ action: 'decide', approvalId: approvalId, decision: decision }, null);
+  $('seal-st').textContent = d ? ('Onay kararı: ' + (decision === 'APPROVE' ? 'onaylandı' : 'reddedildi'))
+                               : 'karar iletilemedi';
+  await sealApprovals();
+}
+$('btn-wa-poll').addEventListener('click', webPoll);
+$('btn-seal-approvals').addEventListener('click', sealApprovals);
 $('btn-login').addEventListener('click', login);
 $('btn-logout').addEventListener('click', logout);
 
