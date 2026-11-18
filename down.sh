@@ -60,12 +60,20 @@ if [[ $ASSUME_YES -ne 1 ]]; then
     fi
 fi
 
-# 1) Konsol port-forward'ları (kubectl port-forward süreçleri)
-step "1/4 Port-forward süreçleri"
+# 1) Konsol (console/app.py) ve port-forward süreçleri
+step "1/4 Konsol ve port-forward süreçleri"
 if command -v pkill >/dev/null 2>&1; then
+    pkill -f "console/app.py" 2>/dev/null && echo "konsol durduruldu" || echo "çalışan konsol yok"
     pkill -f "kubectl.*port-forward" 2>/dev/null && echo "port-forward süreçleri durduruldu" || echo "çalışan port-forward yok"
 else
-    echo "pkill yok; konsol (console/start.sh) ve port-forward süreçlerini elle durdurun"
+    # Windows (Git Bash, pkill yok): komut satırına göre PowerShell ile durdur
+    powershell -NoProfile -Command '
+      $procs = Get-CimInstance Win32_Process | Where-Object {
+        ($_.Name -like "python*" -and $_.CommandLine -match "console[\\/]app\.py") -or
+        ($_.Name -like "kubectl*" -and $_.CommandLine -match "port-forward")
+      };
+      if ($procs) { $procs | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue; "durduruldu: $($_.Name) PID $($_.ProcessId)" } }
+      else { "çalışan konsol/port-forward yok" }' 2>/dev/null || echo "konsol/port-forward durdurulamadı; elle kontrol edin"
 fi
 
 # 2) kind cluster'ları
