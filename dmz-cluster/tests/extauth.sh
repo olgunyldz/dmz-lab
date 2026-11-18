@@ -42,19 +42,6 @@ secret() {
 }
 b64u() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
 
-# DPoP (RFC 9449) proof: test için RSA anahtarı (geçici), RS256 imzalı
-DPOP_DIR=$(mktemp -d)
-DPOP_KEY="$DPOP_DIR/dpop.pem"
-openssl genrsa -out "$DPOP_KEY" 2048 2>/dev/null
-DPOP_N=$(openssl rsa -in "$DPOP_KEY" -noout -modulus | cut -d= -f2 | xxd -r -p | b64u)
-dpop_proof() { # <htm> <htu>
-    local h p s
-    h=$(printf '%s' "{\"typ\":\"dpop+jwt\",\"alg\":\"RS256\",\"jwk\":{\"kty\":\"RSA\",\"n\":\"$DPOP_N\",\"e\":\"AQAB\"}}" | b64u)
-    p=$(printf '%s' "{\"htm\":\"$1\",\"htu\":\"$2\",\"iat\":$(date +%s),\"jti\":\"$(openssl rand -hex 8)\"}" | b64u)
-    s=$(printf '%s.%s' "$h" "$p" | openssl dgst -sha256 -sign "$DPOP_KEY" | b64u)
-    printf '%s.%s.%s' "$h" "$p" "$s"
-}
-
 PF_PIDS=()
 $KI -n idp port-forward svc/spring-idp "$IDP_PORT:8443" >/dev/null 2>&1 & PF_PIDS+=($!)
 $KD -n gw-web     port-forward svc/gw-web     19443:443 >/dev/null 2>&1 & PF_PIDS+=($!)
@@ -80,29 +67,11 @@ web_get() { # <token-or-empty> <path>
     "${CURL[@]}" -s --max-time 20 --cacert "$CERTS/internal-ca.crt" "${auth[@]}" \
         --resolve "gw-web:19443:127.0.0.1" -w '\nHTTP_CODE=%{http_code}' "https://gw-web:19443$2"
 }
-mobile_get() { # <token> <path> [dpop-proof]
-    local proof_hdr=()
-    [[ -n "${3:-}" ]] && proof_hdr=(-H "DPoP: $3")
-    "${CURL[@]}" -s --max-time 20 --cacert "$CERTS/internal-ca.crt" -H "Authorization: Bearer $1" "${proof_hdr[@]}" \
+mobile_get() { # <token> <path>
+    "${CURL[@]}" -s --max-time 20 --cacert "$CERTS/internal-ca.crt" -H "Authorization: Bearer $1" \
         --resolve "gw-mobile:19444:127.0.0.1" -w '\nHTTP_CODE=%{http_code}' "https://gw-mobile:19444$2"
 }
 
-# RFC 9449 DPoP proof (kaynak isteği): ath = base64url(SHA-256(token)), htu = istek URL'i
-rsa_jwk_n() { openssl rsa -in "$1" -noout -modulus | cut -d= -f2 | xxd -r -p | b64u; }
-make_proof() { # <key-file> <htm> <htu> <token-or-empty> [jti] [iat]
-    local key=$1 htm=$2 htu=$3 tok=$4 n h p s ath="" jti iat
-    jti=${5:-$(openssl rand -hex 8)}
-    iat=${6:-$(date +%s)}
-    n=$(rsa_jwk_n "$key")
-    h=$(printf '%s' "{\"typ\":\"dpop+jwt\",\"alg\":\"RS256\",\"jwk\":{\"kty\":\"RSA\",\"n\":\"$n\",\"e\":\"AQAB\"}}" | b64u)
-    if [[ -n "$tok" ]]; then ath=",\"ath\":\"$(printf '%s' "$tok" | openssl dgst -sha256 -binary | b64u)\""; fi
-    p=$(printf '%s' "{\"htm\":\"$htm\",\"htu\":\"$htu\",\"iat\":$iat,\"jti\":\"$jti\"$ath}" | b64u)
-    s=$(printf '%s.%s' "$h" "$p" | openssl dgst -sha256 -sign "$key" | b64u)
-    printf '%s.%s.%s' "$h" "$p" "$s"
-}
-MOBILE_HTU="https://gw-mobile:19444/bff/accounts"
-OTHER_KEY="$DPOP_DIR/other.pem"
-openssl genrsa -out "$OTHER_KEY" 2048 2>/dev/null
 partner_get() { # <token-or-empty> <path>
     local auth=""
     [[ -n "$1" ]] && auth="Authorization: Bearer $1\r\n"
@@ -112,7 +81,7 @@ partner_get() { # <token-or-empty> <path>
         -quiet 2>/dev/null
 }
 
-# Kullanıcı token'ları: Authorization Code + PKCE (web: Bearer, mobil: DPoP bağlı)
+# Kullanıcı token'ları: Authorization Code + PKCE (web ve mobil: Bearer)
 source "$ROOT/../identity-cluster/tests/lib/pkce.sh"
 PKCE_BASE=https://id.bank.lab.local
 # IdP TLS: sunucu sertifikası lab CA ile imzalı; yayın host'u port-forward'a yönlendirilir (schannel iptal kontrolü kapalı)
@@ -134,44 +103,17 @@ absent "web /bff: yanıtta iç token yok (Bearer)" "Bearer" "$body"
 absent "web /bff: yanıtta JWT yok" "eyJ" "$body"
 
 # Mobil giriş (yeni oturum; web oturumu bu noktadan sonra geçersizdir)
-MOBILE_TOKEN=$(pkce_token mobile-app com.bank.app:/callback alice "$(secret alice-password)" "" \
-    "$(dpop_proof POST "$ISSUER_BASE")")
+MOBILE_TOKEN=$(pkce_token mobile-app com.bank.app:/callback alice "$(secret alice-password)" "")
 
 # 3) Mobil token web gateway'de -> 403 (kanal/audience uyuşmazlığı)
 check "web /bff: mobil token -> 403" "HTTP_CODE=403" "$(web_get "$MOBILE_TOKEN" /bff/accounts)"
 
-# 4) Mobil: DPoP (RFC 9449) doğrulaması
-# 4a) DPoP proof yok -> 401
+# 4) Mobil: bearer token ile iş API'si (DPoP yok); exchange çalışır
 body=$(mobile_get "$MOBILE_TOKEN" /bff/accounts)
-check "mobile /bff: DPoP proof yok -> 401" "missing dpop proof" "$body"
-
-# 4b) Yanlış htu (başka yol için üretilmiş proof) -> 401
-bad_htu=$(make_proof "$DPOP_KEY" GET "https://gw-mobile:19444/bff/other" "$MOBILE_TOKEN")
-body=$(mobile_get "$MOBILE_TOKEN" /bff/accounts "$bad_htu")
-check "mobile /bff: htu uyuşmazlığı -> 401" "htu mismatch" "$body"
-
-# 4c) Yanlış anahtar (token cnf.jkt'si ile eşleşmiyor) -> 401
-wrong_key=$(make_proof "$OTHER_KEY" GET "$MOBILE_HTU" "$MOBILE_TOKEN")
-body=$(mobile_get "$MOBILE_TOKEN" /bff/accounts "$wrong_key")
-check "mobile /bff: anahtar cnf.jkt ile eşleşmiyor -> 401" "does not match" "$body"
-
-# 4d) Geçerli proof -> DPoP kontrolü geçer (401 değil). Token exchange SPI'ye kadar IdP reddedebilir.
-replay_jti="lab-$(openssl rand -hex 6)"
-good=$(make_proof "$DPOP_KEY" GET "$MOBILE_HTU" "$MOBILE_TOKEN" "$replay_jti")
-body=$(mobile_get "$MOBILE_TOKEN" /bff/accounts "$good")
-check "mobile /bff: geçerli DPoP + SPI exchange -> 200" "HTTP_CODE=200" "$body"
+check "mobile /bff: bearer token -> 200" "HTTP_CODE=200" "$body"
 check "mobile /bff: upstream channel=mobile" "channel=mobile" "$body"
-check "mobile /bff: upstream auth_method=dpop_device" "auth_method=dpop_device" "$body"
+check "mobile /bff: upstream auth_method=device" "auth_method=device" "$body"
 absent "mobile /bff: yanıtta iç token yok" "eyJ" "$body"
-
-# 4e) Aynı proof tekrar -> replay, 401
-body=$(mobile_get "$MOBILE_TOKEN" /bff/accounts "$good")
-check "mobile /bff: proof tekrarı (replay) -> 401" "replayed proof" "$body"
-
-# 4f) Eski iat (5 dk'dan eski) -> 401
-old=$(make_proof "$DPOP_KEY" GET "$MOBILE_HTU" "$MOBILE_TOKEN" "lab-old-$(openssl rand -hex 4)" "$(( $(date +%s) - 900 ))")
-body=$(mobile_get "$MOBILE_TOKEN" /bff/accounts "$old")
-check "mobile /bff: eski iat -> 401" "stale or future iat" "$body"
 
 # Web girişi yeniden (mobil oturum düşer); aşağıdaki web testleri geçerli web token'ı kullanır
 WEB_TOKEN=$(pkce_token web-app https://web.lab.local:8443/callback alice "$(secret alice-password)" "$(secret web-app)" "")
@@ -201,44 +143,6 @@ check "partner /partner: token yok -> 401" "401" "$(partner_get "" /partner/paym
 
 # 10) Partner gateway'e web token -> 403
 check "partner /partner: web token -> 403" "403" "$(partner_get "$WEB_TOKEN" /partner/payments)"
-
-# 11) ES256 DPoP (P-256): mobil token EC anahtarına bağlı; proof ES256 imzalı
-EC_KEY="$DPOP_DIR/ec.pem"
-openssl ecparam -name prime256v1 -genkey -noout -out "$EC_KEY" 2>/dev/null
-EC_HEX=$(openssl ec -in "$EC_KEY" -noout -text 2>/dev/null | sed -n '/pub:/,/ASN1/p' | grep -v "pub:\|ASN1" | tr -d ' :\n')
-EC_X=$(echo "$EC_HEX" | cut -c3-66 | xxd -r -p | b64u)
-EC_Y=$(echo "$EC_HEX" | cut -c67-130 | xxd -r -p | b64u)
-
-der_to_raw_hex() { # ECDSA DER imzası -> r || s (hex, 128 karakter)
-    local ints r s
-    ints=$(openssl asn1parse -inform DER -in "$1" | sed -n 's/.*INTEGER *: *//p')
-    r=$(echo "$ints" | sed -n 1p); s=$(echo "$ints" | sed -n 2p)
-    pad() { local h=$1; while [[ ${#h} -gt 64 ]]; do h=${h:2}; done; printf '%064s' "$h" | tr ' ' 0; }
-    echo "$(pad "$r")$(pad "$s")"
-}
-
-ec_proof() { # <htm> <htu> <token-or-empty> -> ES256 DPoP proof
-    local htm=$1 htu=$2 tok=$3 h p ath="" raw
-    local jti=${4:-$(openssl rand -hex 8)} iat=${5:-$(date +%s)}
-    h=$(printf '%s' "{\"typ\":\"dpop+jwt\",\"alg\":\"ES256\",\"jwk\":{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"$EC_X\",\"y\":\"$EC_Y\"}}" | b64u)
-    if [[ -n "$tok" ]]; then ath=",\"ath\":\"$(printf '%s' "$tok" | openssl dgst -sha256 -binary | b64u)\""; fi
-    p=$(printf '%s' "{\"htm\":\"$htm\",\"htu\":\"$htu\",\"iat\":$iat,\"jti\":\"$jti\"$ath}" | b64u)
-    printf '%s.%s' "$h" "$p" > "$DPOP_DIR/ec-in"
-    openssl dgst -sha256 -sign "$EC_KEY" -out "$DPOP_DIR/ec-sig.der" "$DPOP_DIR/ec-in"
-    raw=$(der_to_raw_hex "$DPOP_DIR/ec-sig.der" | xxd -r -p | b64u)
-    printf '%s.%s.%s' "$h" "$p" "$raw"
-}
-
-EC_TOKEN=$(pkce_token mobile-app com.bank.app:/callback alice "$(secret alice-password)" "" "$(ec_proof POST "$ISSUER_BASE" "")")
-check "ES256: EC anahtarına bağlı mobil token alındı" "ey" "$EC_TOKEN"
-EC_GOOD=$(ec_proof GET "$MOBILE_HTU" "$EC_TOKEN")
-body=$(mobile_get "$EC_TOKEN" /bff/accounts "$EC_GOOD")
-check "ES256 DPoP geçerli -> 200" "HTTP_CODE=200" "$body"
-check "ES256: upstream auth_method=dpop_device" "auth_method=dpop_device" "$body"
-# Bozuk imza: başlık+yük iyi, imza başka bir proof'tan
-EC_OTHER=$(ec_proof GET "$MOBILE_HTU" "$EC_TOKEN")
-body=$(mobile_get "$EC_TOKEN" /bff/accounts "${EC_GOOD%.*}.${EC_OTHER##*.}")
-check "ES256: bozuk imza -> 401" "bad signature" "$body"
 
 echo
 echo "Sonuç: $pass geçti, $fail kaldı (toplam $((pass + fail)))"

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Spring IdP duman testi: TLS, discovery, JWKS, client_credentials, token exchange (mTLS),
-# DPoP bağlama ve olumsuz senaryolar.
+# olumsuz senaryolar.
 #
 # Gerekli ortam:
 #   IDP_URL          örn. https://127.0.0.1:18443
@@ -8,9 +8,8 @@
 #   EXCHANGE_CERT    dmz-exchange-web yaprak sertifikası (PEM)
 #   EXCHANGE_KEY     dmz-exchange-web özel anahtarı (PEM)
 #   EXCHANGE_CA      lab CA sertifikası (zincirin üst kısmı; Spring zinciri tek sertifikalıysa self-signed sayar)
-#   DPOP_KEY         DPoP proof imzalamak için RSA özel anahtar (PEM)
 #   BFF_SECRET, PARTNER_ACME_SECRET
-# Authorization Code + PKCE (tarayıcı girişi) bu testte yok; mobile-app için yalnız DPoP zorunluluğu kontrol edilir.
+# Authorization Code + PKCE (tarayıcı girişi) bu testte yok.
 set -uo pipefail
 
 IDP="${IDP_URL:?IDP_URL gerekli}"           # yayın adresi (issuer): örn. https://id.bank.lab.local
@@ -97,14 +96,6 @@ p_claims=$(payload "$ptok")
 check "partner-acme: partner_id = acme-001" "\"partner_id\":\"acme-001\"" "$p_claims"
 check "partner-acme: aud = channel-partner" "channel-partner" "$p_claims"
 
-# 5) DPoP bağlama: DPoP proof ile istenen token cnf.jkt taşımalı ve token_type DPoP olmalı
-htu="$REALM/protocol/openid-connect/token"
-proof=$(python3 "$HERE/dpop_proof.py" "$DPOP_KEY" POST "$htu")
-dp_resp=$("${CURL[@]}" -H "DPoP: $proof" -u "bff:$BFF_SECRET" -d grant_type=client_credentials "$TOKEN")
-check "DPoP: token_type = DPoP" "\"token_type\":\"DPoP\"" "$dp_resp"
-dp_claims=$(payload "$(echo "$dp_resp" | field access_token)")
-check "DPoP: access token cnf.jkt taşır" "\"cnf\":{\"jkt\":" "$dp_claims"
-
 # 6) Olumsuz: mTLS sertifikası olmadan exchange reddedilir
 neg0=$("${CURL[@]}" -o /dev/null -w '%{http_code}' --data-urlencode client_id=dmz-exchange-web \
     --data-urlencode grant_type=urn:ietf:params:oauth:grant-type:token-exchange \
@@ -121,12 +112,6 @@ check "olumsuz: yetkisiz istemci reddedilir (unauthorized_client)" "unauthorized
 neg2=$(mtls_post "$(form client_id=dmz-exchange-web grant_type=urn:ietf:params:oauth:grant-type:token-exchange \
     "subject_token=eyJhbGciOiJub25lIn0.eyJzdWIiOiJhdHRhY2tlciJ9.")")
 check "olumsuz: sahte subject token reddedilir (invalid_grant)" "invalid_grant" "$neg2"
-
-# 9) Olumsuz: mobile-app token isteği DPoP'siz reddedilir (DPoP zorunluluğu)
-neg3=$("${CURL[@]}" --data-urlencode client_id=mobile-app --data-urlencode grant_type=authorization_code \
-    --data-urlencode code=x --data-urlencode code_verifier=y \
-    --data-urlencode redirect_uri=com.bank.app:/callback "$TOKEN")
-check "olumsuz: mobile-app DPoP'siz reddedilir (invalid_dpop_proof)" "invalid_dpop_proof" "$neg3"
 
 echo
 echo "Sonuç: $pass geçti, $fail kaldı"

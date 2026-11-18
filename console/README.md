@@ -23,8 +23,7 @@ Sunucu başlarken iki şey yapar:
 | Web | Giriş (PKCE, Bearer) → `/bff/accounts` | 200 |
 | Web | Web token'ı `/partner/payments` üzerinde | 403 (audience) |
 | Web | Çıkış | IdP 204 |
-| Mobil | Giriş (PKCE + ES256 DPoP) → `/bff/accounts` + DPoP | 200 |
-| Mobil | Aynı çağrı, DPoP yok | 401 (`missing dpop proof`) |
+| Mobil | Giriş (PKCE) → `/bff/accounts` | 200 |
 | Partner | Token (client credentials, mTLS) → `/partner/payments` | 200 |
 | Partner | Token yok | 401 |
 | Public | `GET /public/*` (web, mobil) | 200 |
@@ -35,13 +34,12 @@ Her düğme bir satır log yazar: istek, kullanılan auth, beklenen kod, gerçek
 
 ## Bilinçli sınırlar (lab)
 
-- **Mobil login identity port-forward üzerinden:** IdP DPoP `htu` değerini kendi gördüğü URL ile karşılaştırır. Edge üzerinden `id.bank.lab.local` hostname'i henüz yönlendirilmiyor; bu yüzden login adımı identity'ye gider. Servis çağrıları (`/bff`, `/partner`, `/public`) yine edge üzerinden geçer.
+- **Mobil login edge üzerinden** (DMZ `/realms` route'u), web ile aynı yol. Servis çağrıları (`/bff`, `/partner`, `/public`) da edge üzerinden geçer.
 - **Web login edge üzerinden** (DMZ `/realms` route'u).
 - **Parola:** Parola alanı boşsa lab test kullanıcısının (`alice`) parolası kullanılır. Hiçbir parola diske yazılmaz.
 - **Token gösterimi:** Ham token tarayıcıya gönderilmez; yalnız claim özeti (iss, aud, azp, channel, cnf varlığı, exp) gösterilir. İmza bu konsolda doğrulanmaz.
-- **Geçici DPoP anahtarları:** Mobil oturum anahtarları sistem geçici dizininde tutulur; çıkışta silinmez (lab).
 - **Logout ve eski access token (ölçüldü):** Çıkıştan sonra eski access token ile `/bff/accounts` çağrısı **403** döner. ext-authz her istekte token exchange yaptığı için IdP, kapanmış kullanıcı oturumuna ait token'ı exchange'de reddeder. Yani dış token çıkışla fiilen geçersiz olur. İç token (exchange ile üretilmiş) ise kendi `exp`'ine kadar geçerlidir; bu süre design.md'deki iç token TTL'iyle sınırlıdır.
-- **Mobil çıkış:** DPoP'a bağlı refresh token için `/logout` ucu DPoP'u kabul etmediği için (`invalid_grant`), konsol refresh token'ı `/revoke` ucu ile iptal eder (DPoP proof'uyla, 200).
+- **Mobil çıkış:** Konsol refresh token'ı `/revoke` ucu ile iptal eder (RFC 7009, 200).
 
 ## Güvenlik notu
 

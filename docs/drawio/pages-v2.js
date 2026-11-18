@@ -17,7 +17,7 @@ function v2Architecture() {
   };
   p.text(20, 12, 1600, 34, "DMZ Lab V2: genel mimari (güncel durum, cluster'lar, workload'lar, TLS yolları)",
     "text;html=1;fontStyle=1;fontSize=18;align=left;verticalAlign=middle;fontColor=#0F172A;");
-  p.text(20, 40, 1700, 22,
+  p.text(20, 46, 1700, 22,
     "Düz çizgi: çalışan. Kesikli: planlı. Kırmızı kalın: mTLS / passthrough (TLS açılmaz). Seal ürünleri vendor mock.",
     "text;html=1;fontSize=11;align=left;verticalAlign=middle;fontColor=#64748B;");
 
@@ -33,7 +33,7 @@ function v2Architecture() {
 
   // İstemciler
   p.node("c_web", 40, 125, 165, 52, "Web tarayıcı\nPKCE · Bearer", "client");
-  p.node("c_mob", 40, 195, 165, 52, "Mobil uygulama\nSeal SDK · PKCE + DPoP", "client");
+  p.node("c_mob", 40, 195, 165, 52, "Mobil uygulama\nSeal SDK · PKCE", "client");
   p.node("c_dev", 40, 265, 165, 52, "Cihaz istemcisi\nmTLS (cihaz CA sertifikası)", "client");
   p.node("c_par", 40, 335, 165, 52, "Partner\nmTLS + client credentials", "client");
   p.node("br_ui", 40, 700, 165, 60, "branch-ui (ns branch)\nveznedar · PKCE", "branch");
@@ -49,8 +49,8 @@ function v2Architecture() {
   p.node("gw_par", 850, 125, 170, 56, "gw-partner\nmTLS (partner-ca)", "dmz");
   p.node("gw_seal", 690, 200, 150, 56, "gw-seal\nTLS passthrough", "dmz");
   p.node("gw_br", 850, 200, 170, 56, "gw-branch\nmTLS cihaz · F10", "dmz");
-  p.node("ext", 530, 280, 330, 70, "ext-authz (ns auth)\nRS256 · DPoP · KISIT (restricted → 403) · token exchange", "dmz");
-  p.node("seal_mob", 530, 370, 490, 90, "seal-mobile (ns seal-mobile) [vendor mock]\nSDK arka ucu · cihaz mTLS · IdP token + DPoP doğrulama\nPIN (PM) · cihaz imzası · yeni cihaz / aktivasyon çağrıları IdP'ye", "dmz");
+  p.node("ext", 530, 280, 330, 70, "ext-authz (ns auth)\nRS256 · KISIT (restricted → 403) · token exchange", "dmz");
+  p.node("seal_mob", 530, 370, 490, 90, "seal-mobile (ns seal-mobile) [vendor mock]\nSDK arka ucu · cihaz mTLS · IdP token doğrulama\nPIN (PM) · cihaz imzası · yeni cihaz / aktivasyon çağrıları IdP'ye", "dmz");
   p.node("dmz_note", 530, 480, 490, 50, "Default deny: tanımsız yol 404. /public ve /realms iç gateway'e; /bff ve /partner ext-authz'den geçer.", "note");
 
   // İç cluster
@@ -60,7 +60,7 @@ function v2Architecture() {
   p.node("int_note", 1070, 410, 490, 60, "Kimlik süreçleri (OTP, aktivasyon, throttling, login durumu) IdP'de. bank-backend kaldırıldı. Iç bağlantılar HTTPS (iç CA); düz HTTP yok.", "note");
 
   // Identity
-  p.node("idp", 530, 660, 250, 90, "spring-idp (ns idp)\nparola · token · PKCE/DPoP · exchange · tek aktif giriş\nOTP · aktivasyon · throttling · akış durumu · kısıtlı token", "identity");
+  p.node("idp", 530, 660, 250, 90, "spring-idp (ns idp)\nparola · token · PKCE · exchange · tek aktif giriş\nOTP · aktivasyon · throttling · akış durumu · kısıtlı token", "identity");
   p.node("pg", 800, 660, 110, 60, "postgres-idp\nPVC", "identity");
   p.node("si", 530, 770, 230, 60, "seal-intranet (ns seal-intranet) [mock]\nIdP çağırır · küme içi HTTPS", "identity");
   p.node("pm", 780, 770, 250, 60, "password-manager (ns seal-pm) [mock]\nyalnız PIN doğrulayıcı", "identity");
@@ -119,7 +119,7 @@ function v2Namespaces() {
   const p = new Page("V2 namespace yerleşimi");
   p.text(20, 12, 1400, 34, "DMZ Lab V2: namespace ve workload yerleşimi (güncel)",
     "text;html=1;fontStyle=1;fontSize=18;align=left;verticalAlign=middle;fontColor=#0F172A;");
-  p.text(20, 40, 1400, 22, "Her kutu bir namespace. Kesikli çerçeve: namespace, içindeki kutu: workload.",
+  p.text(20, 46, 1400, 22, "Her kutu bir namespace. Kesikli çerçeve: namespace, içindeki kutu: workload.",
     "text;html=1;fontSize=11;align=left;verticalAlign=middle;fontColor=#64748B;");
 
   // DMZ

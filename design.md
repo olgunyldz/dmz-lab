@@ -194,7 +194,7 @@ flowchart LR
 | Bileşen | Tür | Amaç |
 |---|---|---|
 | Müşteri kullanıcıları | Kullanıcılar | Web ve mobil kanalları için kimlik |
-| `web-app`, `mobile-app` | Kanal client'ları | Authorization Code + PKCE, DPoP bağlı token |
+| `web-app`, `mobile-app` | Kanal client'ları | Authorization Code + PKCE, Bearer token (DPoP yok, D-12) |
 | `partner-acme` (ve diğer partner'lar) | Kanal client'ı | Client credentials, partner başına bir client |
 | `bff`, `core-svc` | İç servis client'ları | Servisler arası client credentials |
 | `dmz-exchange-web/mobile/partner` | Exchange client'ları | Her kanal için ayrı; yalnızca kendi kanalının dış token'ını exchange eder |
@@ -336,7 +336,7 @@ Admin konsolu, `/admin/*` ve yönetim portu hiçbir zaman DMZ'ye açılmaz.
 | Şube iş istasyonu (cihaz) | Şube ağı | Veznedar arayüzü. Cihaz sertifikası (branch-ca ile imzalı, CN=branch-ws-01) ile mTLS |
 | Şube gateway'i `gw-branch` | DMZ cluster (ns `gw-branch`) | Cihaz sertifikasını doğrular (ConfigMap `branch-ca`), `/bff/*` için ext-authz (X-Dmz-Channel: branch), `/realms/*` login |
 | Şube cluster'ı (`kind-branch`) | Şube ağı | Şube UI pod'u ve cihaz sertifiği. gw-branch'e doğrudan bağlanır (HAProxy yok, F10) |
-| `ext-authz` (branch profili) | DMZ auth | Bearer token doğrulama (aud `channel-branch`); DPoP yok (çalışan kanalı cihaz sertifikasıyla bağlanır) |
+| `ext-authz` (branch profili) | DMZ auth | Bearer token doğrulama (aud `channel-branch`); çalışan kanalı cihaz sertifikasıyla bağlanır |
 | Token exchange `dmz-exchange-branch` | Identity (IdP client-x509) | İç JWT üretimi: channel=branch, auth_method=branch_cert |
 | `branch-app` (IdP client) | Identity | Authorization Code + PKCE, confidential; çalışan girişi (`teller`) |
 
@@ -385,7 +385,7 @@ Her DMZ gateway'inde path'ler üç sınıfa ayrılır. Kimlik kontrolü yalnızc
 1. **DMZ'de DPoP proof doğrulaması** (RFC 9449, bölüm 4.3). **Uygulandı (lab):** Token `cnf.jkt` içeriyorsa veya kanal mobile ise, ext-authz proof imzasını (proof içindeki `jwk`), `htm`, `htu`, `iat` tazeliğini (5 dk geçmiş, 1 dk gelecek toleransı), `jti` tekrarını, `ath` = base64url(SHA-256(access_token)) ve `cnf.jkt` = jwk thumbprint (RFC 7638) ile kontrol eder. Test: `dmz-cluster/tests/extauth.sh` (4a–4f). Lab sınırları: yalnızca RS256 proof (ES256 için kriptografi kütüphanesi gerekir); `jti` cache'i süreç içidir, bu yüzden ext-authz tek replikada çalışır. Üretimde jti store'u paylaşılan olmalıdır.
 2. **IdP'ta mobil için özel token exchange SPI:** Yalnızca mTLS ile kimliği doğrulanmış `dmz-exchange-mobile` isteğinde, DPoP'a bağlı subject token'ı kabul eder. Güven DMZ'nin proof doğrulamasına dayanır, SPI kanal ve `cnf` eşleşmesini tekrar kontrol eder. IdP yükseltmelerinde SPI yeniden test edilir.
 
-**Karar ve uygulama (D-11, uygulandı):** Önerilen yol uygulandı. DMZ ext-authz DPoP proof'unu doğrular. Keycloak döneminde `dmz-dpop-mobile-exchange` SPI'si (lab'da kaldırıldı; Spring IdP'de DpopRequiredFilter), DMZ mobil exchange'inde (mTLS ile kimliği doğrulanmış `dmz-exchange-mobile`) subject token'ı IdP anahtarıyla bağlamasız olarak yeniden imzalar, sonra standart exchange çalışır. Test: `dmz-cluster/tests/extauth.sh` (mobil `200`, `channel=mobile`, `auth_method=dpop_device`) ve `internal-cluster/tests/authz.sh`. Kaynak ve sınırlar: `identity-cluster/keycloak-spi/README.md`. Güven modeli: DMZ DPoP doğrulamasına ve mTLS kimliğine dayanır. Standart exchange'in DPoP'a bağlı token'ları reddetmesi bu SPI ile bilinçli olarak aşılmıştır, bu yüzden IdP yükseltmelerinde yeniden gözden geçirilmelidir.
+**Karar ve uygulama (D-11, uygulandı; D-12 ile kaldırıldı):** Önerilen yol uygulandı. DMZ ext-authz DPoP proof'unu doğrular. Keycloak döneminde `dmz-dpop-mobile-exchange` SPI'si (lab'da kaldırıldı; Spring IdP'de DpopRequiredFilter), DMZ mobil exchange'inde (mTLS ile kimliği doğrulanmış `dmz-exchange-mobile`) subject token'ı IdP anahtarıyla bağlamasız olarak yeniden imzalar, sonra standart exchange çalışır. Test: `dmz-cluster/tests/extauth.sh` (mobil `200`, `channel=mobile`, `auth_method=dpop_device`) ve `internal-cluster/tests/authz.sh`. Kaynak ve sınırlar: `identity-cluster/keycloak-spi/README.md`. Güven modeli: DMZ DPoP doğrulamasına ve mTLS kimliğine dayanır. Standart exchange'in DPoP'a bağlı token'ları reddetmesi bu SPI ile bilinçli olarak aşılmıştır, bu yüzden IdP yükseltmelerinde yeniden gözden geçirilmelidir.
 
 **SPI fizibilite bulgusu (IdP 26.6.4):** Extension noktası `TokenExchangeProvider` / `TokenExchangeProviderFactory`. Sender-constrained kontrolü `StandardTokenExchangeProvider.tokenExchange()` içinde, private `isSenderConstrainedToken` ile yapılıyor. Kontrolü atlamak için token üretim akışının (imzalama, session, audience ve scope işleme) yeniden yazılması gerekir. Bu, güvenlik açısından kritik ve iç API'lere bağımlı bir değişiklik. SPI yolu teknik olarak mümkün, ama bakım maliyeti yüksek. Karar henüz verilmedi.
 
@@ -397,14 +397,14 @@ Her kanalın kimlik doğrulama ve token bağlama modeli farklıdır. Bu farklar 
 
 | Kanal | Kimlik doğrulama | Token bağlama (sender constraint) | Ek kontroller | Exchange istemcisi |
 |---|---|---|---|---|
-| Web | OIDC Authorization Code + PKCE, MFA (OTP/push) | DPoP (RFC 9449), D-10 kararına bağlı | CSRF koruması, step-up (`acr`) | `dmz-exchange-web` |
-| Mobil | OIDC Authorization Code + PKCE (public client) | DPoP zorunlu | Cihaz attestation (App Attest / Play Integrity), device binding, refresh rotate | `dmz-exchange-mobile` |
+| Web | OIDC Authorization Code + PKCE, MFA (OTP/push) | Bearer (DPoP yok, D-12) | CSRF koruması, step-up (`acr`) | `dmz-exchange-web` |
+| Mobil | OIDC Authorization Code + PKCE (public client) | Bearer (DPoP yok, D-12) | Cihaz attestation (App Attest / Play Integrity), device binding, refresh rotate | `dmz-exchange-mobile` |
 | Partner | Client credentials | mTLS sertifika bağlama (`cnf`, RFC 8705) zorunlu | IP allowlist, partner başına scope, kota | `dmz-exchange-partner` |
 
 **Exchange kuralları (DMZ `auth`):**
 - Her exchange istemcisi yalnızca kendi kanalının dış token'ını exchange edebilir. Örnek: `dmz-exchange-mobile`, yalnızca `customer` realm'den `channel=mobile` token'ı kabul eder.
-- Sender constraint doğrulanır (DPoP proof veya `cnf` eşleşmesi). Yalnızca doğrulanmış sonuç iç JWT'ye yazılır.
-- İç JWT kanal bağımsız bir yapıdadır: `iss`, `aud`, `sub`, `channel`, `auth_method` (`pwd_otp`, `dpop_device`, `mtls_partner`), `acr`, `scope`, opsiyonel `partner_id`.
+- Sender constraint doğrulanmaz (DPoP kaldırıldı, D-12); dış token RS256 imza, iss, aud ve kanal kontrolünden geçer. Yalnızca doğrulanmış sonuç iç JWT'ye yazılır.
+- İç JWT kanal bağımsız bir yapıdadır: `iss`, `aud`, `sub`, `channel`, `auth_method` (`pwd_otp`, `device`, `mtls_partner`), `acr`, `scope`, opsiyonel `partner_id`.
 - Kanal bazlı yetki farkları iç yetkilendirmede `channel` ve `auth_method` claim'leriyle yapılır. İç servisler kanala özel kriptografi bilmez.
 
 ### 5.1 Web / Mobil
@@ -464,7 +464,7 @@ Her kanalın kimlik doğrulama ve token bağlama modeli farklıdır. Bu farklar 
 
 **Not:** Partner'ın mTLS sertifika bağlaması (`cnf`) DMZ'de doğrulanır. İç JWT bu bağlamayı taşımaz, güven DMZ→iç mTLS bağlantısına dayanır. Bu kabul edilen bir risktir (bkz. 13).
 
-**Kanal farkları:** Web ve mobil akışlarında exchange öncesi DMZ, kanal profilini uygular (bkz. 5.0). Web'de DPoP kararına (D-10) göre, mobilde DPoP ve cihaz attestation zorunludur. Partner akışında exchange öncesi `cnf` eşleşmesi zorunludur. İç JWT'de her kanal için `channel` ve `auth_method` farklı değerler taşır.
+**Kanal farkları:** Web ve mobil akışlarında exchange öncesi DMZ, kanal profilini uygular (bkz. 5.0). Web ve mobil Bearer token kullanır (DPoP yok, D-12); mobilde cihaz attestation kapsam dışıdır. Partner akışında exchange öncesi `cnf` eşleşmesi zorunludur. İç JWT'de her kanal için `channel` ve `auth_method` farklı değerler taşır.
 ```
 
 ### 5.3 Token Modeli
@@ -481,7 +481,7 @@ Her kanalın kimlik doğrulama ve token bağlama modeli farklıdır. Bu farklar 
 - **İç token dışarı verilmez:** Dış istemciden gelen her kimlik doğrulama DMZ'de iç token'a çevrilir. İç token yalnızca DMZ→iç bağlantıda ve iç ağda dolaşır. Hiçbir istemci yanıtında, yanıt başlığında, yanıt gövdesinde veya DMZ stub/backend'ine iletilen istekte bulunmaz. DMZ'de tanımlı olmayan yollar iç token üretilmeden 404 ile reddedilir (default deny).
 - **İki ayrı token, iki ayrı issuer kuralı:** Dış token yalnızca DMZ'de doğrulanır ve iç ağa geçmez. İç ağda yalnızca iç JWT dolaşır.
 - **Dönüşüm yalnızca DMZ `auth` servisinde** yapılır (RFC 8693). DMZ hiçbir anahtar imzalamaz; iç JWT iç IdP'ta imzalanır.
-- İç JWT claim'leri: `iss` (internal realm), `aud` (`kgateway-internal`, `bff`, `core`), `sub`, `scope`, `channel` (web/mobile/partner), `auth_method` (`pwd_otp`, `dpop_device`, `mtls_partner`), `acr`, `partner_id` (partner için).
+- İç JWT claim'leri: `iss` (internal realm), `aud` (`kgateway-internal`, `bff`, `core`), `sub`, `scope`, `channel` (web/mobile/partner), `auth_method` (`pwd_otp`, `device`, `mtls_partner`), `acr`, `partner_id` (partner için).
 - Her katman, kendi token'ını offline JWKS ile doğrular. Güven, ağ konumuna değil iç JWT'ye dayanır.
 - Kısa ömür ve `kid` ile anahtar rotasyonu. JWKS, IdP'un standart endpoint'inden yayınlanır.
 
@@ -607,7 +607,8 @@ Aşağıdaki maddeler onay bekler. Varsayılan öneri her madde için verilmişt
 | D-8 | İkinci lokasyon / DR | Ayrı doküman; bu tasarımda aktif-pasif öneri | Aktif-aktif (karmaşıklık yüksek) |
 | D-9 | Müşteri MFA yöntemi | **OTP + push onayı** (IdP'ta yapılandırılır) | Donanım token (FIDO2/WebAuthn) — daha güçlü, daha pahalı |
 | D-10 | Web sender constraint | **DPoP önerilir** (access token cihaz/tarayıcı anahtarına bağlı). Mobil için DPoP zorunlu | Web için yalnızca bearer + kısa ömür (daha basit, daha zayıf) |
-| D-11 | Mobil token exchange (DPoP'lu token) | **DMZ'de DPoP proof doğrulaması + mobil için IdP token exchange SPI'si** (bkz. 5.0b) | DPoP'u kaldırmak (risk kabulü) veya mobil için farklı kimlik modeli |
+| D-11 | Mobil token exchange (DPoP'lu token) | **DMZ'de DPoP proof doğrulaması + mobil için IdP token exchange SPI'si** (bkz. 5.0b). D-12 ile geçersiz | DPoP'u kaldırmak (risk kabulü) veya mobil için farklı kimlik modeli |
+| D-12 | DPoP kaldırıldı | Lab ve mobil akışlardan DPoP tamamen çıkarıldı (IdP filtresi, seal-mobile ve ext-authz doğrulaması, konsol, testler, diyagramlar). Token'lar Bearer | D-10 ve D-11 (DPoP zorunlu) geçerli kalsaydı mobil token'ın cihaz anahtarına bağlanması gerekirdi; bu proje kapsamında kabul edilmedi |
 
 ---
 
@@ -623,7 +624,7 @@ Aşağıdaki maddeler onay bekler. Varsayılan öneri her madde için verilmişt
 | DMZ `dmz-exchange` istemci kimliğinin ele geçirilmesi | DMZ'den sahte iç JWT üretimi (DMZ'den iç yetkiye geçiş) | İstemci yalnızca exchange izni ve kanal audience'ları ile sınırlı; mTLS client cert kısa ömürlü ve workload'a bağlı; exchange olayları SIEM'de; hız sınırı ve anomali uyarısı |
 | Token exchange gecikmesi ve iç IdP bağımlılığı | Yeni oturumlar gecikir veya düşer | İç JWT `exp`'ine kadar önbellek; DMZ `auth` en az 2 replika; IdP SLA |
 | Kanallar arası güvenlik seviyesi tutarsızlığı | Bir kanal zayıf sender constraint ile geçebilir | Kanal profili tek tabloda (5.0); kanal başına exchange istemcisi; exchange politikası kod olarak (GitOps) ve test ile doğrulanır |
-| Mobil cihazın ele geçirilmesi veya klonlanması | Çalınmış dış token başka cihazda kullanılır | DPoP (cihaz anahtarına bağlı token), cihaz attestation, kısa access token ömrü, refresh rotate ve reuse tespiti |
+| Mobil cihazın ele geçirilmesi veya klonlanması | Çalınmış dış token başka cihazda kullanılır | cihaz bağlaması (DPoP kaldırıldı, D-12), cihaz attestation, kısa access token ömrü, refresh rotate ve reuse tespiti |
 | Partner `cnf` bağlamasının iç ağda taşınmaması | İç servis sertifika bağlamasını doğrulayamaz | DMZ→iç mTLS ile güven; `partner_id` ve `channel` claim'leri; iç servis yalnızca gw-partner kimliğinden çağrı kabul eder |
 | kgateway olgunluğu ve bankacılık düzeyinde destek | Destek ve güncelleme riski | Sürüm politikası, ticari destek veya Gateway API uyumlu alternatiflerin değerlendirilmesi (D-5 ile birlikte) |
 | DMZ–iç ayrımının yanlış yapılandırılması | Kritik veriye yanlış erişim | Firewall + NetworkPolicy çift katmanlı; periyodik ağ politika denetimi ve sızma testi |
@@ -653,8 +654,8 @@ Bu bölüm lab'da gerçekten doğrulanan durumu ve prod'da değişmesi gereken n
 | Bileşen | Durum | Doğrulama |
 |---|---|---|
 | DMZ kanal gateway'leri (web, mobile, partner), default deny route'lar. `/public/*` ve `/realms/*` route'ları iç gateway üzerinden gerçek servislere gider (core, IdP); stub yok | Çalışıyor | `smoke.sh` 4/4, `route-classes.sh` 10/10 |
-| Ext-authz: RS256 (JWKS), DPoP proof, token exchange (mTLS, kanal sertifikası) | Çalışıyor | `extauth.sh` 25/25 |
-| Mobil token exchange (DPoP'lu token, IdP SPI `dmz-dpop-mobile-exchange`) | Çalışıyor | `extauth.sh` mobil testleri |
+| Ext-authz: RS256 (JWKS), token exchange (mTLS, kanal sertifikası) | Çalışıyor | `extauth.sh` |
+| Mobil token exchange (Bearer token) | Çalışıyor | `extauth.sh` mobil testleri |
 | İç gateway: iç JWT doğrulaması, kanal RBAC, DMZ kimliğine mTLS, default deny | Çalışıyor | `authz.sh` 16/16 |
 | BFF ve core: iç JWT'yi kendileri doğrular, gateway'i atlayan çağrılar reddedilir | Çalışıyor | `service-verify.sh` 9/9 |
 | DMZ → iç uçtan uca yol (`/bff/*`, `/partner/*`) | Çalışıyor | `internal-path.sh` 8/8 |
@@ -695,7 +696,7 @@ Aşağıdaki her satır prod'da değişmesi gereken bir noktayı gösterir. Süt
 | Exchange kimlik doğrulama | IdP `client-x509`, sertifikalar elle | Vault PKI, rotasyon, kısa ömür |
 | Test client'ları | Lab'da `lab-cli` kaldırıldı; `mobile-app` ve `web-app` üzerinde `directAccessGrants` kapalı. Testler kullanıcı token'ını Authorization Code + PKCE ile alır (`identity-cluster/tests/lib/pkce.sh`) | Prod'da test kullanıcısı ve test client'ı yok; yalnız PKCE ve client credentials |
 | Test kullanıcısı | `alice` | Yok |
-| DPoP | RS256 ve ES256 (P-256) proof, stdlib ile doğrulanır (ES256: `ec_p256_verify`, IdP ES256 proof'unu kabul eder, `extauth.sh` 29/29). `jti` cache süreç içi | Paylaşılan replay store (ör. Redis), kütüphane tabanlı doğrulama |
+| DPoP | Kaldırıldı (D-12); lab kapsamında yok | — |
 | Ext-authz replika | 1 (replay cache tutarlılığı için) | En az 2, paylaşılan store ile |
 | İç servis JWT doğrulaması | Stdlib RS256 (`svc.py`) | Olgun JWT kütüphanesi, JWKS önbellek ve rotasyon politikası |
 | NetworkPolicy | Cilium (lab'da çalışmıyor, 15.3) | Cilium veya Calico, default deny, egress FQDN allowlist (MFA) |

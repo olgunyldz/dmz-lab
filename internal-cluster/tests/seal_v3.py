@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Mobil kimlik akışı uçtan uca testi (IdP = kimlik, OTP, aktivasyon, login durumu; Seal = cihaz + PIN).
 
-Gerçek IdP token'ları: mobil (mobile-app, PKCE + DPoP) ve web (web-app), alice ile.
+Gerçek IdP token'ları: mobil (mobile-app, PKCE) ve web (web-app), alice ile.
 Yollar:
   - Test -> IdP (port-forward 18449, SNI id.bank.lab.local, iç CA)
   - Cihaz -> HAProxy (127.0.0.1:8443, SNI seal.lab.local, passthrough) -> seal-mobile (cihaz mTLS)
@@ -110,14 +110,8 @@ def gw(method, path, body=None, headers=None):
     return tls_request("127.0.0.1", GW_PORT, "gw-internal", method, path, body, headers, client=dmz_client())
 
 
-MOBILE_KEYS = {}  # mobil access token -> (anahtar yolu, x, y)
-
-
 def seal(path, body, token=None, device="device-lab-01"):
     h = {"Authorization": f"Bearer {token}"} if token else {}
-    if token in MOBILE_KEYS:
-        key, x, y = MOBILE_KEYS[token]
-        h["DPoP"] = dpop_proof(key, x, y, "POST", f"https://seal.lab.local{path}", access_token=token)
     client = device if isinstance(device, tuple) else dev_client(device)
     return tls_request("127.0.0.1", HAPROXY_PORT, "seal.lab.local", "POST", path, body, h, client=(client[0], client[1]))
 
@@ -132,7 +126,7 @@ def sign_nonce(device, nonce):
         return base64.b64encode(open(sig, "rb").read()).decode()
 
 
-# ---------------- IdP: PKCE (+ mobil DPoP) ----------------
+# ---------------- IdP: PKCE ----------------
 def b64u(b):
     return base64.urlsafe_b64encode(b).rstrip(b"=").decode()
 
@@ -153,41 +147,7 @@ def cookies_into(jar, set_cookies):
             jar[k.strip()] = v.strip()
 
 
-def ec_key(tmp):
-    key = os.path.join(tmp, "dpop.pem")
-    subprocess.run(["openssl", "ecparam", "-name", "prime256v1", "-genkey", "-noout", "-out", key],
-                   check=True, capture_output=True)
-    der = subprocess.run(["openssl", "ec", "-in", key, "-pubout", "-outform", "DER"],
-                         check=True, capture_output=True).stdout
-    return key, b64u(der[-64:-32]), b64u(der[-32:])
-
-
-def der_to_raw(der):
-    i = 2 + (der[1] & 0x7F) if der[1] & 0x80 else 2
-    out = b""
-    for _ in range(2):
-        ln = der[i + 1]
-        out += der[i + 2:i + 2 + ln].lstrip(b"\x00").rjust(32, b"\x00")
-        i += 2 + ln
-    return out
-
-
-def dpop_proof(key, x, y, htm, htu, access_token=None):
-    header = {"typ": "dpop+jwt", "alg": "ES256", "jwk": {"kty": "EC", "crv": "P-256", "x": x, "y": y}}
-    payload = {"htm": htm, "htu": htu, "iat": int(time.time()), "jti": secrets.token_hex(8)}
-    if access_token:
-        payload["ath"] = b64u(hashlib.sha256(access_token.encode()).digest())
-    h = b64u(json.dumps(header, separators=(",", ":")).encode())
-    p = b64u(json.dumps(payload, separators=(",", ":")).encode())
-    with tempfile.TemporaryDirectory() as td:
-        inp, sig = os.path.join(td, "in"), os.path.join(td, "sig.der")
-        open(inp, "wb").write(f"{h}.{p}".encode())
-        subprocess.run(["openssl", "dgst", "-sha256", "-sign", key, "-out", sig, inp], check=True, capture_output=True)
-        raw = der_to_raw(open(sig, "rb").read())
-    return f"{h}.{p}.{b64u(raw)}"
-
-
-def idp_token(client, redirect, username, password, client_secret=None, mobile=False):
+def idp_token(client, redirect, username, password, client_secret=None):
     verifier = secrets.token_urlsafe(48)
     challenge = b64u(hashlib.sha256(verifier.encode()).digest())
     jar = {}
@@ -217,15 +177,9 @@ def idp_token(client, redirect, username, password, client_secret=None, mobile=F
                   "redirect_uri": redirect, "code_verifier": verifier}
     if client_secret:
         headers["Authorization"] = "Basic " + base64.b64encode(f"{client}:{client_secret}".encode()).decode()
-    key = x = y = None
-    if mobile:
-        key, x, y = ec_key(tempfile.mkdtemp())
-        headers["DPoP"] = dpop_proof(key, x, y, "POST", f"https://{IDP_HOST}{REALM}/token")
     st, body, _, _ = idp("POST", f"{REALM}/token", headers, urllib.parse.urlencode(token_form))
     if "access_token" not in body:
         raise RuntimeError(f"token alınamadı ({st}): {body.get('error_description', body.get('error'))}")
-    if mobile:
-        MOBILE_KEYS[body["access_token"]] = (key, x, y)
     return body["access_token"]
 
 
@@ -261,9 +215,9 @@ def main():
         web_secret = secret("WEB_APP_SECRET")
         user = "alice"
 
-        # 0) Parola yalnız IdP'de; mobil token (DPoP) ve web token
-        m1 = idp_token("mobile-app", "com.bank.app:/callback", user, alice_pw, mobile=True)
-        check("IdP mobil token (DPoP, channel=mobile)", bool(m1))
+        # 0) Parola yalnız IdP'de; mobil token ve web token
+        m1 = idp_token("mobile-app", "com.bank.app:/callback", user, alice_pw)
+        check("IdP mobil token (channel=mobile)", bool(m1))
 
         # 1) Cihaz kaydı (mobil token + PIN)
         s, b, _, _ = seal("/seal/mobile/v1/device/enroll", {"pin": "4321"}, token=m1)
@@ -321,16 +275,14 @@ def main():
         check("doğru OTP -> OTP_OK, aktivasyon gerekli", s == 200 and b.get("activationRequired") is True, (s, b))
 
         # 5) OTP sonrası token kısıtlı (scope=activation, restricted=true)
-        m2 = idp_token("mobile-app", "com.bank.app:/callback", user, alice_pw, mobile=True)
+        m2 = idp_token("mobile-app", "com.bank.app:/callback", user, alice_pw)
         intro = introspect_full(m2)
         check("kısıtlı token: restricted=true, scope=activation",
               intro.get("restricted") is True and "activation" in str(intro.get("scope", "")), intro)
 
         # 5b) Kısıtlı token iş API'sinde reddedilir (ext-authz): HAProxy -> gw-mobile -> ext-authz
         s, b, _, _ = tls_request("127.0.0.1", HAPROXY_PORT, "mobile-api.lab.local", "GET", "/bff/mobile/accounts", None,
-                                 {"Authorization": f"Bearer {m2}",
-                                  "DPoP": dpop_proof(*MOBILE_KEYS[m2], "GET", "https://mobile-api.lab.local/bff/mobile/accounts",
-                                                     access_token=m2)},
+                                 {"Authorization": f"Bearer {m2}"},
                                  client=None, ca=os.path.join(CERTS, "public-ca.crt"))
         check("kısıtlı token iş API'sinde 403 (ext-authz)", s == 403 and "kısıtlı" in str(b), (s, b))
 
@@ -342,7 +294,7 @@ def main():
         check("aktivasyon: yeni cihaz PIN kaydı -> ENROLLED", s == 200, (s, b))
         s, b, _, _ = seal("/seal/mobile/v1/activation/complete", {"activationToken": tok}, token=m2, device=newdev)
         check("aktivasyon tamamlandı -> ACTIVATED", s == 200 and b.get("status") == "ACTIVATED", (s, b))
-        m3 = idp_token("mobile-app", "com.bank.app:/callback", user, alice_pw, mobile=True)
+        m3 = idp_token("mobile-app", "com.bank.app:/callback", user, alice_pw)
         check("aktivasyon sonrası token kısıtsız", introspect_full(m3).get("restricted") is None, introspect_full(m3))
 
         # 7) PIN_EXPIRED: süresi kısa kayıt

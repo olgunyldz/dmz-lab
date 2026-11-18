@@ -41,8 +41,6 @@ public class SecurityConfig {
         String realm = URI.create(issuer).getPath();
         http.securityMatcher(authorizationServer.getEndpointsMatcher())
                 .addFilterBefore(new XfccCertificateFilter(internalPort, labCa), SecurityContextHolderFilter.class)
-                .addFilterBefore(new DpopRequiredFilter(IdpConfig.REALM_PATH + "/protocol/openid-connect/token"),
-                        SecurityContextHolderFilter.class)
                 .with(authorizationServer, as -> as
                         .oidc(oidc -> oidc.providerConfigurationEndpoint(p -> p.providerConfigurationCustomizer(b -> {
                             b.authorizationEndpoint(origin + realm + "/protocol/openid-connect/auth");

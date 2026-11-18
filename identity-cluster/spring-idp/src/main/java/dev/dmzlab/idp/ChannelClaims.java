@@ -33,7 +33,7 @@ final class ChannelClaims {
             // Seal Intranet B2B istemcisi: token aud = seal-intranet (servis audience'ini zorunlu kılar)
             case "seal-b2b" -> new ChannelClaims("b2b", "seal-intranet", null, null);
             case "dmz-exchange-web" -> new ChannelClaims("web", null, "pwd_otp", null);
-            case "dmz-exchange-mobile" -> new ChannelClaims("mobile", null, "dpop_device", null);
+            case "dmz-exchange-mobile" -> new ChannelClaims("mobile", null, "device", null);
             case "dmz-exchange-partner" -> new ChannelClaims("partner", null, "mtls_partner", null);
             case "dmz-exchange-branch" -> new ChannelClaims("branch", null, "branch_cert", null);
             default -> null;

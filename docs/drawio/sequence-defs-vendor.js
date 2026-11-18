@@ -63,7 +63,7 @@ module.exports = [
     footer: [
       VENDOR_NOTE,
       "KAYNAK NOTU: 'pinExpired' bloğu opsiyonel. Yanıt 'flowId' adım 26'da SDK'ya döner; 'clientPasswordToken' kaynakta tanımsız.",
-      "BİZİM FARK: login/begin IdP token + DPoP ister; SID IdP token'ına bağlıdır; yeni cihaz/OTP adımı bizde yok.",
+      "BİZİM FARK: login/begin IdP token ister; SID IdP token'ına bağlıdır; yeni cihaz/OTP adımı bizde yok.",
     ],
   },
 

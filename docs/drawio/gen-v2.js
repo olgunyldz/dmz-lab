@@ -35,7 +35,7 @@ function stackPage(name, defs) {
 const MOBILE_ORDER = [
   ["V2 M5", "1. Aktivasyon"],
   ["V2 M2", "2. İlk login (cihaz kaydı)"],
-  ["V2 M1", "3. Login (IdP: PKCE + DPoP)"],
+  ["V2 M1", "3. Login (IdP: PKCE)"],
   ["V2 M3", "3. Login (PIN + cihaz imzası)"],
   ["V2 M4", "4. İşlem"],
   ["V2 O", "5. Ek: tek aktif giriş"],

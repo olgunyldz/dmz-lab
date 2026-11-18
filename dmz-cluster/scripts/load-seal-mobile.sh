@@ -35,6 +35,10 @@ $K -n seal-mobile create secret generic sm-keys \
     --from-literal=SEAL_MOBILE_SECRET="$SEAL_MOBILE_SECRET" \
     --dry-run=client -o yaml | $K apply -f - >/dev/null
 
+# Paylaşılan izleme modülü (shared/tracing.py) -> /app/tracing.py
+$K -n seal-mobile create configmap seal-mobile-code --from-file=tracing.py="$REPO/shared/tracing.py" \
+    --dry-run=client -o yaml | $K apply -f - >/dev/null
+
 render "$ROOT/manifests/seal-mobile.yaml" | $K apply -f -
 $K -n seal-mobile rollout restart deploy/seal-mobile >/dev/null
 $K -n seal-mobile rollout status deploy/seal-mobile --timeout=240s

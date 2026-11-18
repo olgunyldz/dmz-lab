@@ -22,7 +22,7 @@ function dmzCluster() {
   p.resource("gw_web_r", 330, 238, 260, 25, "HTTPRoute: /bff, /partner, /public, /realms");
 
   p.ns(310, 290, 300, 110, "gw-mobile", "#C2410C");
-  p.node("gw_mob", 330, 330, 260, 60, "gw-mobile pod (Envoy)\nlistener 443 · DPoP yolu", "dmz", 10);
+  p.node("gw_mob", 330, 330, 260, 60, "gw-mobile pod (Envoy)\nlistener 443", "dmz", 10);
 
   p.ns(630, 120, 260, 110, "gw-partner", "#C2410C");
   p.node("gw_par", 650, 160, 220, 50, "gw-partner pod\nmTLS (partner-ca)", "dmz", 10);
@@ -136,8 +136,8 @@ function identityCluster() {
   p.fw("f8", 36, 100, "F8");
 
   p.ns(40, 130, 740, 300, "auth", "#6D28D9");
-  p.node("kc", 60, 170, 380, 110, "Spring IdP pod\nimaj: dmz-lab/spring-idp:0.1.0\nrealm bank · DPoP · XFCC · :8443 / :8080", "identity", 10);
-  p.resource("kc_r", 60, 300, 380, 110, "Secret idp-secrets, idp-tls\nNodePort spring-idp 30443 (HTTPS), 30081 (iç HTTP)\nDPoP: DpopRequiredFilter (mobile-app)");
+  p.node("kc", 60, 170, 380, 110, "Spring IdP pod\nimaj: dmz-lab/spring-idp:0.1.0\nrealm bank · XFCC · :8443 / :8080", "identity", 10);
+  p.resource("kc_r", 60, 300, 380, 110, "Secret idp-secrets, idp-tls\nNodePort spring-idp 30443 (HTTPS), 30081 (iç HTTP)");
   p.node("pg", 460, 170, 260, 110, "PostgreSQL 16 pod\nemptyDir (lab)\n:5432", "identity", 10);
   p.resource("pg_r", 460, 300, 260, 110, "Secret idp-secrets (JDBC parolası)\nlab: restart'ta veri gider");
 
@@ -154,7 +154,7 @@ function identityCluster() {
 
   p.text(40, 590, 800, 150,
     "<b>Notlar</b><br>" +
-    "• Realm bank client'ları: web-app, mobile-app (PKCE + DPoP), branch-app, partner-acme (client credentials), dmz-exchange-{web,mobile,partner,branch} (client-x509), bff, core-svc, .<br>" +
+    "• Realm bank client'ları: web-app, mobile-app (PKCE), branch-app, partner-acme (client credentials), dmz-exchange-{web,mobile,partner,branch} (client-x509), bff, core-svc, .<br>" +
     "• Kullanıcılar (lab): alice, teller. Parolalar idp/idp-secrets secret'ında, repo'da yok.",
     "text;html=1;fontSize=12;align=left;verticalAlign=top;fontColor=#1F2937;");
 
@@ -256,7 +256,7 @@ function podDetail() {
 
   pod("p_kc", 2, 0, "Pod: spring-idp-xxx (ns idp, kind-identity)", "identity",
     ["spring-idp · dmz-lab/spring-idp:0.1.0 · :8443 / :8080"],
-    "Secret idp-secrets, idp-tls\nDPoP + XFCC (yalnız iç port) · issuer https://id.bank.lab.local/realms/bank\nNodePort 30443 (HTTPS), 30081 (iç HTTP)");
+    "Secret idp-secrets, idp-tls\nXFCC (yalnız iç port) · issuer https://id.bank.lab.local/realms/bank\nNodePort 30443 (HTTPS), 30081 (iç HTTP)");
   pod("p_pg", 2, 1, "Pod: postgres-idp-xxx (ns idp, kind-identity)", "identity",
     ["postgres · 16 · :5432"],
     "emptyDir (lab; restart'ta veri gider)\nSecret idp-secrets (parola)\nAğ kısıtı: F8 host firewall (lab)");

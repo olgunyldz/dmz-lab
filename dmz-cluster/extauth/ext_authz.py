@@ -3,14 +3,9 @@
 Her istek için:
   1. X-Dmz-Channel başlığından kanal profilini seç.
   2. Dış token: RS256 imza (IdP JWKS), iss, aud, channel, exp.
-  3. Sender constraint (RFC 9449 DPoP): token cnf.jkt içeriyorsa veya kanal mobile ise,
-     DPoP proof doğrulanır: imza, htm, htu, iat, jti tekrarı, ath, cnf.jkt eşleşmesi.
-  4. Token exchange: kanal sertifikasıyla (mTLS, IdP client-x509) iç JWT.
-  5. 200 + Authorization: Bearer <iç JWT>. İç token istemciye dönmez.
+  3. Token exchange: kanal sertifikasıyla (mTLS, IdP client-x509) iç JWT.
+  4. 200 + Authorization: Bearer <iç JWT>. İç token istemciye dönmez.
 
-DPoP proof imzaları: RS256 (RSA-2048+) ve ES256 (P-256). İkisi de stdlib ile doğrulanır
-(ECDSA için aşağıda P-256 aritmetiği). Üretimde kütüphane tabanlı doğrulama önerilir.
-DPoP jti tekrar kontrolü süreç içi bellektedir; çoklu replikada paylaşılan bir store gerekir.
 """
 import base64
 import hashlib
@@ -18,7 +13,6 @@ import hmac
 import json
 import os
 import ssl
-import threading
 import time
 import urllib.error
 import urllib.parse
@@ -64,18 +58,12 @@ PROFILES = {
 # SHA-256 DigestInfo öneki (RFC 8017)
 DIGEST_INFO_SHA256 = bytes.fromhex("3031300d060960864801650304020105000420")
 
-# DPoP zaman penceresi (saniye)
-DPOP_MAX_AGE = 300
-DPOP_MAX_FUTURE = 60
-
 # HTTP durumu -> OAuth benzeri hata kodu (hata gövdesi için)
 ERROR_CODES = {400: "invalid_request", 401: "unauthorized", 403: "forbidden", 404: "not_found",
                500: "server_error", 503: "service_unavailable"}
 
 _jwks = {}
 _jwks_at = 0.0
-_replay = {}  # jti -> son geçerlilik zamanı
-_replay_lock = threading.Lock()
 
 
 class Denied(Exception):
@@ -111,52 +99,6 @@ P256_B = 0x5ac635d8aa3a93e7b3ebbd55769886bc651d06b0cc53b0f63bce3c3e27d2604b
 P256_N = 0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551
 P256_G = (0x6b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c296,
           0x4fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f5)
-
-
-def _ec_add(p1, p2):
-    """Affin nokta toplama (None = sonsuz nokta)."""
-    if p1 is None:
-        return p2
-    if p2 is None:
-        return p1
-    x1, y1 = p1
-    x2, y2 = p2
-    if x1 == x2 and (y1 + y2) % P256_P == 0:
-        return None
-    if p1 == p2:
-        lam = (3 * x1 * x1 + P256_A) * pow(2 * y1, -1, P256_P) % P256_P
-    else:
-        lam = (y2 - y1) * pow(x2 - x1, -1, P256_P) % P256_P
-    x3 = (lam * lam - x1 - x2) % P256_P
-    y3 = (lam * (x1 - x3) - y1) % P256_P
-    return (x3, y3)
-
-
-def _ec_mul(k, point):
-    result, addend = None, point
-    while k:
-        if k & 1:
-            result = _ec_add(result, addend)
-        addend = _ec_add(addend, addend)
-        k >>= 1
-    return result
-
-
-def ec_p256_verify(qx, qy, signing_input, raw_sig):
-    """ECDSA P-256 + SHA-256 (JWS ES256, RFC 7518 §3.4: imza = r || s, her biri 32 bayt)."""
-    if len(raw_sig) != 64:
-        return False
-    r = int.from_bytes(raw_sig[:32], "big")
-    s = int.from_bytes(raw_sig[32:], "big")
-    if not (1 <= r < P256_N and 1 <= s < P256_N):
-        return False
-    # Genel anahtar eğri üzerinde olmalı
-    if (qy * qy - (qx * qx * qx + P256_A * qx + P256_B)) % P256_P != 0:
-        return False
-    z = int.from_bytes(hashlib.sha256(signing_input).digest(), "big")
-    w = pow(s, -1, P256_N)
-    point = _ec_add(_ec_mul(z * w % P256_N, P256_G), _ec_mul(r * w % P256_N, (qx, qy)))
-    return point is not None and point[0] % P256_N == r
 
 
 def load_jwks():
@@ -208,79 +150,6 @@ def check_claims(claims, channel):
         raise Denied(403, "channel mismatch")
     if int(claims.get("exp", 0)) <= int(time.time()):
         raise Denied(401, "token expired")
-
-
-def jwk_thumbprint(jwk):
-    """RFC 7638: RSA veya EC public key thumbprint (SHA-256, kanonik JSON)."""
-    if jwk.get("kty") == "EC":
-        members = {"crv": jwk["crv"], "kty": "EC", "x": jwk["x"], "y": jwk["y"]}
-    else:
-        members = {"e": jwk["e"], "kty": "RSA", "n": jwk["n"]}
-    canon = json.dumps(members, separators=(",", ":"), sort_keys=True)
-    return b64url_encode(hashlib.sha256(canon.encode()).digest())
-
-
-def verify_dpop(proof, method, htu, access_token, expected_jkt):
-    """RFC 9449 DPoP proof doğrulaması."""
-    try:
-        h_b64, p_b64, s_b64 = proof.split(".")
-        header = json.loads(b64url_decode(h_b64))
-        payload = json.loads(b64url_decode(p_b64))
-        sig = b64url_decode(s_b64)
-    except Exception:
-        raise Denied(401, "malformed dpop proof")
-
-    if header.get("typ") != "dpop+jwt":
-        raise Denied(401, "dpop: wrong typ")
-    jwk = header.get("jwk") or {}
-    if "d" in jwk:
-        raise Denied(401, "dpop: private key in proof")
-    alg = header.get("alg")
-    signing_input = f"{h_b64}.{p_b64}".encode()
-    try:
-        if alg == "RS256" and jwk.get("kty") == "RSA":
-            n = int.from_bytes(b64url_decode(jwk["n"]), "big")
-            e = int.from_bytes(b64url_decode(jwk["e"]), "big")
-            ok = rsa_verify(n, e, signing_input, sig)
-        elif alg == "ES256" and jwk.get("kty") == "EC" and jwk.get("crv") == "P-256":
-            qx = b64url_decode(jwk["x"])
-            qy = b64url_decode(jwk["y"])
-            if len(qx) != 32 or len(qy) != 32:
-                raise Denied(401, "dpop: invalid EC point size")
-            ok = ec_p256_verify(int.from_bytes(qx, "big"), int.from_bytes(qy, "big"), signing_input, sig)
-        else:
-            raise Denied(401, "dpop: unsupported alg/kty (RS256+RSA, ES256+P-256)")
-    except (KeyError, ValueError):
-        raise Denied(401, "dpop: invalid public jwk")
-    if not ok:
-        raise Denied(401, "dpop: bad signature")
-
-    if payload.get("htm") != method:
-        raise Denied(401, "dpop: htm mismatch")
-    if payload.get("htu") != htu:
-        raise Denied(401, "dpop: htu mismatch")
-
-    now = time.time()
-    iat = payload.get("iat")
-    if not isinstance(iat, int) or iat < now - DPOP_MAX_AGE or iat > now + DPOP_MAX_FUTURE:
-        raise Denied(401, "dpop: stale or future iat")
-
-    expected_ath = b64url_encode(hashlib.sha256(access_token.encode()).digest())
-    if payload.get("ath") != expected_ath:
-        raise Denied(401, "dpop: ath mismatch")
-
-    if jwk_thumbprint(jwk) != expected_jkt:
-        raise Denied(401, "dpop: key does not match token cnf.jkt")
-
-    jti = payload.get("jti")
-    if not isinstance(jti, str) or not jti:
-        raise Denied(401, "dpop: missing jti")
-    with _replay_lock:
-        for k in [k for k, exp in _replay.items() if exp < now]:
-            del _replay[k]
-        if jti in _replay:
-            raise Denied(401, "dpop: replayed proof")
-        _replay[jti] = iat + DPOP_MAX_AGE + DPOP_MAX_FUTURE
 
 
 def exchange(subject_token, channel, span=None):
@@ -350,17 +219,6 @@ class Handler(BaseHTTPRequestHandler):
             if claims.get("restricted") or claims.get("scope") == "activation":
                 raise Denied(403, "kısıtlı oturum: aktivasyon gerekli")
             span.set("user.hash", tracing.user_hash(claims.get("sub")))
-
-            jkt = (claims.get("cnf") or {}).get("jkt")
-            if channel == "mobile" and not jkt:
-                raise Denied(401, "mobile token not sender-constrained")
-            if jkt:
-                proof = self.headers.get("DPoP", "")
-                if not proof:
-                    raise Denied(401, "missing dpop proof")
-                # htu: istemcinin çağırdığı tam URL (query hariç)
-                htu = f"https://{self.headers.get('Host', '')}{self.path.split('?', 1)[0]}"
-                verify_dpop(proof, self.command, htu, token, jkt)
 
             internal = exchange(token, channel, span)
         except Denied as d:

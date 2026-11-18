@@ -32,12 +32,13 @@ secret() {
 b64u() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
 json_token() { sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p'; }
 
-PF_PIDS=()
+source "$(cd "$(dirname "$0")" && pwd)/lib/portforward.sh"
+trap pf_stop EXIT
 IDP_PORT=${IDP_PORT:-18448}
-$KI -n idp port-forward svc/spring-idp "$IDP_PORT:8443" >/dev/null 2>&1 & PF_PIDS+=($!)
-$KN -n gw-internal port-forward svc/gw-internal 19543:443 >/dev/null 2>&1 & PF_PIDS+=($!)
-trap 'kill "${PF_PIDS[@]}" 2>/dev/null' EXIT
-sleep 6
+pf_start idp "$IDP_PORT" -- $KI -n idp port-forward svc/spring-idp "$IDP_PORT:8443"
+pf_wait "$IDP_PORT" 30 || exit 1
+pf_start gw-internal 19543 -- $KN -n gw-internal port-forward svc/gw-internal 19543:443
+pf_wait 19543 30 || exit 1
 
 # Dış token'lar (Spring IdP): yayın host'u port-forward'a yönlendirilir, lab CA ile doğrulanır
 REVOKE_OPT=(); if curl -V 2>/dev/null | grep -qi schannel; then REVOKE_OPT=(--ssl-no-revoke); fi
@@ -79,17 +80,19 @@ run_in_cluster() {
     $KN delete pod svc-verify --ignore-not-found --wait=true >/dev/null 2>&1
     $KN run svc-verify --image=curlimages/curl:8.11.1 --restart=Never \
         --env=WEB_INT="$WEB_INT" --env=PARTNER_INT="$PARTNER_INT" --env=WEB_EXT="$WEB_EXT" --env=FORGED="$FORGED" \
+        --env=CA_PEM="$(cat "$CERTS/internal-ca.crt")" \
         -- sh -c '
+printf "%s\n" "$CA_PEM" > /tmp/ca.crt
 req() { # <name> <url> [token]
   if [ -n "$3" ]; then
-    code=$(curl -s -o /tmp/b -w "%{http_code}" --max-time 10 -H "Authorization: Bearer $3" "$2")
+    code=$(curl -s --cacert /tmp/ca.crt -o /tmp/b -w "%{http_code}" --max-time 10 -H "Authorization: Bearer $3" "$2")
   else
-    code=$(curl -s -o /tmp/b -w "%{http_code}" --max-time 10 "$2")
+    code=$(curl -s --cacert /tmp/ca.crt -o /tmp/b -w "%{http_code}" --max-time 10 "$2")
   fi
   echo "$1 => $code $(cat /tmp/b | tr -d "\n")"
 }
-B=http://bff.app-bff.svc.cluster.local/bff/accounts
-C=http://core.app-core.svc.cluster.local
+B=https://bff.app-bff.svc.cluster.local/bff/accounts
+C=https://core.app-core.svc.cluster.local
 req "bff-no-token" "$B"
 req "bff-forged" "$B" "$FORGED"
 req "bff-external-token-wrong-aud" "$B" "$WEB_EXT"
@@ -98,7 +101,7 @@ req "bff-partner-internal-channel" "$B" "$PARTNER_INT"
 req "core-partner-internal" "$C/partner/payments" "$PARTNER_INT"
 req "core-web-internal-channel" "$C/partner/payments" "$WEB_INT"
 req "core-public-no-token" "$C/public/branches"
-req "bff-public-no-token" "http://bff.app-bff.svc.cluster.local/public/branches"
+req "bff-public-no-token" "https://bff.app-bff.svc.cluster.local/public/branches"
 ' >/dev/null 2>&1
     for _ in $(seq 1 60); do
         phase=$($KN get pod svc-verify -o jsonpath='{.status.phase}' 2>/dev/null)

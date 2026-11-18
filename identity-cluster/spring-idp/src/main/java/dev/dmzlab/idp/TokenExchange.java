@@ -38,7 +38,7 @@ import java.util.stream.Collectors;
  * RFC 8693 token exchange (prototip).
  * İstek: grant_type=urn:ietf:params:oauth:grant-type:token-exchange, subject_token, [audience], [scope].
  * Yanıt: aud = istenen audience, azp = exchange yapan istemci. Subject token bu IdP'nin imzaladığı bir JWT olmalı.
- * Eksik (sonraki adım): audience için istemci yetki listesi, mTLS (client-x509), DPoP bağlama, token iptali.
+ * Eksik (sonraki adım): audience için istemci yetki listesi, mTLS (client-x509), token iptali.
  */
 public final class TokenExchange {
 

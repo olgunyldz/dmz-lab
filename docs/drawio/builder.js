@@ -43,6 +43,7 @@ class Page {
 
   // Zone: cluster/bölge arka planı
   zone(x, y, w, h, title, zoneKey) {
+    (this._zones ||= []).push({ x: x + 4, y: y + 2, w: Math.min(w - 8, title.length * 7 + 22), h: 26 });
     return this._vertex(null, x, y, w, h, title, P.zoneStyle(P.Z[zoneKey]));
   }
 
@@ -95,8 +96,15 @@ class Page {
   edgeMarker(src, tgt, n) {
     const a = this.geo[src];
     const b = this.geo[tgt];
-    const mx = ((a.x + a.w / 2) + (b.x + b.w / 2)) / 2;
-    const my = ((a.y + a.h / 2) + (b.y + b.h / 2)) / 2;
+    const ax = a.x + a.w / 2, ay = a.y + a.h / 2, bx = b.x + b.w / 2, by = b.y + b.h / 2;
+    // Bölge başlığı şeridine denk gelmeyen ilk oran seçilir (0.5 varsayılan)
+    const hits = (px, py) => (this._zones || []).some((z) =>
+      px + 8 > z.x && px - 8 < z.x + z.w && py + 8 > z.y && py - 8 < z.y + z.h);
+    let mx = (ax + bx) / 2, my = (ay + by) / 2;
+    for (const t of [0.5, 0.4, 0.6, 0.3, 0.7, 0.2, 0.8, 0.15, 0.85, 0.1, 0.9]) {
+      const cx = ax + (bx - ax) * t, cy = ay + (by - ay) * t;
+      if (!hits(cx, cy)) { mx = cx; my = cy; break; }
+    }
     this._vertex(null, mx - 8, my - 8, 16, 16, String(n),
       "shape=ellipse;perimeter=ellipsePerimeter;whiteSpace=wrap;html=1;fontSize=8;fontStyle=1;" +
       `fillColor=#FFFFFF;strokeColor=#334155;align=center;verticalAlign=middle;spacing=0;fontColor=${P.C.ink};`);

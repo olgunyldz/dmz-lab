@@ -6,7 +6,7 @@
 #   PKCE_BASE=https://id.bank.lab.local                       # yayın adresi (issuer host'u)
 #   PKCE_CURL_ARGS="--cacert <internal-ca> --connect-to id.bank.lab.local:443:127.0.0.1:<port>"
 #   WEB_TOKEN=$(pkce_token web-app https://web.lab.local:8443/callback alice "$ALICE_PW" "$WEB_SECRET")
-#   MOBILE_TOKEN=$(pkce_token mobile-app com.bank.app:/callback alice "$ALICE_PW" "" "$DPOP_PROOF_FOR_TOKEN_URL")
+#   MOBILE_TOKEN=$(pkce_token mobile-app com.bank.app:/callback alice "$ALICE_PW" "")
 #
 # Sınır: alice şifresi yalnız lab'da var (test kullanıcısı). Prod'da bu yardımcı kullanılmaz.
 
@@ -21,10 +21,10 @@ _pkce_b64u() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
 # Location başlığını döndürür (yönlendirme yapılmaz)
 _pkce_location() { tr -d '\r' | grep -i '^location:' | head -1 | sed 's/^[Ll]ocation: //'; }
 
-# pkce_token <client_id> <redirect_uri> <user> <password> <client_secret|""> <dpop_proof|"">
+# pkce_token <client_id> <redirect_uri> <user> <password> <client_secret|"">
 # Çıktı: access_token (boş ise hata; ham yanıt stderr'e yazılır)
 pkce_token() {
-    local client=$1 redirect=$2 user=$3 pw=$4 secret=$5 proof=${6:-}
+    local client=$1 redirect=$2 user=$3 pw=$4 secret=$5
     local verifier challenge jar page csrf loc code body token
 
     verifier=$(openssl rand -hex 32)
@@ -56,13 +56,12 @@ pkce_token() {
         return 1
     fi
 
-    # 5) Token: code + code_verifier (+ confidential ise secret, mobil ise DPoP proof)
+    # 5) Token: code + code_verifier (+ confidential ise secret)
     local -a args=(-d grant_type=authorization_code -d "client_id=$client" -d "code=$code"
                    -d "redirect_uri=$redirect" -d "code_verifier=$verifier")
     # Gizli anahtarlı istemci: client_secret_basic (IdP kaydı bu yöntemi bekler)
     local -a hdr=()
     [[ -n "$secret" ]] && hdr+=(-u "$client:$secret")
-    [[ -n "$proof" ]] && hdr+=(-H "DPoP: $proof")
     body=$(_pkce_curl -X POST "$PKCE_BASE/realms/bank/protocol/openid-connect/token" "${hdr[@]}" "${args[@]}")
     token=$(echo "$body" | sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p')
     if [[ -z "$token" ]]; then

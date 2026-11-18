@@ -7,8 +7,8 @@ const EDGE = "#FEF3C7", DMZ = "#FFEDD5", INT = "#DBEAFE", ID = "#EDE9FE", EXT = 
 module.exports = [
   // ------------------------------------------------------------------
   {
-    name: "V2 M1 Mobil giriş (PKCE + DPoP)",
-    title: "V2 M1) Mobil giriş: PKCE, parola IdP'de, DPoP bağlı token, tek aktif giriş",
+    name: "V2 M1 Mobil giriş (PKCE)",
+    title: "V2 M1) Mobil giriş: PKCE, parola IdP'de, Bearer token, tek aktif giriş",
     participants: [
       { id: "m", label: "Mobil uygulama\n(Seal SDK)", color: EXT },
       { id: "ha", label: "HAProxy\n[edge]", color: EDGE },
@@ -25,21 +25,20 @@ module.exports = [
       { from: "m", to: "idp", label: "6. POST /login  username=alice  parola (YALNIZ IdP'de)  _csrf" },
       { from: "idp", to: "idp", self: true, label: "7. parola BCrypt doğrula (JdbcUserDetailsManager)" },
       { from: "idp", to: "m", ret: true, label: "8. 302 → code  (com.bank.app:/callback?code=...)" },
-      { from: "m", to: "idp", label: "9. POST /token  code + code_verifier  DPoP: <proof, jwk>" },
-      { from: "idp", to: "idp", self: true, label: "10. DpopRequiredFilter: proof zorunlu; cnf.jkt = proof anahtarı" },
-      { from: "idp", to: "idp", self: true, label: "11. TEK AKTİF GİRİŞ: alice'in diğer authorization_code oturumları silinir" },
-      { from: "idp", to: "m", ret: true, label: "12. access_token (channel=mobile, aud=channel-mobile, cnf.jkt) + refresh" },
+      { from: "m", to: "idp", label: "9. POST /token  code + code_verifier" },
+      { from: "idp", to: "idp", self: true, label: "10. TEK AKTİF GİRİŞ: alice'in diğer authorization_code oturumları silinir" },
+      { from: "idp", to: "m", ret: true, label: "11. access_token (channel=mobile, aud=channel-mobile, cnf.jkt) + refresh" },
     ],
     footer: [
-      "KONTROLLER: K1 parola yalnız IdP'de; Seal ve mobil uygulama parola görmez. K2 DPoP: token anahtara bağlı (cnf.jkt). K3 yeni giriş eski kanal oturumunu düşürür.",
-      "LAB → PROD: PKCE ve DPoP lab'da; attestation (App Attest / Play Integrity) yok. Mobil redirect (com.bank.app) prod'da uygulama bağlantısı doğrulamalı.",
+      "KONTROLLER: K1 parola yalnız IdP'de; Seal ve mobil uygulama parola görmez. K2 Bearer token; cihaz anahtarına bağlı değil (D-12). K3 yeni giriş eski kanal oturumunu düşürür.",
+      "LAB → PROD: PKCE lab'da; attestation (App Attest / Play Integrity) yok. Mobil redirect (com.bank.app) prod'da uygulama bağlantısı doğrulamalı.",
     ],
   },
 
   // ------------------------------------------------------------------
   {
     name: "V2 M2 Cihaz kaydı (Seal, PIN)",
-    title: "V2 M2) Cihaz kaydı: cihaz mTLS passthrough, IdP token + DPoP, PIN Password Manager'da",
+    title: "V2 M2) Cihaz kaydı: cihaz mTLS passthrough, IdP token, PIN Password Manager'da",
     participants: [
       { id: "m", label: "Mobil uygulama\n(Seal SDK, cihaz CA)", color: EXT },
       { id: "ha", label: "HAProxy\n[edge, L4]", color: EDGE },
@@ -54,18 +53,17 @@ module.exports = [
       { from: "ha", to: "gs", label: "2. L4 passthrough (TLS açılmaz)" },
       { from: "gs", to: "sm", label: "3. TLS passthrough → seal-mobile" },
       { from: "sm", to: "sm", self: true, label: "4. cihaz CN: CERT_REQUIRED (device CA)" },
-      { from: "m", to: "sm", label: "5. POST /seal/mobile/v1/device/enroll  {pin}  Authorization: Bearer <IdP token>  DPoP" },
+      { from: "m", to: "sm", label: "5. POST /seal/mobile/v1/device/enroll  {pin}  Authorization: Bearer <IdP token>" },
       { from: "sm", to: "sm", self: true, label: "6. token: JWKS (HTTPS) imza, iss, aud=channel-mobile, channel=mobile, cnf" },
-      { from: "sm", to: "sm", self: true, label: "7. DPoP: imza(jwk), htm, htu, iat, ath, jkt=cnf.jkt, jti (replay)" },
-      { from: "sm", to: "gi", label: "8. POST /realms/.../token/introspect  (gw-internal → IdP, HTTPS; istemci seal-mobile)" },
-      { from: "gi", to: "sm", ret: true, label: "9. active=true, sub=alice" },
-      { from: "sm", to: "gi", label: "10. POST /seal-pm/v1/pin/set  (DMZ istemci mTLS, X-Seal-Key)" },
-      { from: "gi", to: "pm", label: "11. /seal-pm/ BackendTLSPolicy (HTTPS)" },
-      { from: "pm", to: "pm", self: true, label: "12. scrypt(PIN taşıma hash) → (alice, cihaz CN) doğrulayıcı" },
-      { from: "pm", to: "m", ret: true, label: "13. 200  ENROLLED" },
+      { from: "sm", to: "gi", label: "7. POST /realms/.../token/introspect  (gw-internal → IdP, HTTPS; istemci seal-mobile)" },
+      { from: "gi", to: "sm", ret: true, label: "8. active=true, sub=alice" },
+      { from: "sm", to: "gi", label: "9. POST /seal-pm/v1/pin/set  (DMZ istemci mTLS, X-Seal-Key)" },
+      { from: "gi", to: "pm", label: "10. /seal-pm/ BackendTLSPolicy (HTTPS)" },
+      { from: "pm", to: "pm", self: true, label: "11. scrypt(PIN taşıma hash) → (alice, cihaz CN) doğrulayıcı" },
+      { from: "pm", to: "m", ret: true, label: "12. 200  ENROLLED" },
     ],
     footer: [
-      "KONTROLLER: K1 seal-mobile TLS'i sonlandırır; gateway görmez. K2 IdP token ve DPoP birlikte doğrulanır; oturum introspection ile aktif. K3 PM yalnız PIN doğrulayıcı tutar.",
+      "KONTROLLER: K1 seal-mobile TLS'i sonlandırır; gateway görmez. K2 IdP token doğrulanır; oturum introspection ile aktif. K3 PM yalnız PIN doğrulayıcı tutar.",
       "LAB → PROD: PIN taşıma hash'i (sha256) vendor'ın KPu/JWE akışı değil. Cihaz kaydı (enrollment) ve attestation yok; sertifika lab CA'sı.",
     ],
   },
@@ -83,7 +81,7 @@ module.exports = [
       { id: "si", label: "seal-intranet\n[identity · mock]", color: ID },
     ],
     messages: [
-      { from: "m", to: "sm", label: "1. POST /login/begin  Bearer <IdP token> + DPoP  (passthrough, cihaz mTLS)" },
+      { from: "m", to: "sm", label: "1. POST /login/begin  Bearer <IdP token>  (passthrough, cihaz mTLS)" },
       { from: "sm", to: "gi", label: "2. introspection via gw-internal → IdP (HTTPS; oturum aktif mi)" },
       { from: "gi", to: "sm", ret: true, label: "3. active=true, sub=alice" },
       { from: "sm", to: "m", ret: true, label: "4. flowId" },
@@ -106,7 +104,7 @@ module.exports = [
       { from: "idp", to: "m", ret: true, label: "21. status=PIN_AUTHORIZED, restricted=false, timestamp" },
     ],
     footer: [
-      "KONTROLLER: K1 her Seal çağrısında IdP token + DPoP + introspection. K2 PIN kilidi 5 denemede. K3 cihaz imzası tek kullanımlık ve cihaza bağlı.",
+      "KONTROLLER: K1 her Seal çağrısında IdP token + introspection. K2 PIN kilidi 5 denemede. K3 cihaz imzası tek kullanımlık ve cihaza bağlı.",
       "LAB → PROD: login-status yolu (adım 18) henüz app-bff'e bağlı değil. Seal Intranet identity'de, yalnız IdP çağırır.",
     ],
   },
@@ -114,7 +112,7 @@ module.exports = [
   // ------------------------------------------------------------------
   {
     name: "V2 M4 Mobil işlem",
-    title: "V2 M4) Mobil işlem: DPoP + ext-authz (kısıt kontrolü) + token exchange → BFF → core",
+    title: "V2 M4) Mobil işlem: ext-authz (kısıt kontrolü) + token exchange → BFF → core",
     participants: [
       { id: "m", label: "Mobil uygulama", color: EXT },
       { id: "ha", label: "HAProxy\n[edge]", color: EDGE },
@@ -126,10 +124,10 @@ module.exports = [
       { id: "core", label: "core app-core\n[iç]", color: INT },
     ],
     messages: [
-      { from: "m", to: "ha", label: "1. GET /bff/mobile/accounts  Bearer <IdP token>  DPoP: <proof>" },
+      { from: "m", to: "ha", label: "1. GET /bff/mobile/accounts  Bearer <IdP token>" },
       { from: "ha", to: "gwm", label: "2. TLS re-encrypt" },
-      { from: "gwm", to: "ea", label: "3. ext-authz: X-Dmz-Channel=mobile, Authorization, DPoP, Host" },
-      { from: "ea", to: "ea", self: true, label: "4. RS256, channel=mobile, cnf zorunlu; DPoP proof doğrula" },
+      { from: "gwm", to: "ea", label: "3. ext-authz: X-Dmz-Channel=mobile, Authorization, Host" },
+      { from: "ea", to: "ea", self: true, label: "4. RS256, channel=mobile; iss, aud, exp doğrula" },
       { from: "ea", to: "ea", self: true, label: "5. KISIT: restricted=true veya scope=activation → 403 (iş API'sine girmez)" },
       { from: "ea", to: "gi", label: "6. token exchange (mTLS CN=dmz-exchange-mobile), subject = dış token" },
       { from: "gi", to: "idp", label: "7. /token grant=token-exchange  audience=kgateway-internal" },
@@ -179,7 +177,7 @@ module.exports = [
       { from: "sm", to: "gi", label: "10. POST /internal/auth/otp/verify  {username, flowId, code}" },
       { from: "idp", to: "idp", self: true, label: "11. OTP doğrula → OK ise alice 'bekleyen aktivasyon' listesine girer" },
       { from: "idp", to: "m", ret: true, label: "12. OTP_OK, activationRequired=true" },
-      { from: "m", to: "idp", label: "13. yeni mobil token (PKCE + DPoP)" },
+      { from: "m", to: "idp", label: "13. yeni mobil token (PKCE)" },
       { from: "idp", to: "idp", self: true, label: "14. KISITLI TOKEN: restricted=true, scope=activation" },
       { from: "idp", to: "m", ret: true, label: "15. kısıtlı access_token" },
       { from: "m", to: "ea", label: "16. GET /bff/mobile/accounts  (kısıtlı token)" },
@@ -290,7 +288,7 @@ module.exports = [
     ],
     messages: [
       { from: "w", to: "idp", label: "1. web girişi tamamlandı: web token (channel=web)" },
-      { from: "mo", to: "idp", label: "2. mobil girişi tamamlandı: mobil token (DPoP)" },
+      { from: "mo", to: "idp", label: "2. mobil girişi tamamlandı: mobil token" },
       { from: "idp", to: "idp", self: true, label: "3. yeni authorization_code girişi → alice'in web oturumu SİLİNİR" },
       { from: "w", to: "ea", label: "4. GET /bff/web/accounts  eski web token" },
       { from: "ea", to: "idp", label: "5. token exchange (subject = eski web token)" },

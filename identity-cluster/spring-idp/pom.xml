@@ -2,7 +2,7 @@
 <!--
   Spring tabanlı kimlik sağlayıcı (prototip). IdP yerine geçmeyi denemek için.
   Kapsam: discovery, JWKS, Authorization Code + PKCE, client_credentials, token exchange.
-  Kapsam dışı: DPoP, mTLS (client-x509), kalıcı veritabanı, admin arayüzü.
+  Kapsam dışı: mTLS (client-x509), kalıcı veritabanı, admin arayüzü.
 -->
 <project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"

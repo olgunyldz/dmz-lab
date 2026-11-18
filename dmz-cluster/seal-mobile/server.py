@@ -45,6 +45,10 @@ from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import padding
 
+import tracing  # ConfigMap ile /app/tracing.py (shared/tracing.py)
+
+_CUR = threading.local()  # istek işlenirken aktif server span'i
+
 INTERNAL = os.environ.get("SM_INTERNAL", "internal-gw.seal-mobile.svc:443")
 PM_KEY = os.environ.get("SM_PM_KEY", "")
 MOCK_KEY = os.environ.get("SM_MOCK_KEY", "")
@@ -83,9 +87,18 @@ def https_post_json(host, port, server_name, path, body, headers, ca, client=Non
     return resp.status, data
 
 
+def child_span(name, peer):
+    # Aktif server span'inden istemci span'i; istek dışında (ör. açılış) None
+    parent = getattr(_CUR, "span", None)
+    return tracing.start_client_span(name, parent, {"peer.service": peer}) if parent else None
+
+
 def gw_request(method, path, headers, body):
     """DMZ -> gw-internal (mTLS, DMZ istemci sertifikası). IdP'ye doğrudan bağlantı YOK: yol gateway üzerinden."""
     host, port = INTERNAL.rsplit(":", 1)
+    child = child_span(f"seal-mobile -> gw-internal {path}", "gw-internal")
+    if child:
+        headers = {**headers, "traceparent": child.header()}
     ctx = ssl.create_default_context(cafile=os.environ["SM_CA"])
     ctx.minimum_version = ssl.TLSVersion.TLSv1_2
     ctx.load_cert_chain(os.environ["SM_CLIENT_CERT"], os.environ["SM_CLIENT_KEY"])
@@ -95,6 +108,8 @@ def gw_request(method, path, headers, body):
     resp = conn.getresponse()
     data = resp.read()
     conn.close()
+    if child:
+        child.end(http_status=resp.status)
     return resp.status, data
 
 
@@ -123,59 +138,8 @@ def idp_active(token):
     return bool(json.loads(data or b"{}").get("active"))
 
 
-def b64u(data):
-    return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
-
-
-def jwk_thumbprint(jwk):
-    """RFC 7638 (EC): kanonik JSON'un SHA-256'sı."""
-    canon = json.dumps({"crv": jwk["crv"], "kty": "EC", "x": jwk["x"], "y": jwk["y"]},
-                       separators=(",", ":"), sort_keys=True).encode()
-    return b64u(hashlib.sha256(canon).digest())
-
-
-DPOP_SEEN = {}  # jti -> son geçerlilik (replay koruması)
-DPOP_LOCK = threading.Lock()
-
-
-def verify_dpop(headers, method, host, path, token, token_jkt):
-    """RFC 9449: proof imzası (ES256, başlıktaki jwk), htm/htu, iat penceresi, ath, jkt bağlaması, jti tekrarı."""
-    proof = headers.get("DPoP", "")
-    if not proof:
-        raise Unauthorized("DPoP proof yok")
-    try:
-        header = jwt.get_unverified_header(proof)
-        if header.get("typ") != "dpop+jwt" or header.get("alg") != "ES256" or "jwk" not in header:
-            raise Unauthorized("DPoP başlığı geçersiz")
-        jwk = header["jwk"]
-        if jwk.get("kty") != "EC" or jwk.get("crv") != "P-256":
-            raise Unauthorized("DPoP anahtarı desteklenmiyor")
-        claims = jwt.decode(proof, jwt.PyJWK(jwk).key, algorithms=["ES256"],
-                            options={"require": ["iat", "htm", "htu", "jti"], "verify_aud": False})
-    except jwt.PyJWTError as e:
-        raise Unauthorized(f"DPoP proof geçersiz: {type(e).__name__}")
-    if claims["htm"] != method:
-        raise Unauthorized("DPoP htm uyuşmuyor")
-    if claims["htu"] != f"https://{host}{path}":
-        raise Unauthorized("DPoP htu uyuşmuyor")
-    if abs(time.time() - claims["iat"]) > 300:
-        raise Unauthorized("DPoP iat penceresi dışında")
-    if claims.get("ath") != b64u(hashlib.sha256(token.encode()).digest()):
-        raise Unauthorized("DPoP ath uyuşmuyor")
-    thumb = jwk_thumbprint(jwk)
-    if thumb != token_jkt:
-        raise Unauthorized("DPoP anahtarı token'a bağlı değil")
-    with DPOP_LOCK:
-        now = time.time()
-        for j in [j for j, exp in DPOP_SEEN.items() if exp < now]:
-            del DPOP_SEEN[j]
-        if claims["jti"] in DPOP_SEEN:
-            raise Unauthorized("DPoP proof tekrar kullanılmış")
-        DPOP_SEEN[claims["jti"]] = now + 300
-
-
-def require_user(headers, method, host, path):
-    """IdP access token'ını doğrular: imza/iss/aud/kanal, DPoP (token'a bağlı anahtar), oturum aktif. Dönüş: sub."""
+def require_user(headers):
+    """IdP access token'ını doğrular: imza/iss/aud/kanal, oturum aktif. Dönüş: sub."""
     auth = headers.get("Authorization", "")
     if not auth.startswith("Bearer "):
         raise Unauthorized("bearer token yok")
@@ -189,10 +153,6 @@ def require_user(headers, method, host, path):
         raise Unauthorized(f"token geçersiz: {type(e).__name__}")
     if claims.get("channel") != CHANNEL:
         raise Unauthorized("token mobil kanala ait değil")
-    token_jkt = (claims.get("cnf") or {}).get("jkt")
-    if not token_jkt:
-        raise Unauthorized("token DPoP ile bağlı değil")  # cihaz-bağlı token zorunlu
-    verify_dpop(headers, method, host, path, token, token_jkt)
     if not idp_active(token):
         raise Unauthorized("oturum sonlanmış (başka bir kanalda giriş yapıldı)")
     return claims["sub"]
@@ -200,8 +160,15 @@ def require_user(headers, method, host, path):
 
 def internal_call(method, path, body, extra_headers):
     host, port = INTERNAL.rsplit(":", 1)
-    return https_post_json(host, port, "gw-internal", path, body, extra_headers, os.environ["SM_CA"],
-                           client=(os.environ["SM_CLIENT_CERT"], os.environ["SM_CLIENT_KEY"]))
+    child = child_span(f"seal-mobile -> gw-internal {path}", "gw-internal")
+    headers = dict(extra_headers)
+    if child:
+        headers["traceparent"] = child.header()
+    st, data = https_post_json(host, port, "gw-internal", path, body, headers, os.environ["SM_CA"],
+                               client=(os.environ["SM_CLIENT_CERT"], os.environ["SM_CLIENT_KEY"]))
+    if child:
+        child.end(http_status=st)
+    return st, data
 
 
 def idp_flow_update(user, flow_id, status, new_device):
@@ -234,6 +201,7 @@ class Handler(BaseHTTPRequestHandler):
     server_version = "seal-mobile"
 
     def _json(self, code, obj):
+        self._status = code
         body = json.dumps(obj).encode()
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
@@ -249,13 +217,28 @@ class Handler(BaseHTTPRequestHandler):
             return None
 
     def do_POST(self):
+        path = self.path.split("?", 1)[0]
+        span = tracing.start_server_span(f"seal-mobile POST {path}", self.headers.get("traceparent"),
+                                         {"http.method": "POST", "http.target": path})
+        self._span = span
+        self._status = None
+        _CUR.span = span
+        try:
+            self._post()
+        finally:
+            _CUR.span = None
+            span.end(http_status=self._status)
+
+    def _post(self):
         dev = device_cn(self.connection)
         if not dev:
             return self._json(401, {"error": "cihaz kimliği yok"})
         try:
-            user = require_user(self.headers, "POST", self.headers.get("Host", "").split(":")[0], self.path)
+            user = require_user(self.headers)
         except Unauthorized as e:
             return self._json(401, {"error": str(e)})
+        self._span.set("user.hash", tracing.user_hash(user))
+        self._span.set("device.cn", dev)
         req = self._body()
         if req is None:
             return self._json(400, {"error": "geçersiz JSON"})

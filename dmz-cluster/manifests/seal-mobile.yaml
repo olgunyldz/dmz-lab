@@ -25,6 +25,11 @@ spec:
           image: dmz-lab/seal-mobile:0.1.0
           imagePullPolicy: IfNotPresent
           env:
+            # İzleme: span'ler mgmt cluster'daki OTLP girişine gider (NodePort 30318)
+            - name: SERVICE_NAME
+              value: seal-mobile
+            - name: OTLP_ENDPOINT
+              value: http://__MGMT_NODE_IP__:30318
             - name: SM_PORT
               value: "8443"
             - name: SM_TLS_CERT
@@ -78,6 +83,10 @@ spec:
             - name: client
               mountPath: /client
               readOnly: true
+            - name: tracing
+              mountPath: /app/tracing.py
+              subPath: tracing.py
+              readOnly: true
           securityContext:
             allowPrivilegeEscalation: false
             runAsNonRoot: true
@@ -96,6 +105,9 @@ spec:
         - name: client
           secret:
             secretName: sm-dmz-client
+        - name: tracing
+          configMap:
+            name: seal-mobile-code
 ---
 apiVersion: v1
 kind: Service

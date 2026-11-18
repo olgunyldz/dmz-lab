@@ -59,7 +59,11 @@ function sequencePage(def) {
     "text;html=1;fontStyle=1;fontSize=16;align=left;verticalAlign=middle;fontColor=#1F2937;");
 
   // Mesaj y koordinatları (çerçeve ve notlar yer kaplar; çerçeve işaretleri kaplamaz)
-  let y = FIRST_MSG_Y;
+  // İlk ok etiketi (çok satırlı olabilir) katılımcı başlıklarının altında kalmalı: y, etiket yüksekliğine göre
+  const firstStep = def.messages.find((m) => !isFrag(m) && !m.note && !m.gap);
+  const headerBottom = HEADER_Y + HEADER_H;
+  const minFirstY = headerBottom + 14 + (firstStep ? labelLines(firstStep.label) * LINE_H : 0) + 8;
+  let y = Math.max(FIRST_MSG_Y, minFirstY);
   const msgY = def.messages.map((m) => {
     if (m.gap) y += m.gap;
     const my = y;

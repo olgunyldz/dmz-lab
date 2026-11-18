@@ -60,7 +60,7 @@ Test: `bash dmz-cluster/tests/extauth.sh` (16 test: token yok, yanlış kanal, y
 - **İmza doğrulaması HS256 ile yapılıyor** (lab anahtarı `ext-issuer-key`). Üretimde IdP JWKS'inden RS256/ES256 doğrulaması ve `kid` desteği olacak.
 - **Dış token'lar** test betiğinde üretiliyor (IdP yok). Gerçek akışta IdP `customer`/`partner` realm'lerinden çıkar.
 - **İç STS bir stub** (`sts-internal/sts`). Gerçekte iç IdP'un token-exchange endpoint'i olacak.
-- **DPoP ve cihaz attestation doğrulanmıyor.** Mobil ve web için DPoP proof kontrolü sonraki adım.
+- **Cihaz attestation doğrulanmıyor.** Mobil uygulama bütünlüğü (App Attest / Play Integrity) sonraki adım; DPoP lab kapsamından kaldırıldı (D-12).
 - **Partner `cnf` bağlaması** ext-authz'de kontrol edilmiyor, gateway'in mTLS doğrulaması ile sağlanıyor.
 - **Backend stub'ları `Authorization` başlığını yanıtta geri yazıyor** (`auth=...`). Bu yalnızca test içindir, üretimde hiçbir yanıtta token dönmez.
 - **ConfigMap `subPath` ile bağlı** stub'larda yapılandırma değişince `rollout restart` gerekir.

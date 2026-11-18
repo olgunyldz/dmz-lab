@@ -24,7 +24,7 @@ function architecture() {
 
   // İstemciler
   p.node("c_web", 40, 125, 165, 52, "Web tarayıcı\n(PKCE, Bearer)", "client");
-  p.node("c_mob", 40, 200, 165, 52, "Mobil uygulama\n(PKCE + DPoP)", "client");
+  p.node("c_mob", 40, 200, 165, 52, "Mobil uygulama\n(PKCE)", "client");
   p.node("c_par", 40, 275, 165, 52, "Partner\n(mTLS + client credentials)", "client");
   p.node("c_any", 40, 350, 165, 52, "Anonim kullanıcı\n(token yok)", "client");
 
@@ -39,7 +39,7 @@ function architecture() {
   p.node("gw_mob", 720, 125, 180, 56, "gw-mobile\nTLS · route · ext-authz", "dmz");
   p.node("gw_par", 515, 200, 180, 56, "gw-partner\nmTLS (istemci sertifikası)", "dmz");
   p.node("gw_br", 720, 200, 180, 56, "gw-branch\nmTLS (cihaz sertifikası)", "dmz");
-  p.node("ext", 515, 280, 385, 84, "ext-authz (ns: auth)\nRS256 (JWKS) · DPoP proof · token exchange (mTLS)\nkanal profilleri: web · mobile · partner · branch", "dmz");
+  p.node("ext", 515, 280, 385, 84, "ext-authz (ns: auth)\nRS256 (JWKS) · token exchange (mTLS)\nkanal profilleri: web · mobile · partner · branch", "dmz");
   p.node("dmz_note", 515, 380, 385, 62, "Default deny: tanımsız yol 404.\n/public/* ve /realms/* iç gateway'e; /bff/* ve /partner/* ext-authz'den geçer.", "note");
 
   // İç cluster
@@ -56,7 +56,7 @@ function architecture() {
   p.node("hsm", 1370, 385, 290, 52, "HSM / KMS · realm imza anahtarı (D-12) [prod]", "planned");
 
   // Identity
-  p.node("kc", 520, 780, 375, 78, "Spring IdP\nrealm bank · token exchange (RFC 8693) · tls_client_auth · DPoP", "identity");
+  p.node("kc", 520, 780, 375, 78, "Spring IdP\nrealm bank · token exchange (RFC 8693) · tls_client_auth", "identity");
   p.node("pg", 520, 880, 175, 62, "PostgreSQL 16\n[lab: emptyDir]", "identity");
 
   // Mgmt
@@ -80,7 +80,7 @@ function architecture() {
 
   // İstemci → edge
   p.edge("c_web", "ha", "HTTPS 443 · dış token");
-  p.edge("c_mob", "ha", "HTTPS 443 · DPoP");
+  p.edge("c_mob", "ha", "HTTPS 443");
   p.edge("c_par", "ha", "mTLS passthrough");
   p.edge("c_any", "ha", "HTTPS 443 · public");
 
@@ -160,7 +160,7 @@ const IO_ROWS = [
     out: "/bff ve /partner → ext-authz çağrısı\n/public ve /realms → iç gateway (mTLS)",
     tools: "kgateway v2.5 (Envoy) · Gateway API v1.7 · HTTPRoute · TrafficPolicy" },
   { k: "ext", name: "ext-authz (auth, DMZ)", kind: "dmz",
-    inp: "Bearer (web) veya DPoP proof + token (mobile); dış JWT (RS256, JWKS)",
+    inp: "Bearer (web ve mobil); dış JWT (RS256, JWKS)",
     out: "İç JWT (exchange sonucu, yalnız iç ağda)\nHata: JSON gövde 401 / 403 / 5xx",
     tools: "Python stdlib · IdP token exchange (client-x509, mTLS) · OTLP · metrik" },
   { k: "gwi", name: "kgateway gw-internal", kind: "internal",
@@ -176,9 +176,9 @@ const IO_ROWS = [
     out: "Hesap, işlem, transfer yanıtları (JSON)\nMetrik: transfer sayısı ve tutarı",
     tools: "Python stdlib · bellekte, sub bazlı deterministik hesap deposu" },
   { k: "kc", name: "Spring IdP (identity)", kind: "identity",
-    inp: "Login (PKCE), client credentials, token exchange (client-x509), DPoP proof",
+    inp: "Login (PKCE), client credentials, token exchange (client-x509)",
     out: "Access token (RS256), JWKS, exchange token; realm bank",
-    tools: "Spring IdP · DPoP (mobil) · PostgreSQL 16" },
+    tools: "Spring IdP · PostgreSQL 16" },
   { k: "vault", name: "Vault 1.18 (mgmt, secrets)", kind: "mgmt",
     inp: "init / unseal; KV v2 yazma (IdP parolaları)",
     out: "Identity secret'ları (load-vault.sh türetir)",
@@ -287,7 +287,7 @@ function allClusters() {
     { zone: "identity", title: "Identity cluster (kind-identity)", x: 1000, w: 240, h: 900, color: "#6D28D9", kind: "identity",
       nss: [
         { name: "auth", color: "#6D28D9", pods: [
-          { k: "id_kc", label: "Spring IdP (DPoP, XFCC)" },
+          { k: "id_kc", label: "Spring IdP (XFCC)" },
           { k: "id_pg", label: "postgres 16" },
         ] },
       ] },

@@ -79,20 +79,20 @@ IDENTITY_TOKEN_URL = f"http://127.0.0.1:{IDENTITY_PORT}{REALM}/token"
 CHANNELS = {
     "web": {"title": "Web kanalı", "host": "web.lab.local", "ca": PUBLIC_CA, "cert": None,
             "login": "pkce", "client": "web-app", "secret": "web-app", "redirect": "https://web.lab.local:8443/callback",
-            "user": "alice", "password": "alice-password", "dpop": False},
+            "user": "alice", "password": "alice-password"},
     "mobile": {"title": "Mobil kanal", "host": "mobile-api.lab.local", "ca": PUBLIC_CA, "cert": None,
-               "login": "pkce_dpop", "client": "mobile-app", "secret": None, "redirect": "com.bank.app:/callback",
-               "user": "alice", "password": "alice-password", "dpop": True},
+               "login": "pkce", "client": "mobile-app", "secret": None, "redirect": "com.bank.app:/callback",
+               "user": "alice", "password": "alice-password"},
     "partner": {"title": "Partner kanalı", "host": "partner-api.lab.local", "ca": INTERNAL_CA,
                 "cert": (str(CERTS / "partner-client.crt"), str(CERTS / "partner-client.key")),
                 "login": "client_credentials", "client": "partner-acme", "secret": "partner-acme", "redirect": None,
-                "user": None, "password": None, "dpop": False},
+                "user": None, "password": None},
     "branch": {"title": "Şube (çalışan) kanalı", "via": "branch-ui", "host": "teller.lab.local", "ca": INTERNAL_CA,
                "cert": (str(CERTS / "branch-device.crt"), str(CERTS / "branch-device.key")),
                "login": "pkce", "client": "branch-app", "secret": "branch-app", "redirect": "https://teller.lab.local/callback",
-               "user": "teller", "password": "teller-password", "dpop": False},
+               "user": "teller", "password": "teller-password"},
     "public": {"title": "Public (oturumsuz)", "host": "web.lab.local", "ca": PUBLIC_CA, "cert": None,
-               "login": None, "dpop": False},
+               "login": None},
 }
 
 SECRETS = {}
@@ -127,7 +127,7 @@ def load_secrets():
 
 
 def start_identity_forward():
-    # Spring IdP iç HTTP portu (8080): mobil login DPoP htu'su http://127.0.0.1:<port>/... ile eşleşir
+    # Spring IdP iç HTTP portu (8080): konsol için port-forward
     proc = subprocess.Popen(["kubectl", "--context", "kind-identity", "-n", "idp", "port-forward",
                              "svc/spring-idp", f"{IDENTITY_PORT}:8080"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     atexit.register(proc.terminate)
@@ -149,6 +149,9 @@ def summarize(token):
             "sender_constrained": "cnf" in c, "exp": c.get("exp")}
 
 
+_TP = threading.local()  # login/logout sırasında aktif span'in traceparent'ı
+
+
 def sni_request(host, cafile, method, path, headers=None, body=None, client_cert=None):
     ctx = ssl.create_default_context(cafile=cafile)
     if client_cert:
@@ -161,6 +164,8 @@ def sni_request(host, cafile, method, path, headers=None, body=None, client_cert
 
     conn = SNIConnection(EDGE[0], EDGE[1], context=ctx, timeout=20)
     h = {"Host": host, "Connection": "close"}
+    if getattr(_TP, "value", None):
+        h["traceparent"] = _TP.value
     h.update(headers or {})
     conn.request(method, path, body=body, headers=h)
     resp = conn.getresponse()
@@ -172,7 +177,10 @@ def sni_request(host, cafile, method, path, headers=None, body=None, client_cert
 
 def identity_req(method, path, headers=None, body=None):
     conn = http.client.HTTPConnection("127.0.0.1", IDENTITY_PORT, timeout=20)
-    conn.request(method, path, body=body, headers=headers or {})
+    h = dict(headers or {})
+    if getattr(_TP, "value", None):
+        h["traceparent"] = _TP.value
+    conn.request(method, path, body=body, headers=h)
     resp = conn.getresponse()
     data = resp.read().decode("utf-8", "replace")
     hdrs = resp.getheaders()
@@ -188,44 +196,6 @@ def cookies_from(hdrs, jar):
                 a, b = pair.split("=", 1)
                 jar[a.strip()] = b.strip()
     return jar
-
-
-def ec_new_key(tmpdir):
-    key = os.path.join(tmpdir, "dpop-ec.pem")
-    subprocess.run(["openssl", "ecparam", "-name", "prime256v1", "-genkey", "-noout", "-out", key],
-                   check=True, capture_output=True)
-    der = subprocess.run(["openssl", "ec", "-in", key, "-pubout", "-outform", "DER"],
-                         check=True, capture_output=True).stdout
-    pub = der[-65:]
-    return key, b64u(pub[1:33]), b64u(pub[33:65])
-
-
-def der_to_raw(der):
-    i = 2
-    if der[1] & 0x80:
-        i = 2 + (der[1] & 0x7F)
-    out = b""
-    for _ in range(2):
-        ln = der[i + 1]
-        out += der[i + 2:i + 2 + ln].lstrip(b"\x00").rjust(32, b"\x00")
-        i += 2 + ln
-    return out
-
-
-def dpop_proof(key_path, x, y, htm, htu, access_token=None):
-    header = {"typ": "dpop+jwt", "alg": "ES256", "jwk": {"kty": "EC", "crv": "P-256", "x": x, "y": y}}
-    payload = {"htm": htm, "htu": htu, "iat": int(time.time()), "jti": secrets.token_hex(8)}
-    if access_token:
-        payload["ath"] = b64u(hashlib.sha256(access_token.encode()).digest())
-    h = b64u(json.dumps(header, separators=(",", ":")).encode())
-    p = b64u(json.dumps(payload, separators=(",", ":")).encode())
-    with tempfile.TemporaryDirectory() as td:
-        inp, sig = os.path.join(td, "in"), os.path.join(td, "sig.der")
-        open(inp, "wb").write(f"{h}.{p}".encode())
-        subprocess.run(["openssl", "dgst", "-sha256", "-sign", key_path, "-out", sig, inp],
-                       check=True, capture_output=True)
-        raw = der_to_raw(open(sig, "rb").read())
-    return f"{h}.{p}.{b64u(raw)}"
 
 
 def pkce_pair():
@@ -250,7 +220,7 @@ def location_path(hdrs):
     return loc, (p.path + ("?" + p.query if p.query else ""))
 
 
-def idp_pkce(req, cfg, username, password, client_secret=None, dpop_for_token=None):
+def idp_pkce(req, cfg, username, password, client_secret=None):
     """Authorization Code + PKCE (Spring IdP): yetkilendirme -> /login (CSRF) -> devam -> code -> token."""
     verifier, challenge = pkce_pair()
     jar = {}
@@ -283,8 +253,6 @@ def idp_pkce(req, cfg, username, password, client_secret=None, dpop_for_token=No
     headers = {"Content-Type": "application/x-www-form-urlencoded"}
     if client_secret:
         headers["Authorization"] = "Basic " + base64.b64encode(f"{cfg['client']}:{client_secret}".encode()).decode()
-    if dpop_for_token:
-        headers["DPoP"] = dpop_for_token
     st, _, body = req("POST", f"{REALM}/token", headers, urllib.parse.urlencode(form))
     tok = json.loads(body)
     if "access_token" not in tok:
@@ -319,13 +287,6 @@ def do_login(sess, ch, username, password):
         if "access_token" not in tok:
             raise RuntimeError(f"token alınamadı (HTTP {st})")
         sess["channels"][ch] = {"access": tok["access_token"], "user": None}
-        return summarize(tok["access_token"])
-    if cfg["login"] == "pkce_dpop":
-        key, x, y = ec_new_key(sess["tmp"])
-        proof = dpop_proof(key, x, y, "POST", IDENTITY_TOKEN_URL)
-        tok = idp_pkce(identity_req_fn, cfg, user, pw, None, proof)
-        sess["channels"][ch] = {"access": tok["access_token"], "refresh": tok.get("refresh_token"), "user": user,
-                                "key": key, "x": x, "y": y}
         return summarize(tok["access_token"])
     # pkce (confidential)
     secret = SECRETS.get(cfg["secret"]) if cfg["secret"] else None
@@ -391,28 +352,192 @@ def do_logout(sess, ch):
         sess["channels"][ch] = None
         return status
     status = None
-    if entry and cfg.get("login") == "pkce_dpop":
-        proof = dpop_proof(entry["key"], entry["x"], entry["y"], "POST", f"{IDENTITY_TOKEN_URL[:-6]}/revoke")
-        status, _, _ = identity_req("POST", f"{REALM}/revoke",
-                                    headers={"Content-Type": "application/x-www-form-urlencoded", "DPoP": proof},
-                                    body=urllib.parse.urlencode({"client_id": cfg["client"],
-                                                                 "token": entry.get("refresh") or "",
-                                                                 "token_type_hint": "refresh_token"}))
+    if entry and cfg.get("login") == "pkce" and not cfg.get("secret") and entry.get("seal"):
+        # Seal mobil oturumu: IdP /revoke public istemci için yapılandırılmamış (invalid_client); yalnız yerel kapatılır
+        status = "local"
     elif entry and cfg.get("login") == "pkce":
         # RFC 7009 token iptali (Spring IdP /revoke); gizli anahtarlı istemci Basic auth ile
         headers = {"Content-Type": "application/x-www-form-urlencoded"}
         if cfg.get("secret"):
             headers["Authorization"] = "Basic " + base64.b64encode(
                 f"{cfg['client']}:{SECRETS[cfg['secret']]}".encode()).decode()
+        form = {"token": entry.get("refresh") or "", "token_type_hint": "refresh_token"}
+        if not cfg.get("secret"):  # public istemci (mobil): client_id gövdede
+            form["client_id"] = cfg["client"]
         status, _, _ = sni_request(cfg["host"], cfg["ca"], "POST", f"{REALM}/revoke", headers=headers,
-                                   body=urllib.parse.urlencode({"token": entry.get("refresh") or "",
-                                                                "token_type_hint": "refresh_token"}),
-                                   client_cert=cfg["cert"])
+                                   body=urllib.parse.urlencode(form), client_cert=cfg["cert"])
     sess["channels"][ch] = None
     return status
 
 
-def do_call(sess, ch, method, path, auth, dpop, cert, token_from=None, body=None, idem=None):
+# ---------------- Mobil cihaz (Seal) akışı: enroll, PIN, cihaz imzası, OTP, aktivasyon ----------------
+SEAL_HOST = "seal.lab.local"
+SEAL_DEVICE_DIR = str(CERTS / "device")
+MOBILE_USER = "alice"
+
+
+def seal_device(sess, fresh=False):
+    # Konsol cihazı: cihaz CA ile imzalı istemci sertifikası. Oturum başına bir cihaz; "yeni cihaz" yeni sertifika üretir.
+    st = sess.setdefault("seal", {})
+    if st.get("device") and not fresh:
+        return st["device"]
+    cn = "console-" + secrets.token_hex(4)
+    td = sess["tmp"]
+    crt, key = os.path.join(td, cn + ".crt"), os.path.join(td, cn + ".key")
+    csr, ext = os.path.join(td, cn + ".csr"), os.path.join(td, cn + ".ext")
+    with open(ext, "w") as fh:
+        fh.write(f"subjectAltName=DNS:{cn}\nextendedKeyUsage=clientAuth\nbasicConstraints=CA:FALSE\n")
+    subprocess.run(["openssl", "req", "-newkey", "rsa:2048", "-nodes", "-keyout", key, "-out", csr,
+                    "-subj", f"/CN={cn}"], check=True, capture_output=True)
+    subprocess.run(["openssl", "x509", "-req", "-in", csr,
+                    "-CA", os.path.join(SEAL_DEVICE_DIR, "device-ca.crt"),
+                    "-CAkey", os.path.join(SEAL_DEVICE_DIR, "device-ca.key"),
+                    "-CAcreateserial", "-out", crt, "-days", "1", "-extfile", ext],
+                   check=True, capture_output=True)
+    st["device"] = {"crt": crt, "key": key, "cn": cn, "enrolled": False}
+    return st["device"]
+
+
+def seal_call(dev, token, method, path, body=None):
+    # Seal (DMZ) çağrısı: edge SNI passthrough, cihaz istemci sertifikası (mTLS), IdP token (Bearer)
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    payload = json.dumps(body).encode() if body is not None else None
+    status, _, data = sni_request(SEAL_HOST, INTERNAL_CA, method, path, headers=headers, body=payload,
+                                  client_cert=(dev["crt"], dev["key"]))
+    try:
+        parsed = json.loads(data or "{}")
+    except ValueError:
+        parsed = {"raw": data[:200]}
+    return status, parsed
+
+
+def seal_sign(key, nonce):
+    # Cihaz anahtarıyla challenge imzası (RSA PKCS1v15 / SHA-256), base64
+    with tempfile.TemporaryDirectory() as td:
+        inp, sig = os.path.join(td, "n"), os.path.join(td, "s")
+        with open(inp, "wb") as fh:
+            fh.write(nonce.encode())
+        subprocess.run(["openssl", "dgst", "-sha256", "-sign", key, "-out", sig, inp],
+                       check=True, capture_output=True)
+        with open(sig, "rb") as fh:
+            return base64.b64encode(fh.read()).decode()
+
+
+def seal_store(sess, token, user):
+    # Seal ile alınan kısıtsız IdP token'ı mobil kanal oturumuna yazılır (menü ve /bff çağrıları buradan okur)
+    sess["channels"]["mobile"] = {"access": token["access_token"], "refresh": token.get("refresh_token"), "user": user,
+                                  "seal": True}
+
+
+def seal_token_full(user, pw):
+    return idp_pkce(request_for(CHANNELS["mobile"]), CHANNELS["mobile"], user, pw)
+
+
+def seal_token(user, pw):
+    return seal_token_full(user, pw)["access_token"]
+
+
+def do_seal(sess, req):
+    action = req.get("action", "start")
+    st = sess.setdefault("seal", {})
+    steps = []
+
+    def rec(name, status, ok, result, expect=""):
+        steps.append({"name": name, "status": status, "ok": bool(ok), "result": str(result)[:160], "expect": expect})
+
+    def done(status, **extra):
+        ok = status in ("PIN_AUTHORIZED", "ACTIVATED", "NEW_DEVICE", "RESET")
+        return dict(ok=ok, status=status, steps=steps, **extra)
+
+    try:
+        if action == "reset":
+            st.clear()
+            rec("oturum cihazı sıfırlandı", "-", True, "cihaz ve bekleyen akış silindi")
+            return done("RESET")
+
+        if action == "start":
+            user = (req.get("username") or MOBILE_USER).strip()
+            pw = req.get("password") or SECRETS.get(CHANNELS["mobile"]["password"], "")
+            pin = str(req.get("pin") or "4321")
+            mode = req.get("mode", "")
+            fresh = mode == "first" or bool(req.get("newDevice"))
+            dev = seal_device(sess, fresh)
+            if mode == "again" and not dev["enrolled"]:
+                rec("kayıtlı cihaz yok", "-", False, "önce 'İlk kez kurulum' yapın")
+                return done("NO_DEVICE")
+            tokd = seal_token_full(user, pw)
+            tok = tokd["access_token"]
+            rec("IdP token (PKCE, mobile-app)", 200, True, "token alındı", "200")
+            if not fresh and not dev["enrolled"]:
+                s, b = seal_call(dev, tok, "POST", "/seal/mobile/v1/device/enroll", {"pin": pin})
+                dev["enrolled"] = s == 200 and b.get("status") == "ENROLLED"
+                rec("cihaz kaydı (device/enroll)", s, dev["enrolled"], b.get("status") or b, "ENROLLED")
+                if not dev["enrolled"]:
+                    return done("ENROLL_FAILED")
+            s, b = seal_call(dev, tok, "POST", "/seal/mobile/v1/login/begin", {})
+            flow = b.get("flowId", "")
+            rec("login/begin", s, s == 200 and bool(flow), "flowId alındı" if flow else b, "200 + flowId")
+            if not flow:
+                return done("BEGIN_FAILED")
+            s, pb = seal_call(dev, tok, "POST", "/seal/mobile/v1/login/pin", {"flowId": flow, "pin": pin})
+            pstatus = pb.get("status", "")
+            rec("login/pin", s, pstatus in ("PIN_OK", "NEW_DEVICE"), pstatus or pb, "PIN_OK / NEW_DEVICE")
+            if pstatus == "NEW_DEVICE":
+                st["pending"] = {"flowId": flow, "user": user, "pw": pw, "pin": pin, "tok": tok, "dev": dev}
+                rec("yeni cihaz: demo OTP ekranda", "-", True, "SMS yok; OTP ekrana yazıldı")
+                return done("NEW_DEVICE", demoOtp=pb.get("demoOtp", ""))
+            if pstatus != "PIN_OK":
+                return done(pstatus or "PIN_FAILED")
+            s, b = seal_call(dev, tok, "POST", "/seal/mobile/v1/login/authorize",
+                             {"flowId": flow, "authorizationId": pb.get("authorizationId", ""),
+                              "signature": seal_sign(dev["key"], pb.get("nonce", ""))})
+            astatus = b.get("status", "")
+            if astatus == "PIN_AUTHORIZED":
+                seal_store(sess, tokd, user)
+            rec("login/authorize (cihaz imzası)", s, astatus == "PIN_AUTHORIZED", astatus or b, "PIN_AUTHORIZED")
+            return done(astatus or "AUTHORIZE_FAILED")
+
+        if action == "otp":
+            pend = st.get("pending")
+            if not pend:
+                rec("bekleyen akış yok", "-", False, "önce 'Seal ile giriş' (yeni cihaz) çalıştırın")
+                return done("NO_PENDING")
+            dev = pend["dev"]
+            otp = str(req.get("otp", "")).strip()
+            s, b = seal_call(dev, pend["tok"], "POST", "/seal/mobile/v1/device/otp",
+                             {"flowId": pend["flowId"], "otp": otp})
+            ok = s == 200 and b.get("activationRequired") is True
+            rec("device/otp", s, ok, b.get("status") or b, "200 + activationRequired")
+            if not ok:
+                return done("OTP_FAILED")
+            tok2 = seal_token(pend["user"], pend["pw"])
+            rec("IdP token (kısıtlı, scope=activation)", 200, True, "token alındı", "200")
+            s, b = seal_call(dev, tok2, "POST", "/seal/mobile/v1/activation/start", {})
+            atok = b.get("activationToken", "")
+            rec("activation/start", s, s == 200 and bool(atok), "activationToken alındı" if atok else b, "200")
+            if not atok:
+                return done("ACTIVATION_FAILED")
+            s, b = seal_call(dev, tok2, "POST", "/seal/mobile/v1/device/enroll", {"pin": pend["pin"]})
+            dev["enrolled"] = s == 200
+            rec("yeni cihaz PIN kaydı (device/enroll)", s, dev["enrolled"], b.get("status") or b, "ENROLLED")
+            s, b = seal_call(dev, tok2, "POST", "/seal/mobile/v1/activation/complete", {"activationToken": atok})
+            ok = s == 200 and b.get("status") == "ACTIVATED"
+            rec("activation/complete", s, ok, b.get("status") or b, "ACTIVATED")
+            if ok:
+                st.pop("pending", None)
+                seal_store(sess, seal_token_full(pend["user"], pend["pw"]), pend["user"])
+            return done("ACTIVATED" if ok else "ACTIVATION_FAILED")
+
+        rec("bilinmeyen işlem", "-", False, action)
+        return done("UNKNOWN_ACTION")
+    except Exception as e:  # ağ/TLS/IdP hatası: adım listesiyle birlikte döner
+        rec("hata", "-", False, f"{type(e).__name__}: {e}")
+        return done("ERROR")
+
+
+def do_call(sess, ch, method, path, auth, cert, token_from=None, body=None, idem=None):
     cfg = CHANNELS[ch]
     if cfg.get("via") == "branch-ui":
         return branch_call(sess, ch, method, path, auth, cert, body)
@@ -428,9 +553,6 @@ def do_call(sess, ch, method, path, auth, dpop, cert, token_from=None, body=None
     token = entry.get("access") if auth == "session" else None
     if token:
         headers["Authorization"] = f"Bearer {token}"
-    if dpop and cfg["dpop"] and token and entry.get("key"):
-        headers["DPoP"] = dpop_proof(entry["key"], entry["x"], entry["y"], method,
-                                     f"https://{cfg['host']}{path}", token)
     # Her çağrının kök span'i: traceparent ile zincirin tamamına (edge, ext-authz, BFF, core) taşınır
     root = tracing.start_server_span(f"console {method} {path}", child_traceparent(_req.tid),
                                      {"channel": ch, "auth": auth, "http.method": method, "http.target": path})
@@ -563,11 +685,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
         try:
             if self.path == "/api/login":
                 ch = req.get("channel")
+                if ch == "mobile":
+                    return self._json(400, {"error": "mobil giriş yalnız Seal ile (cihaz + PIN) yapılır"}, sid, new)
                 span = tracing.start_server_span(f"console login {ch}", child_traceparent(_req.tid),
                                                  {"channel": ch, "http.target": "/api/login"})
+                _TP.value = span.header()
                 try:
                     info = do_login(sess, ch, req.get("username"), req.get("password"))
                 finally:
+                    _TP.value = None
                     span.end()
                 return self._json(200, {"ok": True, "token": info, "trace_id": span.trace_id,
                                         "trace_url": trace_link(span.trace_id)}, sid, new)
@@ -594,15 +720,30 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     span.end(http_status=200)
                     return self._json(200, {"ok": True, "idp_status": None, "note": "oturum yoktu",
                                             "trace_id": span.trace_id, "trace_url": trace_link(span.trace_id)}, sid, new)
+                _TP.value = span.header()
                 try:
                     kc = do_logout(sess, ch)
                 finally:
+                    _TP.value = None
                     span.end(http_status=200)
-                return self._json(200, {"ok": kc in (200, 204, None), "idp_status": kc,
+                note = ("IdP iptali yapılmadı (public istemci); yerel oturum kapatıldı" if kc == "local" else "")
+                return self._json(200, {"ok": kc in (200, 204, None, "local"), "idp_status": None if kc == "local" else kc,
+                                        "note": note,
                                         "trace_id": span.trace_id, "trace_url": trace_link(span.trace_id)}, sid, new)
+            if self.path == "/api/seal":
+                span = tracing.start_server_span(f"console seal {req.get('action', 'start')}",
+                                                 child_traceparent(_req.tid), {"http.target": "/api/seal"})
+                _TP.value = span.header()
+                try:
+                    res = do_seal(sess, req)
+                finally:
+                    _TP.value = None
+                    span.end()
+                return self._json(200, dict(res, trace_id=span.trace_id, trace_url=trace_link(span.trace_id)),
+                                  sid, new)
             if self.path == "/api/call":
                 res = do_call(sess, req.get("channel"), req.get("method", "GET"), req.get("path", "/"),
-                              req.get("auth", "session"), bool(req.get("dpop")), req.get("cert", True),
+                              req.get("auth", "session"), req.get("cert", True),
                               req.get("token_from"), req.get("body"), req.get("idem"))
                 expect = req.get("expect")
                 res["expect"] = expect

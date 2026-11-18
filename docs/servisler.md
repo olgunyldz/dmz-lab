@@ -17,7 +17,7 @@ Bileşenler aşağıdaki adlarla anılır. Kod dizinleri ve servis adları (`spr
 
 | Ad | Rol | Çalıştığı yer | Lab karşılığı |
 |---|---|---|---|
-| **Seal SDK** | Mobil uygulamanın içine gömülü SDK: login, işlem ve belge imzası, backend ile TLS haberleşmesi | Cihaz (mobil uygulama) | `mobile-app` istemcisi, PKCE + DPoP (konsol mobil kanalı) |
+| **Seal SDK** | Mobil uygulamanın içine gömülü SDK: login, işlem ve belge imzası, backend ile TLS haberleşmesi | Cihaz (mobil uygulama) | `mobile-app` istemcisi, PKCE (konsol mobil kanalı) |
 | **Octopus** | Cihazda çalışan güvenlik tarayıcısı: kötü amaçlı yazılım tespiti, uygulama koruma (shielding), cihaz parmak izi | Cihaz (Seal SDK ile birlikte) | Lab'da yok; sinyali Seal Mobile alır (device-trust kaldırıldı) |
 | **Seal Mobile** | SDK'ya hizmet veren mobil backend; kimlik doğrulama ve imza işlemlerini yönetir (orkestrasyon) | DMZ'de internete açık kısım + iç orkestrasyon | DMZ: `gw-mobile`, `ext-authz`; iç: `bff` (mobil kanal), `spring-idp` |
 | **Seal Intranet** | Ayrı servis: backend-to-backend API (`/seal/v1/...`). Çağıran backend'in IdP `seal-b2b` token'ı (aud=seal-intranet) JWKS ile doğrulanır | Internal cluster, ns `seal-intranet`; `internal-cluster/seal-intranet/`, `manifests/seal-intranet.yaml`, `scripts/load-seal-intranet.sh`; gw-internal `/seal/` HTTPRoute | Doğrulandı (yerel): 9/9. Kümede kurulum bekliyor (internal cluster kapalı) |
@@ -61,7 +61,7 @@ Edge testleri (`edge/tests/run-all.sh`): smoke, lb (failover dahil), waf, ddos �
 | Gateway | Kanal | Giriş | Özel kurallar |
 |---|---|---|---|
 | `gw-web` | Web | `web.lab.local` (HAProxy → NodePort 30446) | PKCE token → ext-authz (Bearer) |
-| `gw-mobile` | Mobil | `mobile-api.lab.local` (HAProxy → 30447) | PKCE + DPoP → ext-authz (DPoP doğrulama) |
+| `gw-mobile` | Mobil | `mobile-api.lab.local` (HAProxy → 30447) | PKCE → ext-authz |
 | `gw-partner` | Partner | `partner-api.lab.local` (HAProxy passthrough → 30448) | Frontend mTLS (`partner-ca`) |
 | `gw-branch` | Şube | **Şube cluster'ından doğrudan**, WAN benzeri bağlantı (NodePort 30449, HAProxy yok) | Frontend mTLS (`branch-ca`, cihaz sertifikası), F10 ile sınırlı |
 
@@ -82,11 +82,11 @@ Tracing: her gateway `ListenerPolicy` ile OTLP/gRPC span gönderir (Tempo, 30317
 
 | Bileşen | Görev | Durum |
 |---|---|---|
-| **ext-authz** (Python, stdlib) | Dış token: RS256 (IdP JWKS), iss, aud, kanal, exp. Mobil ve DPoP bağlı token'da **RS256 ve ES256 (P-256)** DPoP proof doğrulaması. Ardından kanal sertifikasıyla **token exchange** (mTLS, `dmz-exchange-<kanal>`) → iç JWT. Kanal profilleri: web, mobile, partner, branch | Doğrulandı: `extauth.sh` 29/29 (önceki çalıştırma). Branch profili: doğrulama bekliyor |
+| **ext-authz** (Python, stdlib) | Dış token: RS256 (IdP JWKS), iss, aud, kanal, exp. Ardından kanal sertifikasıyla **token exchange** (mTLS, `dmz-exchange-<kanal>`) → iç JWT. Kanal profilleri: web, mobile, partner, branch | Doğrulandı: `extauth.sh` 29/29 (önceki çalıştırma). Branch profili: doğrulama bekliyor |
 | Hata gövdesi | 4xx/5xx JSON: `error`, `error_description`, `layer: dmz-ext-authz`, `status`; 401'de `WWW-Authenticate` | Doğrulandı |
 | Tracing | Karar ve token exchange span'leri (Tempo) | Doğrulandı |
 | Metrikler | `authz_decisions_total{channel,decision,status}`, `authz_exchange_total`, `authz_decision_duration_seconds` (port 9100, NodePort 30903) | Doğrulandı |
-| Replika | 1 (DPoP replay cache süreç içi; prod'da paylaşılan store) | Lab sınırı |
+| Replika | 1 | Lab sınırı |
 
 ### 2.4 Route sınıfları ve iç backend
 Login ve public route'ları gerçek servislere gider (stub yok). `partner-login` yolu `/realms/`.
@@ -140,7 +140,7 @@ Tracing: BFF ve core span üretir (`bff → core` alt span'i dahil).
 
 | Bileşen | Görev | Yapılandırma | Durum |
 |---|---|---|---|
-| **Spring IdP** (Spring Authorization Server 7.1.2) | Login (Authorization Code + PKCE, CSRF'li login formu), client_credentials, token exchange (RFC 8693, mTLS `tls_client_auth`), DPoP (`cnf.jkt`), realm yolları `/realms/bank/...`, claim'ler (`channel`, `auth_method`, `partner_id`, `aud`) | `identity-cluster/spring-idp/` (Java), imaj `dmz-lab/spring-idp:0.1.0`, `identity-cluster/manifests/spring-idp.yaml` (ns `idp`), NodePort 30443 (HTTPS), 30081 (iç HTTP) | Doğrulandı: tüm test süitleri (97 kontrol) |
+| **Spring IdP** (Spring Authorization Server 7.1.2) | Login (Authorization Code + PKCE, CSRF'li login formu), client_credentials, token exchange (RFC 8693, mTLS `tls_client_auth`), realm yolları `/realms/bank/...`, claim'ler (`channel`, `auth_method`, `partner_id`, `aud`) | `identity-cluster/spring-idp/` (Java), imaj `dmz-lab/spring-idp:0.1.0`, `identity-cluster/manifests/spring-idp.yaml` (ns `idp`), NodePort 30443 (HTTPS), 30081 (iç HTTP) | Doğrulandı: tüm test süitleri (97 kontrol) |
 | **PostgreSQL 16** | IdP veritabanı | PVC `postgres-idp-data` (1Gi, local-path; lab tek replika) | Doğrulandı |
 | **F8 host firewall** | IdP'ye yalnız iç node'lardan ve pod ağından erişim | `identity-cluster/scripts/host-firewall.sh` | Doğrulandı: 3/3 |
 
@@ -148,8 +148,8 @@ Tracing: BFF ve core span üretir (`bff → core` alt span'i dahil).
 
 | Client | Akış | Not |
 |---|---|---|
-| `web-app` | PKCE, confidential | DPoP yok (Bearer), exchange kabul eder |
-| `mobile-app` | PKCE, public | DPoP zorunlu; `directAccessGrants` kapalı |
+| `web-app` | PKCE, confidential | Bearer, exchange kabul eder |
+| `mobile-app` | PKCE, public | Bearer; `directAccessGrants` kapalı |
 | `branch-app` | PKCE, confidential | Şube çalışanı girişi (`teller`); redirect `https://teller.lab.local/*` |
 | `partner-acme` | Client credentials | mTLS ile birlikte |
 | `dmz-exchange-{web,mobile,partner,branch}` | client-x509 | Token exchange istemcileri (kanal başına) |

@@ -59,6 +59,30 @@
     <div class="hint" id="hint"></div>
   </section>
 
+  <section id="seal-sec" style="display:none">
+    <h2>Mobil cihaz (Seal) akışı</h2>
+    <div class="row">
+      <button class="primary" id="tab-first">İlk kez kurulum</button>
+      <button id="tab-again">Tekrar giriş</button>
+    </div>
+    <div id="pane-first">
+      <div class="hint">Uygulama ilk kez kuruluyor: yeni cihaz kaydı, PIN, demo OTP ve aktivasyon.</div>
+      <div class="row"><input id="f-pin" size="6" placeholder="PIN" value="4321"></div>
+      <div class="row"><button class="primary" id="btn-first">Kur ve giriş yap</button></div>
+      <div class="row">
+        <input id="f-otp" size="8" placeholder="OTP">
+        <button id="btn-otp">OTP doğrula + aktivasyon</button>
+      </div>
+    </div>
+    <div id="pane-again" style="display:none">
+      <div class="hint">Uygulama daha önce kurulmuş: aynı cihazda PIN ile giriş (OTP yok). Önce "İlk kez kurulum" yapılmış olmalı.</div>
+      <div class="row"><input id="a-pin" size="6" placeholder="PIN" value="4321"></div>
+      <div class="row"><button class="primary" id="btn-again">PIN ile giriş</button></div>
+    </div>
+    <div class="state" id="seal-st">Bir sekme seçin. Sonuç log tablosunda adım adım görünür.</div>
+    <div class="row"><button id="btn-seal-reset">Cihazı sıfırla</button></div>
+  </section>
+
   <section>
     <h2>Menü: yapılabilen ve yapılamayan işlemler</h2>
     <div class="state">Yapılabilenler çalıştırılabilir; yapılamayanların gerekçesi listelenir.</div>
@@ -110,8 +134,7 @@ const CHECKS = {
     { label: 'Web token → şube endpoint (403)', channel: 'branch', method: 'GET', path: '/bff/branch/accounts', auth: 'session', token_from: 'web', expect: '403', hint: 'Önce web girişi yapın' },
   ],
   mobile: [
-    { label: 'BFF hesaplar, DPoP ile (200)', channel: 'mobile', method: 'GET', path: '/bff/mobile/accounts', auth: 'session', dpop: true, expect: '200' },
-    { label: 'BFF, DPoP yok (401)', channel: 'mobile', method: 'GET', path: '/bff/mobile/accounts', auth: 'session', dpop: false, expect: '401' },
+    { label: 'BFF hesaplar (200)', channel: 'mobile', method: 'GET', path: '/bff/mobile/accounts', auth: 'session', expect: '200' },
     { label: 'Token yok (401)', channel: 'mobile', method: 'GET', path: '/bff/mobile/accounts', auth: 'none', expect: '401' },
   ],
   partner: [
@@ -191,8 +214,9 @@ function setupPage(channels) {
   }
   if (KEY === 'partner') $('hint').textContent = 'Partner girişi client credentials ile (mTLS). Çıkış yerel token siler.';
   if (KEY === 'branch') $('hint').textContent = 'Şube girişi: şube UI pod’u (branch-cluster, cihaz sertifikası pod’da). Giriş: teller kullanıcısı.';
-  if (KEY === 'mobile') $('hint').textContent = 'Mobil girişte DPoP anahtarı üretilir; çıkış refresh token\'ı iptal eder.';
+  if (KEY === 'mobile') { $('hint').textContent = 'Mobil giriş yalnız Seal ile (cihaz + PIN). Çıkış oturumu kapatır.'; $('login-fields').style.display = 'none'; $('btn-login').style.display = 'none'; }
   if (KEY === 'web') $('hint').textContent = 'Web girişi PKCE ile. Çıkış IdP oturumunu kapatır.';
+  if (KEY === 'mobile') { $('seal-sec').style.display = ''; sealTab('first'); }
 
   renderMenu($('menu'), KEY, (op, cfg, res) => {
     const ok = res.pass === true || String(res.status) === String(cfg.expect || '200');
@@ -215,11 +239,11 @@ async function runCheck(btn, c) {
   btn.disabled = true;
   try {
     const body = { channel: c.channel, method: c.method, path: c.path, auth: c.auth,
-      dpop: !!c.dpop, cert: c.cert !== false, token_from: c.token_from || null, expect: c.expect };
+      cert: c.cert !== false, token_from: c.token_from || null, expect: c.expect };
     const r = await post('/api/call', body);
     const d = r.data;
     const ok = !!d.pass;
-    addRow([now(), c.channel, `${c.method} ${c.path}${c.dpop ? ' (DPoP)' : ''}`, c.auth + (c.token_from ? ` (${c.token_from})` : ''),
+    addRow([now(), c.channel, `${c.method} ${c.path}`, c.auth + (c.token_from ? ` (${c.token_from})` : ''),
       c.expect, d.status, { cls: ok ? 'pass' : 'fail', text: ok ? 'PASS' : 'FAIL' },
       (d.body || d.error || '').replace(/\s+/g, ' ').slice(0, 140)],
       { url: d.trace_url, id: d.trace_id, sent: r.traceId });
@@ -250,6 +274,64 @@ async function logout() {
   } catch (e) { addRow([now(), KEY, 'çıkış', '-', '-', 'hata', { cls: 'fail', text: 'FAIL' }, String(e)]); }
   finally { btn.disabled = false; await refreshState(); }
 }
+
+// Seal akışı: sunucu adımları döner; her adım log'a bir satır, son satırın İz bağlantısı ile.
+function sealRows(d, sent) {
+  (d.steps || []).forEach((st) => {
+    addRow([now(), KEY, st.name, 'seal', st.expect || '-', st.status,
+      { cls: st.ok ? 'pass' : 'fail', text: st.ok ? 'PASS' : 'FAIL' }, st.result],
+      { url: d.trace_url, id: d.trace_id, sent });
+  });
+}
+async function sealRun(payload, btn) {
+  if (btn) btn.disabled = true;
+  try {
+    const r = await post('/api/seal', payload);
+    sealRows(r.data, r.traceId);
+    return r.data;
+  } catch (e) {
+    addRow([now(), KEY, 'seal', 'seal', '-', 'hata', { cls: 'fail', text: 'FAIL' }, String(e)]);
+    return null;
+  } finally { if (btn) btn.disabled = false; }
+}
+function sealTab(which) {
+  const first = which === 'first';
+  $('pane-first').style.display = first ? '' : 'none';
+  $('pane-again').style.display = first ? 'none' : '';
+  $('tab-first').className = first ? 'primary' : '';
+  $('tab-again').className = first ? '' : 'primary';
+}
+// mode: 'first' (yeni cihaz: OTP + aktivasyon) | 'again' (kayıtlı cihaz: PIN)
+async function sealStart(mode) {
+  const pinId = mode === 'first' ? 'f-pin' : 'a-pin';
+  const btn = $(mode === 'first' ? 'btn-first' : 'btn-again');
+  const d = await sealRun({ action: 'start', mode, username: $('u').value.trim(), password: $('p').value,
+    pin: $(pinId).value.trim() }, btn);
+  if (!d) return;
+  if (d.status === 'NEW_DEVICE') {
+    $('f-otp').value = d.demoOtp || '';
+    $('seal-st').textContent = 'Yeni cihaz: demo OTP ekranda: ' + (d.demoOtp || '-') + ' (SMS gönderilmez). OTP doğrulayın.';
+  } else {
+    $('seal-st').textContent = 'Seal durumu: ' + d.status;
+  }
+  await refreshState();
+}
+async function sealOtp() {
+  const d = await sealRun({ action: 'otp', otp: $('f-otp').value.trim() }, $('btn-otp'));
+  if (!d) return;
+  $('seal-st').textContent = 'Seal durumu: ' + d.status;
+  await refreshState();
+}
+async function sealReset() {
+  await sealRun({ action: 'reset' }, $('btn-seal-reset'));
+  $('seal-st').textContent = 'Cihaz sıfırlandı; sonraki "Tekrar giriş" için önce kurulum gerekir.';
+}
+$('tab-first').addEventListener('click', () => sealTab('first'));
+$('tab-again').addEventListener('click', () => sealTab('again'));
+$('btn-first').addEventListener('click', () => sealStart('first'));
+$('btn-again').addEventListener('click', () => sealStart('again'));
+$('btn-otp').addEventListener('click', sealOtp);
+$('btn-seal-reset').addEventListener('click', sealReset);
 
 $('btn-login').addEventListener('click', login);
 $('btn-logout').addEventListener('click', logout);

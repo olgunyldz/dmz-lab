@@ -79,21 +79,20 @@
   </section>
 
   <section>
-    <h2>Mobil kanal (PKCE + DPoP, ES256)</h2>
+    <h2>Mobil kanal (PKCE)</h2>
     <div class="state" id="st-mobile">durum: giriş yok</div>
     <div class="row">
       <input id="u-mobile" placeholder="kullanıcı (alice)" size="10">
       <input id="p-mobile" type="password" placeholder="parola (boş = lab varsayılanı)" size="18">
     </div>
     <div class="row">
-      <button class="primary" data-act="login" data-ch="mobile">Giriş yap (DPoP)</button>
+      <button class="primary" data-act="login" data-ch="mobile">Giriş yap</button>
       <button data-act="logout" data-ch="mobile">Çıkış yap</button>
     </div>
     <div class="row">
-      <button data-act="call" data-ch="mobile" data-method="GET" data-path="/bff/accounts" data-auth="session" data-dpop="1" data-expect="200">BFF, DPoP ile (200)</button>
-      <button data-act="call" data-ch="mobile" data-method="GET" data-path="/bff/accounts" data-auth="session" data-dpop="0" data-expect="401">BFF, DPoP yok (401)</button>
+      <button data-act="call" data-ch="mobile" data-method="GET" data-path="/bff/accounts" data-auth="session" data-expect="200">BFF (200)</button>
     </div>
-    <div class="hint">Mobil token cnf.jkt ile bağlıdır; DPoP proof olmadan kabul edilmez.</div>
+    <div class="hint">Mobil token Bearer olarak gönderilir.</div>
   </section>
 
   <section>
@@ -219,7 +218,7 @@ async function runAction(btn) {
     } else if (act === 'call') {
       const body = {
         channel: ch, method: btn.dataset.method, path: btn.dataset.path, auth: btn.dataset.auth,
-        dpop: btn.dataset.dpop === '1', expect: btn.dataset.expect
+        expect: btn.dataset.expect
       };
       const res = await post('/api/call', body);
       const d = res.data;
@@ -229,7 +228,7 @@ async function runAction(btn) {
       } else {
         const label = d.pass === null ? 'bilgi' : (d.pass ? 'PASS' : 'FAIL');
         const cls = d.pass === null ? 'none' : (d.pass ? 'pass' : 'fail');
-        const reqLabel = `${body.method} ${body.path}` + (body.dpop ? ' (DPoP)' : '');
+        const reqLabel = `${body.method} ${body.path}`;
         addRow([now(), ch, reqLabel, body.auth, body.expect, d.status, { cls, text: label },
                 (d.body || '').replace(/\s+/g, ' ').slice(0, 160)]);
       }

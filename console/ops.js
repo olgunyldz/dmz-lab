@@ -24,13 +24,13 @@ function apiFetch(url, opts = {}) {
 const CH_LABEL = { web: 'Web', mobile: 'Mobil', partner: 'Partner', branch: 'Şube', public: 'Public' };
 const CHANNEL_KEYS = ['web', 'mobile', 'partner', 'branch', 'public'];
 
-// ok: yapılabilir. path/method/auth/dpop/body: çağrı. needsAccount: önce hesap listesinden kimlik alınır.
+// ok: yapılabilir. path/method/auth/body: çağrı. needsAccount: önce hesap listesinden kimlik alınır.
 // reason: yapılamıyorsa gerekçe (sunucudaki gerçek hata ile uyumlu).
 const OPS = [
   { id: 'accounts', label: 'Hesap listesi', desc: 'Kullanıcının dummy hesapları',
     per: {
       web:     { ok: true, path: '/bff/web/accounts', auth: 'session', expect: '200' },
-      mobile:  { ok: true, path: '/bff/mobile/accounts', auth: 'session', dpop: true, expect: '200' },
+      mobile:  { ok: true, path: '/bff/mobile/accounts', auth: 'session', expect: '200' },
       branch:  { ok: true, path: '/bff/branch/accounts', auth: 'session', expect: '200' },
       partner: { ok: false, reason: 'Partner kanalında hesap API yok; partner yalnız ödeme rotasını kullanır (/partner/payments).' },
       public:  { ok: false, reason: 'Hesap bilgisi kişisel veri; token gerekir, public kanalda oturum yok.' } } },
@@ -38,7 +38,7 @@ const OPS = [
   { id: 'transactions', label: 'İşlem geçmişi', desc: 'Bir hesabın işlemleri', needsAccount: true,
     per: {
       web:     { ok: true, path: '/bff/web/accounts/{id}/transactions', auth: 'session', expect: '200' },
-      mobile:  { ok: true, path: '/bff/mobile/accounts/{id}/transactions', auth: 'session', dpop: true, expect: '200', note: 'Mobilde son 5 işlem' },
+      mobile:  { ok: true, path: '/bff/mobile/accounts/{id}/transactions', auth: 'session', expect: '200', note: 'Mobilde son 5 işlem' },
       branch:  { ok: true, path: '/bff/branch/accounts/{id}/transactions', auth: 'session', expect: '200' },
       partner: { ok: false, reason: 'Partner kanalında hesap/işlem API yok.' },
       public:  { ok: false, reason: 'İşlem geçmişi token gerektirir.' } } },
@@ -46,7 +46,7 @@ const OPS = [
   { id: 'transfer', label: 'Para transferi (1,00 TRY)', desc: 'Idempotency-Key ile havale', needsAccount: true,
     per: {
       web:     { ok: true, path: '/bff/web/transfers', auth: 'session', method: 'POST', expect: '200', limit: '100.000,00 TRY' },
-      mobile:  { ok: true, path: '/bff/mobile/transfers', auth: 'session', dpop: true, method: 'POST', expect: '200', limit: '10.000,00 TRY' },
+      mobile:  { ok: true, path: '/bff/mobile/transfers', auth: 'session', method: 'POST', expect: '200', limit: '10.000,00 TRY' },
       branch:  { ok: true, path: '/bff/branch/transfers', auth: 'session', method: 'POST', expect: '200', limit: '50.000,00 TRY' },
       partner: { ok: false, reason: 'Partner kanalı salt okunur; transfer yapamaz.' },
       public:  { ok: false, reason: 'Transfer için giriş gerekir; public kanalda oturum yok.' } } },
@@ -78,7 +78,7 @@ const OPS = [
   { id: 'login', label: 'Giriş', desc: 'Kanala özel kimlik doğrulama (menüde bilgi)',
     per: {
       web:     { ok: true, note: 'PKCE (Bearer)' },
-      mobile:  { ok: true, note: 'PKCE + ES256 DPoP' },
+      mobile:  { ok: true, note: 'PKCE' },
       branch:  { ok: true, note: 'Cihaz sertifikası + PKCE' },
       partner: { ok: true, note: 'Client credentials + mTLS' },
       public:  { ok: false, reason: 'Public kanalda giriş yok (token gerekmez).' } } },
@@ -98,7 +98,7 @@ async function runOp(channel, op) {
   if (!cfg || !cfg.ok || !cfg.path) throw new Error('bu kanalda çalıştırılamaz');
   let path = cfg.path;
   if (op.needsAccount) {
-    const acc = await callApi({ channel, method: 'GET', path: channelAccountsPath(channel), auth: 'session', dpop: !!cfg.dpop });
+    const acc = await callApi({ channel, method: 'GET', path: channelAccountsPath(channel), auth: 'session' });
     const id = (acc.body || '').match(/TR[0-9A-F]{12}/);
     if (!id) throw new Error('hesap kimliği alınamadı (önce giriş yapın)');
     path = path.replace('{id}', id[0]);
@@ -107,7 +107,7 @@ async function runOp(channel, op) {
     ? { from: await firstAccount(channel), to: 'EXT-100001', amount: '1.00', currency: 'TRY', description: 'menü' }
     : undefined;
   const idem = cfg.method === 'POST' ? `MENU-${Date.now()}` : undefined;
-  return callApi({ channel, method: cfg.method || 'GET', path, auth: cfg.auth, dpop: !!cfg.dpop,
+  return callApi({ channel, method: cfg.method || 'GET', path, auth: cfg.auth,
                    body, idem, expect: cfg.expect });
 }
 
@@ -116,8 +116,7 @@ function channelAccountsPath(ch) {
 }
 
 async function firstAccount(channel) {
-  const acc = await callApi({ channel, method: 'GET', path: channelAccountsPath(channel), auth: 'session',
-                              dpop: channel === 'mobile' });
+  const acc = await callApi({ channel, method: 'GET', path: channelAccountsPath(channel), auth: 'session' });
   const id = (acc.body || '').match(/TR[0-9A-F]{12}/);
   return id ? id[0] : '';
 }

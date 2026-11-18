@@ -104,7 +104,7 @@ class Seeder implements ApplicationRunner {
                 .clientSettings(ClientSettings.builder().requireProofKey(true).build())
                 .build();
 
-        // Mobil: public istemci, PKCE zorunlu, DPoP zorunlu (DpopRequiredFilter)
+        // Mobil: public istemci, PKCE zorunlu
         RegisteredClient mobileApp = RegisteredClient.withId(UUID.randomUUID().toString())
                 .clientId("mobile-app")
                 .clientAuthenticationMethod(ClientAuthenticationMethod.NONE)

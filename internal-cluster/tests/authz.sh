@@ -35,23 +35,14 @@ secret() {
 }
 
 b64u() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
-DPOP_DIR=$(mktemp -d); DPOP_KEY="$DPOP_DIR/dpop.pem"
-openssl genrsa -out "$DPOP_KEY" 2048 2>/dev/null
-DPOP_N=$(openssl rsa -in "$DPOP_KEY" -noout -modulus | cut -d= -f2 | xxd -r -p | b64u)
-dpop_proof() { # <htm> <htu>
-    local h p s
-    h=$(printf '%s' "{\"typ\":\"dpop+jwt\",\"alg\":\"RS256\",\"jwk\":{\"kty\":\"RSA\",\"n\":\"$DPOP_N\",\"e\":\"AQAB\"}}" | b64u)
-    p=$(printf '%s' "{\"htm\":\"$1\",\"htu\":\"$2\",\"iat\":$(date +%s),\"jti\":\"$(openssl rand -hex 8)\"}" | b64u)
-    s=$(printf '%s.%s' "$h" "$p" | openssl dgst -sha256 -sign "$DPOP_KEY" | b64u)
-    printf '%s.%s.%s' "$h" "$p" "$s"
-}
 
-PF_PIDS=()
+source "$(cd "$(dirname "$0")" && pwd)/lib/portforward.sh"
+trap pf_stop EXIT
 IDP_PORT=${IDP_PORT:-18450}
-$KI -n idp port-forward svc/spring-idp "$IDP_PORT:8443" >/dev/null 2>&1 & PF_PIDS+=($!)
-$KN -n gw-internal port-forward svc/gw-internal 19543:443 >/dev/null 2>&1 & PF_PIDS+=($!)
-trap 'kill "${PF_PIDS[@]}" 2>/dev/null' EXIT
-sleep 6
+pf_start idp "$IDP_PORT" -- $KI -n idp port-forward svc/spring-idp "$IDP_PORT:8443"
+pf_wait "$IDP_PORT" 30 || exit 1
+pf_start gw-internal 19543 -- $KN -n gw-internal port-forward svc/gw-internal 19543:443
+pf_wait 19543 30 || exit 1
 
 CURL=(curl)
 if curl -V 2>/dev/null | grep -qi schannel; then CURL=(curl --ssl-no-revoke); fi
@@ -68,8 +59,6 @@ source "$ROOT/../identity-cluster/tests/lib/pkce.sh"
 PKCE_BASE=https://id.bank.lab.local
 PKCE_CURL_ARGS="${CURL[*]:1} --cacert $CERTS/internal-ca.crt --connect-to id.bank.lab.local:443:127.0.0.1:$IDP_PORT"
 WEB_EXT=$(pkce_token web-app https://web.lab.local:8443/callback alice "$(secret alice-password)" "$(secret web-app)" "")
-MOBILE_EXT=$(pkce_token mobile-app com.bank.app:/callback alice "$(secret alice-password)" "" \
-    "$(dpop_proof POST "$KC_LOCAL")")
 PARTNER_EXT=$("${IDP_CURL[@]}" -u "partner-acme:$(secret partner-acme)" -X POST "$KC_LOCAL" \
     -d grant_type=client_credentials | json_token)
 
@@ -100,7 +89,10 @@ exchange() { # <channel> <external-token> -> iç JWT
     raw=$(GW_CERT="dmz-exchange-$1" gw_raw POST "$TOKEN_PATH" "application/x-www-form-urlencoded" "$form")
     echo "$raw" | json_token
 }
+# Tek aktif giriş: aynı kullanıcının yeni girişi (mobil) önceki web oturumunu sonlandırır.
+# Bu yüzden web exchange'i mobil girişten ÖNCE yapılır.
 WEB_INT=$(exchange web "$WEB_EXT")
+MOBILE_EXT=$(pkce_token mobile-app com.bank.app:/callback alice "$(secret alice-password)" "")
 MOBILE_INT=$(exchange mobile "$MOBILE_EXT")
 PARTNER_INT=$(exchange partner "$PARTNER_EXT")
 echo "iç token'lar: web=${#WEB_INT} mobile=${#MOBILE_INT} partner=${#PARTNER_INT}"

@@ -75,7 +75,7 @@ function apiFetch(url, opts = {}) {
 
 const DESCRIPTIONS = {
   web: 'Kullanıcı girişi (PKCE, Bearer token). Iç servis: /bff/web/… (kanal: web).',
-  mobile: 'Kullanıcı girişi (PKCE + ES256 DPoP). Iç servis: /bff/mobile/… (kanal: mobile).',
+  mobile: 'Kullanıcı girişi (PKCE). Iç servis: /bff/mobile/… (kanal: mobile).',
   partner: 'Client credentials + mTLS partner sertifikası. Iç servis: /partner/… (kanal: partner).',
   branch: 'Çalışan (veznedar) girişi: cihaz sertifikası + PKCE. Iç servis: /bff/branch/… (kanal: branch).',
   public: 'Token gerektirmeyen yollar. Oturum yok; yalnız GET ve default-deny kontrolleri.'

@@ -10,7 +10,7 @@ Ortam değişkenleri:
   OTLP_ENDPOINT  örn. http://172.18.0.12:30318  (boşsa dışa aktarım kapalı; span üretimi yine çalışır)
   SERVICE_NAME   servis adı (Jaeger'da görünür)
 
-Güvenlik: span özniteliklerine token, parola, Authorization veya DPoP değeri YAZILMAZ. Kullanıcı yalnız hash'lenmiş
+Güvenlik: span özniteliklerine token, parola veya Authorization değeri YAZILMAZ. Kullanıcı yalnız hash'lenmiş
 kimlik olarak eklenir (user.hash). Bu, lab sınırıdır; prod'da örnekleme ve veri sınıflandırma politikası gerekir.
 """
 import hashlib

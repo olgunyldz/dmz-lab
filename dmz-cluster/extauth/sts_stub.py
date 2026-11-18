@@ -25,7 +25,7 @@ CLIENT_CHANNEL = {
 }
 AUTH_METHOD = {
     "web": "pwd_otp",
-    "mobile": "dpop_device",
+    "mobile": "device",
     "partner": "mtls_partner",
 }
 TTL = 300

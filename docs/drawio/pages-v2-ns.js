@@ -15,7 +15,7 @@ function v2NorthSouth() {
 
   p.text(20, 12, 1300, 34, "DMZ Lab V2: kuzey-güney mimari (dış → iç katmanlar)",
     "text;html=1;fontStyle=1;fontSize=18;align=left;verticalAlign=middle;fontColor=#0F172A;");
-  p.text(20, 40, 1300, 22,
+  p.text(20, 46, 1300, 22,
     "Yukarıdan aşağıya: dış trafik (kuzey) → edge → DMZ → iç → identity → mgmt. Numaralar oklarda; açıklamalar sağda.",
     "text;html=1;fontSize=11;align=left;verticalAlign=middle;fontColor=#64748B;");
 
@@ -29,7 +29,7 @@ function v2NorthSouth() {
 
   // --- Dış istemciler ---
   p.node("c_web", 40, 110, 200, 56, "Web tarayıcı · PKCE · Bearer", "client");
-  p.node("c_mob", 260, 110, 200, 56, "Mobil uygulama · Seal SDK · PKCE + DPoP", "client");
+  p.node("c_mob", 260, 110, 200, 56, "Mobil uygulama · Seal SDK · PKCE", "client");
   p.node("c_dev", 480, 110, 200, 56, "Cihaz istemcisi · cihaz mTLS", "client");
   p.node("c_par", 700, 110, 200, 56, "Partner · mTLS + client credentials", "client");
   p.node("c_br", 920, 110, 200, 56, "Şube UI (branch-ui) · WAN · F10", "branch");
@@ -44,8 +44,8 @@ function v2NorthSouth() {
   p.node("gw_par", 440, 340, 180, 56, "gw-partner · mTLS (partner-ca)", "dmz");
   p.node("gw_br", 640, 340, 180, 56, "gw-branch · mTLS cihaz · F10", "dmz");
   p.node("gw_seal", 840, 340, 180, 56, "gw-seal · TLS passthrough", "dmz");
-  p.node("ext", 40, 412, 380, 36, "ext-authz: RS256 · DPoP · kısıt · exchange", "dmz");
-  p.node("sm", 440, 412, 580, 36, "seal-mobile: cihaz mTLS · IdP token + DPoP · PIN / cihaz imzası", "dmz");
+  p.node("ext", 40, 412, 380, 36, "ext-authz: RS256 · kısıt · exchange", "dmz");
+  p.node("sm", 440, 412, 580, 36, "seal-mobile: cihaz mTLS · IdP token · PIN / cihaz imzası", "dmz");
 
   // --- İç ---
   p.node("gwi", 40, 510, 380, 60, "gw-internal · mTLS (DMZ kimliği) · iç JWT · /internal/auth · /seal-pm", "internal");
@@ -53,7 +53,7 @@ function v2NorthSouth() {
   p.node("core", 740, 510, 280, 60, "core (app-core) · hesap · işlem · transfer", "internal");
 
   // --- Identity ---
-  p.node("idp", 40, 650, 420, 80, "spring-idp · parola · token · PKCE/DPoP · exchange · OTP · aktivasyon · throttling · kısıtlı token", "identity");
+  p.node("idp", 40, 650, 420, 80, "spring-idp · parola · token · PKCE · exchange · OTP · aktivasyon · throttling · kısıtlı token", "identity");
   p.node("pg", 500, 650, 160, 80, "postgres-idp · PVC", "identity");
   p.node("si", 700, 650, 200, 80, "seal-intranet [mock] · IdP çağırır (HTTPS)", "identity");
   p.node("pm", 940, 650, 240, 80, "password-manager [mock] · yalnız PIN doğrulayıcı", "identity");

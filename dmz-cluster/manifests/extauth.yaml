@@ -14,7 +14,7 @@ metadata:
   name: ext-authz
   namespace: auth
 spec:
-  replicas: 1   # lab: DPoP jti cache süreç içi; üretimde paylaşılan store ile çoklu replika
+  replicas: 1   # lab: süreç içi durum yok; çoklu replika için ek bir gereksinim yok
   selector:
     matchLabels: { app: ext-authz }
   template:
@@ -190,7 +190,7 @@ metadata:
 spec:
   extAuth:
     failOpen: false
-    headersToForward: ["authorization", "dpop", "host", "traceparent", "x-request-id"]
+    headersToForward: ["authorization", "host", "traceparent", "x-request-id"]
     httpService:
       backendRef:
         name: ext-authz
@@ -224,7 +224,7 @@ metadata:
 spec:
   extAuth:
     failOpen: false
-    headersToForward: ["authorization", "dpop", "host", "traceparent", "x-request-id"]
+    headersToForward: ["authorization", "host", "traceparent", "x-request-id"]
     httpService:
       backendRef:
         name: ext-authz
@@ -258,7 +258,7 @@ metadata:
 spec:
   extAuth:
     failOpen: false
-    headersToForward: ["authorization", "dpop", "host", "traceparent", "x-request-id"]
+    headersToForward: ["authorization", "host", "traceparent", "x-request-id"]
     httpService:
       backendRef:
         name: ext-authz
@@ -284,7 +284,7 @@ spec:
     extensionRef:
       name: extauth-partner
 ---
-# Şube (branch) çalışan kanalı: bearer token, DPoP yok. Sertifika kanalı belirler (X-Dmz-Channel: branch).
+# Şube (branch) çalışan kanalı: bearer token. Sertifika kanalı belirler (X-Dmz-Channel: branch).
 apiVersion: gateway.networking.k8s.io/v1beta1
 kind: ReferenceGrant
 metadata:
@@ -308,7 +308,7 @@ metadata:
 spec:
   extAuth:
     failOpen: false
-    headersToForward: ["authorization", "dpop", "host", "traceparent", "x-request-id"]
+    headersToForward: ["authorization", "host", "traceparent", "x-request-id"]
     httpService:
       backendRef:
         name: ext-authz
