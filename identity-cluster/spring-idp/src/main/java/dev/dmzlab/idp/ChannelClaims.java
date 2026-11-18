@@ -30,6 +30,8 @@ final class ChannelClaims {
             case "mobile-app" -> new ChannelClaims("mobile", "channel-mobile", null, null);
             case "branch-app" -> new ChannelClaims("branch", "channel-branch", null, null);
             case "partner-acme" -> new ChannelClaims("partner", "channel-partner", null, "acme-001");
+            // Seal Intranet B2B istemcisi: token aud = seal-intranet (servis audience'ini zorunlu kılar)
+            case "seal-b2b" -> new ChannelClaims("b2b", "seal-intranet", null, null);
             case "dmz-exchange-web" -> new ChannelClaims("web", null, "pwd_otp", null);
             case "dmz-exchange-mobile" -> new ChannelClaims("mobile", null, "dpop_device", null);
             case "dmz-exchange-partner" -> new ChannelClaims("partner", null, "mtls_partner", null);
@@ -44,7 +46,9 @@ final class ChannelClaims {
     void apply(JwtClaimsSet.Builder claims, boolean setAudience) {
         claims.claim("channel", channel);
         if (setAudience && audience != null) {
-            claims.audience(List.of(audience));
+            // Değiştirilebilir liste: JDBC yetkilendirme deposu (Jackson 3 PolymorphicTypeValidator) List.of'u
+            // (ImmutableCollections$List12) okurken reddediyor; bu da token'ı kayıttan okuyan her işlemi bozar.
+            claims.audience(new java.util.ArrayList<>(List.of(audience)));
         }
         if (authMethod != null) {
             claims.claim("auth_method", authMethod);

@@ -118,10 +118,9 @@ PKCE_BASE=https://id.bank.lab.local
 # IdP TLS: sunucu sertifikası lab CA ile imzalı; yayın host'u port-forward'a yönlendirilir (schannel iptal kontrolü kapalı)
 PKCE_CURL_ARGS="${CURL[*]:1} --cacert $CERTS/internal-ca.crt --connect-to id.bank.lab.local:443:127.0.0.1:$IDP_PORT"
 WEB_TOKEN=$(pkce_token web-app https://web.lab.local:8443/callback alice "$(secret alice-password)" "$(secret web-app)" "")
-MOBILE_TOKEN=$(pkce_token mobile-app com.bank.app:/callback alice "$(secret alice-password)" "" \
-    "$(dpop_proof POST "$ISSUER_BASE")")
 PARTNER_TOKEN=$(token_from partner-acme "$(secret partner-acme)" "")
-echo "token'lar alındı: web=${#WEB_TOKEN} mobile=${#MOBILE_TOKEN} partner=${#PARTNER_TOKEN}"
+echo "token'lar alındı: web=${#WEB_TOKEN} partner=${#PARTNER_TOKEN}"
+# Tek aktif giriş: alice'in mobil girişi web oturumunu düşürür. Bu yüzden mobil token web bölümünden SONRA alınır.
 
 # 1) Token yok -> 401 (iç route'ta)
 check "web /bff: token yok -> 401" "HTTP_CODE=401" "$(web_get "" /bff/accounts)"
@@ -133,6 +132,10 @@ check "web /bff: upstream channel=web" "channel=web" "$body"
 check "web /bff: upstream auth_method=pwd_otp" "auth_method=pwd_otp" "$body"
 absent "web /bff: yanıtta iç token yok (Bearer)" "Bearer" "$body"
 absent "web /bff: yanıtta JWT yok" "eyJ" "$body"
+
+# Mobil giriş (yeni oturum; web oturumu bu noktadan sonra geçersizdir)
+MOBILE_TOKEN=$(pkce_token mobile-app com.bank.app:/callback alice "$(secret alice-password)" "" \
+    "$(dpop_proof POST "$ISSUER_BASE")")
 
 # 3) Mobil token web gateway'de -> 403 (kanal/audience uyuşmazlığı)
 check "web /bff: mobil token -> 403" "HTTP_CODE=403" "$(web_get "$MOBILE_TOKEN" /bff/accounts)"
@@ -169,6 +172,9 @@ check "mobile /bff: proof tekrarı (replay) -> 401" "replayed proof" "$body"
 old=$(make_proof "$DPOP_KEY" GET "$MOBILE_HTU" "$MOBILE_TOKEN" "lab-old-$(openssl rand -hex 4)" "$(( $(date +%s) - 900 ))")
 body=$(mobile_get "$MOBILE_TOKEN" /bff/accounts "$old")
 check "mobile /bff: eski iat -> 401" "stale or future iat" "$body"
+
+# Web girişi yeniden (mobil oturum düşer); aşağıdaki web testleri geçerli web token'ı kullanır
+WEB_TOKEN=$(pkce_token web-app https://web.lab.local:8443/callback alice "$(secret alice-password)" "$(secret web-app)" "")
 
 # 5) Bozulmuş payload -> 401
 tampered="$(echo "$WEB_TOKEN" | cut -d. -f1).$(echo '{"iss":"https://id.bank.lab.local/realms/bank","aud":"channel-web","channel":"web","exp":9999999999}' | b64u).$(echo "$WEB_TOKEN" | cut -d. -f3)"

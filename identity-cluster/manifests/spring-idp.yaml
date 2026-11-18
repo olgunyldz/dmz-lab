@@ -94,8 +94,13 @@ spec:
             - name: IDP_DB_PASSWORD
               valueFrom:
                 secretKeyRef: {name: idp-secrets, key: IDP_DB_PASSWORD}
+            - name: IDP_INTERNAL_CALLERS
+              value: gw-internal
             - name: IDP_OTLP_ENDPOINT
               value: http://__MGMT_NODE_IP__:30318/v1/traces
+            - name: IDP_INTERNAL_API_KEY
+              valueFrom:
+                secretKeyRef: {name: idp-secrets, key: IDP_INTERNAL_API_KEY}
             - name: IDP_SIGNING_KEYSTORE
               value: /signing/signing.p12
             - name: IDP_SIGNING_KEYSTORE_PASSWORD
@@ -129,6 +134,12 @@ spec:
             - name: CORE_SVC_SECRET
               valueFrom:
                 secretKeyRef: {name: idp-secrets, key: CORE_SVC_SECRET}
+            - name: SEAL_B2B_SECRET
+              valueFrom:
+                secretKeyRef: {name: idp-secrets, key: SEAL_B2B_SECRET}
+            - name: SEAL_MOBILE_SECRET
+              valueFrom:
+                secretKeyRef: {name: idp-secrets, key: SEAL_MOBILE_SECRET}
           ports:
             - containerPort: 8443
             - containerPort: 8080

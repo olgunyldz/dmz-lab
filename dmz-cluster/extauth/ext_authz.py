@@ -345,6 +345,10 @@ class Handler(BaseHTTPRequestHandler):
             token = auth[len("Bearer "):]
             claims = verify_rs256(token)
             check_claims(claims, channel)
+            # Kısıtlı oturum (yeni cihaz, OTP geçildi, aktivasyon bekliyor): iş API'lerine girmez.
+            # Aktivasyon uçları seal-mobile'da (ext-authz dışında) çalışır.
+            if claims.get("restricted") or claims.get("scope") == "activation":
+                raise Denied(403, "kısıtlı oturum: aktivasyon gerekli")
             span.set("user.hash", tracing.user_hash(claims.get("sub")))
 
             jkt = (claims.get("cnf") or {}).get("jkt")

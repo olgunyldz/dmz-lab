@@ -30,7 +30,7 @@ OUT_EDGE=$("${CURL[@]}" -s -o /dev/null -w '%{http_code}' --max-time 10 \
 check "edge HAProxy -> DMZ gateway (NodePort 30446) açık" "401" "$OUT_EDGE"
 
 # 2) Yabancı container (kind ağı, edge değil): her NodePort reddedilir
-for port in 30446 30447 30448 30449; do
+for port in 30446 30447 30448 30449 30452; do
     OUT=$(MSYS_NO_PATHCONV=1 docker run --rm --network kind --entrypoint curl curlimages/curl:8.11.1 \
         -s -o /dev/null -w '%{http_code}' --max-time 5 "http://$DMZ_NODE_IP:$port/" 2>/dev/null; true)
     check "yabancı kaynak -> DMZ NodePort $port reddedilir" "000" "$OUT"

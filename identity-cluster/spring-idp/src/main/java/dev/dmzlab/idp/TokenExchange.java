@@ -19,6 +19,8 @@ import org.springframework.security.oauth2.jwt.JwtEncoder;
 import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
 import org.springframework.security.oauth2.jwt.JwtException;
 import org.springframework.security.oauth2.jwt.JwsHeader;
+import org.springframework.security.oauth2.server.authorization.OAuth2AuthorizationService;
+import org.springframework.security.oauth2.server.authorization.OAuth2TokenType;
 import org.springframework.security.oauth2.server.authorization.authentication.OAuth2AccessTokenAuthenticationToken;
 import org.springframework.security.oauth2.server.authorization.authentication.OAuth2ClientAuthenticationToken;
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClient;
@@ -60,8 +62,9 @@ public final class TokenExchange {
                 new org.springframework.security.oauth2.server.authorization.web.authentication.OAuth2ClientCredentialsAuthenticationConverter()));
     }
 
-    public static AuthenticationProvider provider(JwtDecoder subjectDecoder, JwtEncoder encoder, String issuer) {
-        return new Provider(subjectDecoder, encoder, issuer);
+    public static AuthenticationProvider provider(JwtDecoder subjectDecoder, JwtEncoder encoder, String issuer,
+                                                  OAuth2AuthorizationService authorizations) {
+        return new Provider(subjectDecoder, encoder, issuer, authorizations);
     }
 
     static final class Request extends AbstractAuthenticationToken {
@@ -122,11 +125,13 @@ public final class TokenExchange {
         private final JwtDecoder subjectDecoder;
         private final JwtEncoder encoder;
         private final String issuer;
+        private final OAuth2AuthorizationService authorizations;
 
-        Provider(JwtDecoder subjectDecoder, JwtEncoder encoder, String issuer) {
+        Provider(JwtDecoder subjectDecoder, JwtEncoder encoder, String issuer, OAuth2AuthorizationService authorizations) {
             this.subjectDecoder = subjectDecoder;
             this.encoder = encoder;
             this.issuer = issuer;
+            this.authorizations = authorizations;
         }
 
         @Override
@@ -144,6 +149,10 @@ public final class TokenExchange {
                 subject = subjectDecoder.decode(request.subjectToken);
             } catch (JwtException e) {
                 throw error(OAuth2ErrorCodes.INVALID_GRANT, "subject_token geçersiz");
+            }
+            // İmza geçerli olsa bile oturum sonlanmış olabilir (tek aktif giriş: yeni giriş eskisini düşürür)
+            if (authorizations.findByToken(request.subjectToken, OAuth2TokenType.ACCESS_TOKEN) == null) {
+                throw error(OAuth2ErrorCodes.INVALID_GRANT, "subject_token iptal edilmiş veya oturum sonlanmış");
             }
 
             String audience = request.audience != null && !request.audience.isBlank()

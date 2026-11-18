@@ -19,7 +19,7 @@ CA_DIR="$REPO/edge/certs"
 TLS_DIR="$CA_DIR/idp"
 VAULT_PATH="secret/identity/idp"
 KEYS=(IDP_DB_PASSWORD ALICE_PASSWORD TELLER_PASSWORD WEB_APP_SECRET PARTNER_ACME_SECRET BFF_SECRET CORE_SVC_SECRET \
-      IDP_TLS_KEYSTORE_PASSWORD IDP_TLS_TRUSTSTORE_PASSWORD IDP_SIGNING_KEYSTORE_PASSWORD)
+      IDP_TLS_KEYSTORE_PASSWORD IDP_TLS_TRUSTSTORE_PASSWORD IDP_SIGNING_KEYSTORE_PASSWORD IDP_INTERNAL_API_KEY SEAL_B2B_SECRET SEAL_MOBILE_SECRET)
 
 # Vault'a erişim (mgmt cluster, root token vault-bootstrap'ten; KV v2 secret/ load-vault.sh ile hazır)
 # Vault hiç başlatılmadıysa (vault-bootstrap yok) önce load-vault.sh çalıştırılır: init, unseal, KV v2.
@@ -42,6 +42,12 @@ if vault_exec vault kv get -format=json "$VAULT_PATH" >/dev/null 2>&1; then
     for k in "${KEYS[@]}"; do
         VAL[$k]=$(echo "$json" | python3 -c 'import sys,json; print(json.load(sys.stdin)["data"]["data"].get(sys.argv[1],""))' "$k")
     done
+    # Yeni eklenen anahtarlar (ör. IDP_INTERNAL_API_KEY) Vault'ta yoksa üretilip eklenir
+    missing=()
+    for k in "${KEYS[@]}"; do
+        if [[ -z "${VAL[$k]}" ]]; then VAL[$k]=$(openssl rand -hex 16); missing+=("$k=${VAL[$k]}"); fi
+    done
+    if (( ${#missing[@]} )); then vault_exec vault kv patch "$VAULT_PATH" "${missing[@]}" >/dev/null; fi
     echo "sırlar Vault'tan okundu ($VAULT_PATH)"
 else
     # İlk geçiş: mevcut Kubernetes değerleri (varsa) Vault'a kopyalanır; yoksa rastgele üretilir

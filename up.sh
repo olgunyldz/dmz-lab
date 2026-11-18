@@ -85,6 +85,9 @@ preflight() {
         branch-cluster/kind-config.yaml branch-cluster/manifests/branch-ui.yaml
         branch-cluster/scripts/up.sh branch/server.py branch/probe.py branch/index.html
         shared/tracing.py shared/metrics.py
+        identity-cluster/scripts/load-password-manager.sh identity-cluster/scripts/load-seal-intranet.sh
+        identity-cluster/scripts/load-device-trust.sh
+        internal-cluster/scripts/load-idp-internal.sh dmz-cluster/scripts/load-seal-mobile.sh
     )
     local missing=0
     for f in "${required[@]}"; do
@@ -187,10 +190,16 @@ docker compose -f "$ROOT/edge/docker-compose.yml" up -d
 # 3) identity: cluster, Spring IdP, PostgreSQL, F8
 step "3/5 identity cluster (Spring IdP, PostgreSQL, F8)"
 bash "$ROOT/identity-cluster/scripts/up.sh"
+# Mobil kimlik bileşenleri identity'de: Password Manager (PIN), Seal Intranet (vendor mock), cihaz güven servisi
+bash "$ROOT/identity-cluster/scripts/load-password-manager.sh"
+bash "$ROOT/identity-cluster/scripts/load-seal-intranet.sh"
+bash "$ROOT/identity-cluster/scripts/load-device-trust.sh"
 
 # 4) internal
 step "4/5 internal cluster (gw-internal, BFF, core)"
 bash "$ROOT/internal-cluster/scripts/up.sh"
+# gw-internal -> IdP iç API (/internal/auth/*) ve Password Manager (/seal-pm/) yolları
+bash "$ROOT/internal-cluster/scripts/load-idp-internal.sh"
 
 # 5) DMZ
 step "5/5 DMZ cluster (gateway'ler, F1, iç backend, ext-authz, şube)"
@@ -199,6 +208,8 @@ bash "$ROOT/dmz-cluster/scripts/load-internal-backend.sh"
 # load-branch.sh önce: gw-branch namespace'ini oluşturur; load-extauth.sh onun içindeki kaynakları ister
 bash "$ROOT/dmz-cluster/scripts/load-branch.sh"
 bash "$ROOT/dmz-cluster/scripts/load-extauth.sh"
+# Seal Mobile: cihaz yüzü (passthrough gw-seal, SNI seal.lab.local); IdP iç API'sine gw-internal üzerinden gider
+bash "$ROOT/dmz-cluster/scripts/load-seal-mobile.sh"
 
 # Edge (HAProxy) DMZ node IP'lerini bilir: yapılandırma DMZ kurulduktan sonra üretilir
 bash "$ROOT/edge/scripts/render-haproxy.sh"
@@ -212,6 +223,9 @@ bash "$ROOT/mgmt-cluster/scripts/load-observability.sh"
 
 # Yönetim araçları host'tan doğrudan (HAProxy yok): Grafana 3000, Prometheus 9090, Vault 8200
 bash "$ROOT/mgmt-cluster/scripts/tools-forward.sh" start || true
+
+# IP'ye bağlı yapılandırmayı güncel node IP'leriyle yeniden uygula (yeniden kullanılan kümelerde de şart)
+bash "$ROOT/scripts/reconcile-ips.sh"
 
 echo
 echo "=================== TAMAM ==================="

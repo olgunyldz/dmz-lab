@@ -113,7 +113,8 @@ def b64u_dec(s):
 
 # Test adı -> Spring IdP secret anahtarı (idp/idp-secrets). branch-app istemcisi WEB_APP_SECRET ile kayıtlı.
 IDP_SECRET_KEYS = {"web-app": "WEB_APP_SECRET", "partner-acme": "PARTNER_ACME_SECRET", "branch-app": "WEB_APP_SECRET",
-                   "alice-password": "ALICE_PASSWORD", "teller-password": "TELLER_PASSWORD"}
+                   "alice-password": "ALICE_PASSWORD", "teller-password": "TELLER_PASSWORD",
+                   "idp-internal-key": "IDP_INTERNAL_API_KEY"}
 
 
 def load_secrets():
@@ -337,6 +338,49 @@ def identity_req_fn(method, path, headers=None, body=None):
     return identity_req(method, path, headers, body)
 
 
+# ---------------------------------------------------------------------------
+# Demo kayıt (OTP gibi, SMS YOK). Kod yalnızca bu konsolda gösterilir; lab içi demo.
+# ---------------------------------------------------------------------------
+REG_PENDING = {}          # kullanıcı adı -> {code, password, exp, tries}
+REG_LOCK = threading.Lock()
+REG_TTL = 300             # saniye
+REG_MAX_TRIES = 5
+USERNAME_RE = re.compile(r"^[a-z][a-z0-9_]{2,31}$")
+
+
+def register_start(username, password):
+    if not USERNAME_RE.match(username or ""):
+        raise ValueError("kullanıcı adı: küçük harfle başlar, 3-32 karakter (a-z, 0-9, _)")
+    if not (8 <= len(password or "") <= 128):
+        raise ValueError("parola en az 8 karakter olmalı")
+    code = f"{secrets.randbelow(1000000):06d}"
+    with REG_LOCK:
+        REG_PENDING[username] = {"code": code, "password": password, "exp": time.time() + REG_TTL, "tries": 0}
+    return code
+
+
+def register_verify(username, code):
+    with REG_LOCK:
+        pend = REG_PENDING.get(username)
+        if not pend or time.time() > pend["exp"]:
+            REG_PENDING.pop(username, None)
+            raise ValueError("kod yok veya süresi doldu; yeniden kod üretin")
+        if pend["tries"] >= REG_MAX_TRIES:
+            REG_PENDING.pop(username, None)
+            raise ValueError("çok fazla hatalı deneme; yeniden kod üretin")
+        if not secrets.compare_digest(pend["code"], code or ""):
+            pend["tries"] += 1
+            raise ValueError("kod hatalı")
+        REG_PENDING.pop(username)
+    body = json.dumps({"username": username, "password": pend["password"]})
+    st, _, data = identity_req("POST", "/internal/users",
+                               {"Content-Type": "application/json", "X-Internal-Key": SECRETS.get("idp-internal-key", "")},
+                               body)
+    if st != 201:
+        raise RuntimeError(f"IdP kayıt hatası (HTTP {st}): {data[:120]}")
+    return username
+
+
 def do_logout(sess, ch):
     cfg = CHANNELS[ch]
     entry = sess["channels"].get(ch)
@@ -525,6 +569,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 finally:
                     span.end()
                 return self._json(200, {"ok": True, "token": info}, sid, new)
+            if self.path == "/api/register/start":
+                try:
+                    code = register_start((req.get("username") or "").strip().lower(), req.get("password") or "")
+                except ValueError as e:
+                    return self._json(400, {"error": str(e)}, sid, new)
+                return self._json(200, {"ok": True, "demo_otp": code,
+                                        "note": "DEMO: SMS gönderilmez; kod yalnızca bu ekranda gösterilir"}, sid, new)
+            if self.path == "/api/register/verify":
+                try:
+                    user = register_verify((req.get("username") or "").strip().lower(), (req.get("code") or "").strip())
+                except ValueError as e:
+                    return self._json(400, {"error": str(e)}, sid, new)
+                except RuntimeError as e:
+                    return self._json(502, {"error": str(e)}, sid, new)
+                return self._json(200, {"ok": True, "username": user}, sid, new)
             if self.path == "/api/logout":
                 ch = req.get("channel")
                 if not sess["channels"].get(ch):

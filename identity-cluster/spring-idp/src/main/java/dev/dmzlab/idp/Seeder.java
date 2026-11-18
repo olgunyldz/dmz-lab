@@ -40,6 +40,8 @@ class Seeder implements ApplicationRunner {
     private final String partnerSecret;
     private final String bffSecret;
     private final String coreSecret;
+    private final String sealB2bSecret;
+    private final String sealMobileSecret;
 
     Seeder(RegisteredClientRepository clients, UserDetailsManager users, PasswordEncoder encoder,
            @Value("${idp.users.alice.password}") String alicePassword,
@@ -47,7 +49,9 @@ class Seeder implements ApplicationRunner {
            @Value("${idp.clients.web-app.secret}") String webAppSecret,
            @Value("${idp.clients.partner-acme.secret}") String partnerSecret,
            @Value("${idp.clients.bff.secret}") String bffSecret,
-           @Value("${idp.clients.core-svc.secret}") String coreSecret) {
+           @Value("${idp.clients.core-svc.secret}") String coreSecret,
+           @Value("${idp.clients.seal-b2b.secret}") String sealB2bSecret,
+           @Value("${idp.clients.seal-mobile.secret}") String sealMobileSecret) {
         this.clients = clients;
         this.users = users;
         this.encoder = encoder;
@@ -57,6 +61,8 @@ class Seeder implements ApplicationRunner {
         this.partnerSecret = partnerSecret;
         this.bffSecret = bffSecret;
         this.coreSecret = coreSecret;
+        this.sealB2bSecret = sealB2bSecret;
+        this.sealMobileSecret = sealMobileSecret;
     }
 
     @Override
@@ -129,6 +135,9 @@ class Seeder implements ApplicationRunner {
                 serviceClient("partner-acme", partnerSecret),
                 serviceClient("bff", bffSecret),
                 serviceClient("core-svc", coreSecret),
+                serviceClient("seal-b2b", sealB2bSecret),
+                // Seal Mobile: yalnız introspection için (token'ın oturumu hâlâ aktif mi). Parola/giriş yetkisi yok.
+                serviceClient("seal-mobile", sealMobileSecret),
                 exchangeClient("web"),
                 exchangeClient("mobile"),
                 exchangeClient("partner"),

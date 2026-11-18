@@ -12,6 +12,7 @@ import org.springframework.security.config.annotation.web.configuration.EnableWe
 import org.springframework.security.config.annotation.web.configurers.oauth2.server.authorization.OAuth2AuthorizationServerConfigurer;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.JwtEncoder;
+import org.springframework.security.oauth2.server.authorization.OAuth2AuthorizationService;
 import org.springframework.security.oauth2.server.authorization.settings.AuthorizationServerSettings;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.LoginUrlAuthenticationEntryPoint;
@@ -28,6 +29,7 @@ public class SecurityConfig {
     @Order(1)
     SecurityFilterChain authorizationServerChain(HttpSecurity http,
                                                  JwtDecoder subjectTokenDecoder,
+                                                 OAuth2AuthorizationService authorizationService,
                                                  JwtEncoder jwtEncoder,
                                                  @Value("${idp.issuer}") String issuer,
                                                  @Value("${idp.internal-port}") int internalPort,
@@ -49,7 +51,8 @@ public class SecurityConfig {
                         })))
                         .tokenEndpoint(token -> token
                                 .accessTokenRequestConverter(TokenExchange.delegating(TokenExchange.converter()))
-                                .authenticationProvider(TokenExchange.provider(subjectTokenDecoder, jwtEncoder, issuer))))
+                                .authenticationProvider(TokenExchange.provider(subjectTokenDecoder, jwtEncoder, issuer,
+                                        authorizationService))))
                 .authorizeHttpRequests(auth -> auth.anyRequest().authenticated())
                 // Girişe yönlendirme: (a) yetkilendirme uç noktası (her istemci, Accept'ten bağımsız) veya
                 // (b) açıkça text/html isteyen tarayıcılar. Token uç noktası kimliksiz istekte JSON hata (401/invalid_client).
@@ -72,7 +75,10 @@ public class SecurityConfig {
     @Bean
     @Order(2)
     SecurityFilterChain defaultChain(HttpSecurity http) throws Exception {
-        http.authorizeHttpRequests(auth -> auth.anyRequest().authenticated())
+        // /internal/users: kimlik doğrulama InternalUserController'da (iç port + X-Internal-Key); CSRF bu yol için kapalı
+        http.csrf(csrf -> csrf.ignoringRequestMatchers("/internal/users", "/internal/auth/**"))
+                .authorizeHttpRequests(auth -> auth.requestMatchers("/internal/users", "/internal/auth/**").permitAll()
+                        .anyRequest().authenticated())
                 .formLogin(Customizer.withDefaults());
         return http.build();
     }

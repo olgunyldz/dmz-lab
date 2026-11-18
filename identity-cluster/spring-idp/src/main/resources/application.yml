@@ -38,7 +38,17 @@ server:
     trust-store-type: PKCS12
 
 idp:
+  # Mobil kimlik süreçleri (IdP içinde): Seal Intranet (küme içi HTTPS, iç CA)
+  seal:
+    url: ${IDP_SEAL_URL:https://seal-intranet.seal-intranet.svc:8443}
+  # İç API (/internal/auth/*) çağıranları: istemci sertifikası CN allowlist'i
+  internal:
+    allowed-clients: ${IDP_INTERNAL_CALLERS:gw-internal}
+  auth:
+    demo-otp: ${IDP_DEMO_OTP:true}
   issuer: ${IDP_ISSUER:http://localhost:8443/realms/bank}
+  # İç kullanıcı oluşturma (demo kayıt) anahtarı; boşsa uç nokta kapalı
+  internal-api-key: ${IDP_INTERNAL_API_KEY:}
   # Token imzalama anahtarı: PKCS12 keystore (kalıcı; yeniden başlatmada aynı anahtar). Üretim: load-spring-idp.sh.
   signing:
     keystore: ${IDP_SIGNING_KEYSTORE}
@@ -64,3 +74,7 @@ idp:
       secret: ${BFF_SECRET}
     core-svc:
       secret: ${CORE_SVC_SECRET}
+    seal-b2b:
+      secret: ${SEAL_B2B_SECRET}
+    seal-mobile:
+      secret: ${SEAL_MOBILE_SECRET}

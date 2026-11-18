@@ -1,0 +1,62 @@
+# Cihaz güven servisi (identity cluster, namespace: devtrust). DMZ'den L4 passthrough ile gelen mTLS burada doğrulanır.
+# Secret'lar load-device-trust.sh ile edge/certs/device'dan üretilir (repoda sertifika yok).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: devtrust
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: device-trust
+  namespace: devtrust
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: device-trust}
+  template:
+    metadata:
+      labels: {app: device-trust}
+    spec:
+      containers:
+        - name: device-trust
+          image: dmz-lab/device-trust:0.1.0
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: DT_PORT
+              value: "8443"
+            - name: DT_CERT
+              value: /certs/server/device-trust.crt
+            - name: DT_KEY
+              value: /certs/server/device-trust.key
+            - name: DT_DEVICE_CA
+              value: /certs/ca/device-ca.crt
+          ports:
+            - containerPort: 8443
+          volumeMounts:
+            - name: server
+              mountPath: /certs/server
+              readOnly: true
+            - name: ca
+              mountPath: /certs/ca
+              readOnly: true
+      volumes:
+        - name: server
+          secret:
+            secretName: devtrust-tls
+        - name: ca
+          secret:
+            secretName: devtrust-device-ca
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: device-trust
+  namespace: devtrust
+spec:
+  type: NodePort
+  selector: {app: device-trust}
+  ports:
+    - port: 8443
+      targetPort: 8443
+      nodePort: 30445

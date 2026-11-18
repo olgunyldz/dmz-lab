@@ -70,6 +70,8 @@ public class IdpConfig {
                 .tokenEndpoint(REALM_PATH + "/protocol/openid-connect/token")
                 .jwkSetEndpoint(REALM_PATH + "/protocol/openid-connect/certs")
                 .tokenRevocationEndpoint(REALM_PATH + "/protocol/openid-connect/revoke")
+                // Introspection: diğer servisler (seal-mobile) token'ın hâlâ aktif olup olmadığını buradan öğrenir
+                .tokenIntrospectionEndpoint(REALM_PATH + "/protocol/openid-connect/token/introspect")
                 .build();
     }
 
@@ -121,9 +123,10 @@ public class IdpConfig {
         return new JdbcRegisteredClientRepository(jdbc);
     }
 
+    /** Kullanıcı başına tek aktif giriş (bkz. {@link SingleLoginAuthorizationService}). */
     @Bean
     OAuth2AuthorizationService authorizationService(JdbcOperations jdbc, RegisteredClientRepository clients) {
-        return new JdbcOAuth2AuthorizationService(jdbc, clients);
+        return new SingleLoginAuthorizationService(new JdbcOAuth2AuthorizationService(jdbc, clients), jdbc);
     }
 
     @Bean
@@ -210,13 +213,20 @@ public class IdpConfig {
      * Yalnız erişim token'ına uygulanır. Exchange token'ları kendi üretiminde aynı kuralı kullanır (TokenExchange).
      */
     @Bean
-    OAuth2TokenCustomizer<JwtEncodingContext> channelClaimsCustomizer() {
+    OAuth2TokenCustomizer<JwtEncodingContext> channelClaimsCustomizer(
+            dev.dmzlab.idp.auth.AuthStateRepository authState) {
         return context -> {
             if (!OAuth2TokenType.ACCESS_TOKEN.equals(context.getTokenType())) {
                 return;
             }
             ChannelClaims.forClient(context.getRegisteredClient().getClientId())
                     .ifPresent(profile -> profile.apply(context.getClaims(), true));
+            // Aktivasyon bekleyen kullanıcı (yeni cihaz + OTP geçildi): token yalnız aktivasyon kapsamında (kısıtlı)
+            if (context.getAuthorizationGrantType() == AuthorizationGrantType.AUTHORIZATION_CODE
+                    && context.getPrincipal() != null
+                    && authState.isPending(context.getPrincipal().getName())) {
+                context.getClaims().claim("restricted", true).claim("scope", "activation");
+            }
         };
     }
 }

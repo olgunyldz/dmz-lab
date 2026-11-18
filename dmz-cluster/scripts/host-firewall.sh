@@ -11,7 +11,7 @@
 # Idempotent: her çalıştırmada zincirler sıfırlanır ve yeniden kurulur.
 set -euo pipefail
 
-EDGE_PORTS=(30446 30447 30448)                   # gw-web, gw-mobile, gw-partner
+EDGE_PORTS=(30446 30447 30448 30452 30456)      # gw-web, gw-mobile, gw-partner, gw-device, gw-seal (passthrough)
 BRANCH_PORT=30449                                # gw-branch (F10)
 CHAIN="F1-EDGE"
 BRANCH_CHAIN="F10-BRANCH"

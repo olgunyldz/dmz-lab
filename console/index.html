@@ -63,6 +63,22 @@
   </section>
 
   <section>
+    <h2>Mobil kayıt (demo OTP)</h2>
+    <div class="hint">Demo: SMS gönderilmez. Kod yalnızca bu ekranda gösterilir (lab içi). Kayıttan sonra aşağıdaki mobil kanaldan giriş yapın.</div>
+    <div class="row">
+      <input id="reg-u" placeholder="kullanıcı adı (ör. demo_ali)" size="14">
+      <input id="reg-p" type="password" placeholder="parola (en az 8)" size="18">
+      <button class="primary" id="reg-start">Kod üret</button>
+    </div>
+    <div class="row" id="otp-row" style="display:none">
+      <span class="state" id="otp-box"></span>
+      <input id="reg-code" placeholder="6 haneli kod" size="8" maxlength="6">
+      <button class="primary" id="reg-verify">Doğrula ve kaydet</button>
+    </div>
+    <div class="state" id="reg-state">durum: kayıt yok</div>
+  </section>
+
+  <section>
     <h2>Mobil kanal (PKCE + DPoP, ES256)</h2>
     <div class="state" id="st-mobile">durum: giriş yok</div>
     <div class="row">
@@ -226,6 +242,29 @@ async function runAction(btn) {
   }
 }
 
+async function regStart() {
+  const u = $('reg-u').value.trim().toLowerCase(), p = $('reg-p').value;
+  const res = await post('/api/register/start', { username: u, password: p });
+  if (!res.ok) { $('reg-state').textContent = 'hata: ' + res.data.error; return; }
+  $('otp-box').textContent = 'DEMO kodu: ' + res.data.demo_otp;
+  $('otp-row').style.display = '';
+  $('reg-state').textContent = 'kod üretildi (5 dk geçerli)';
+  addRow([now(), 'mobile', 'kayıt kodu üret', '-', '200', 'kod gösterildi', { cls: 'pass', text: 'PASS' }, u]);
+}
+async function regVerify() {
+  const u = $('reg-u').value.trim().toLowerCase(), code = $('reg-code').value.trim();
+  const res = await post('/api/register/verify', { username: u, code });
+  if (res.ok) {
+    $('reg-state').textContent = 'kayıt tamam: ' + res.data.username;
+    $('otp-row').style.display = 'none';
+    addRow([now(), 'mobile', 'kayıt doğrula', '-', '200', 'kullanıcı oluşturuldu', { cls: 'pass', text: 'PASS' }, res.data.username]);
+  } else {
+    $('reg-state').textContent = 'hata: ' + res.data.error;
+    addRow([now(), 'mobile', 'kayıt doğrula', '-', String(res.status), res.data.error, { cls: 'fail', text: 'FAIL' }, u]);
+  }
+}
+$('reg-start').addEventListener('click', regStart);
+$('reg-verify').addEventListener('click', regVerify);
 document.querySelectorAll('button[data-act]').forEach((b) => b.addEventListener('click', () => runAction(b)));
 refreshState();
 </script>

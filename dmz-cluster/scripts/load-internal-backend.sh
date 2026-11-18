@@ -19,6 +19,8 @@ for ns in gw-web gw-mobile gw-partner; do
 done
 
 render "$ROOT/manifests/internal-backend.yaml" | $K apply -f -
+# Cihaz güveni passthrough (gw-device, NodePort 30452 -> iç gw-device-int 30453); TLS açılmaz
+render "$ROOT/manifests/device-gateway.yaml" | $K apply -f -
 $K apply -f "$ROOT/manifests/channels.yaml"
 # Public ve login route'ları (/public, /realms -> iç gateway); bunlar olmadan sağlık kontrolü 404 alır
 $K apply -f "$ROOT/manifests/route-classes.yaml"
