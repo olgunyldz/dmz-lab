@@ -14,6 +14,7 @@ class Page {
     this.n = 2;
     this.prefix = `p${++PAGE_SEQ}_`;
     this.ids = {};
+    this.geo = {}; // anahtar -> {x,y,w,h} (ok etiketlerini konumlandırmak için)
     this.maxX = 0;
     this.maxY = 0;
   }
@@ -30,6 +31,7 @@ class Page {
     if (key) {
       if (this.ids[key]) throw new Error(`[${this.name}] tekrar eden anahtar: ${key}`);
       this.ids[key] = cid;
+      this.geo[key] = { x, y, w, h };
     }
     this._track(x, y, w, h);
     this.cells.push(
@@ -81,10 +83,43 @@ class Page {
   edge(src, tgt, label, kind = "request") {
     if (!this.ids[src]) throw new Error(`[${this.name}] ok kaynağı yok: ${src}`);
     if (!this.ids[tgt]) throw new Error(`[${this.name}] ok hedefi yok: ${tgt}`);
+    // Ok etiketsiz çizilir; metin ayrı bir kutuda, okun yanında (çizgiyi örtmez)
     this.cells.push(
-      `<mxCell id="${this._id()}" value="${br(label || "")}" style="${P.edgeStyle(kind)}" edge="1" parent="1" ` +
+      `<mxCell id="${this._id()}" value="" style="${P.edgeStyle(kind)}" edge="1" parent="1" ` +
       `source="${this.ids[src]}" target="${this.ids[tgt]}"><mxGeometry relative="1" as="geometry"/></mxCell>`
     );
+    if (label) this._edgeLabel(src, tgt, label);
+  }
+
+  // Ok ortasında küçük numaralı işaret (açıklama listesi sayfa altında)
+  edgeMarker(src, tgt, n) {
+    const a = this.geo[src];
+    const b = this.geo[tgt];
+    const mx = ((a.x + a.w / 2) + (b.x + b.w / 2)) / 2;
+    const my = ((a.y + a.h / 2) + (b.y + b.h / 2)) / 2;
+    this._vertex(null, mx - 8, my - 8, 16, 16, String(n),
+      "shape=ellipse;perimeter=ellipsePerimeter;whiteSpace=wrap;html=1;fontSize=8;fontStyle=1;" +
+      `fillColor=#FFFFFF;strokeColor=#334155;align=center;verticalAlign=middle;spacing=0;fontColor=${P.C.ink};`);
+  }
+
+  // Etiket: yatay ilişkide iki kutunun orta noktasının üstünde; dikey ilişkide sağ tarafında.
+  _edgeLabel(src, tgt, label) {
+    const a = this.geo[src];
+    const b = this.geo[tgt];
+    const ax = a.x + a.w / 2, ay = a.y + a.h / 2;
+    const bx = b.x + b.w / 2, by = b.y + b.h / 2;
+    const mx = (ax + bx) / 2, my = (ay + by) / 2;
+    const text = String(label);
+    const textW = text.length * 5.4;
+    const w = Math.min(240, Math.max(70, Math.round(textW) + 10));
+    const lines = Math.max(1, Math.ceil(textW / (w - 10)));
+    const h = lines * 12 + 6;
+    const horizontal = Math.abs(bx - ax) >= Math.abs(by - ay);
+    const x = horizontal ? mx - w / 2 : mx + 6;
+    const y = horizontal ? my - h - 3 : my - h / 2;
+    this._vertex(null, x, y, w, h, text,
+      `text;html=1;fontSize=9;align=${horizontal ? "center" : "left"};verticalAlign=bottom;whiteSpace=wrap;` +
+      `fillColor=#FFFFFF;strokeColor=none;fontColor=${P.C.ink};`);
   }
 
   // Kimlikle verilen iki hücre arasında ham stil ile ok (sequence okları için)

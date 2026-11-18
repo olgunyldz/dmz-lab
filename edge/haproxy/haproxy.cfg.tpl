@@ -6,7 +6,6 @@
 #   Client :443 -> fe_public (L4)
 #       - IP başına bağlantı hızı / eşzamanlı bağlantı sınırı (DDoS, L4)
 #       - SNI = partner-api.lab.local  -> be_partner_pt (passthrough, mTLS gw-partner'da)
-#       - SNI = device.lab.local       -> be_device_pt (passthrough, mTLS device-trust'ta)
 #       - diğer                        -> be_edge_tls -> fe_https (127.0.0.1:8444, PROXY protocol)
 #   fe_https (L7)
 #       - TLS sonlandırma (public sertifika)
@@ -48,8 +47,6 @@ frontend fe_public
     tcp-request content accept if { req.ssl_hello_type 1 }
 
     use_backend be_partner_pt if { req.ssl_sni -i partner-api.lab.local }
-    # Cihaz güveni (device.lab.local): mTLS cihaz sertifikası device-trust'ta doğrulanır (passthrough, TLS açılmaz)
-    use_backend be_device_pt if { req.ssl_sni -i device.lab.local }
     # Seal Mobile (SDK, cihaz mTLS): passthrough; TLS seal-mobile pod'unda sonlanır
     use_backend be_seal_pt if { req.ssl_sni -i seal.lab.local }
     # Şube (teller.lab.local) HAProxy'den GEÇMEZ: şube cluster'ı gw-branch'e doğrudan (WAN, F10) bağlanır.
@@ -70,12 +67,6 @@ backend be_seal_pt
     # DMZ gw-seal NodePort (30456). TLS passthrough: cihaz mTLS'i seal-mobile'da doğrulanır.
     server dmz-worker __DMZ_NODE_IP__:30456 check
     server dmz-worker2 __DMZ_WORKER2_IP__:30456 check
-
-backend be_device_pt
-    mode tcp
-    # DMZ gw-device NodePort (30452). TLS passthrough: cihaz mTLS'i device-trust'ta doğrulanır.
-    server dmz-worker __DMZ_NODE_IP__:30452 check
-    server dmz-worker2 __DMZ_WORKER2_IP__:30452 check
 
 # ---------------------------------------------------------------------------
 # L7: TLS sonlandırma, DDoS/rate limit, WAF, host yönlendirme, re-encrypt

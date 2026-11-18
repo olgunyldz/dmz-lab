@@ -13,12 +13,12 @@ Son güncelleme: 2026-11-11.
 
 ## 0. Bileşen adları (ürün isimleri)
 
-Bileşenler aşağıdaki adlarla anılır. Kod dizinleri ve servis adları (`spring-idp`, `device-trust`, `bff`, ...) lab'da olduğu gibi kalır; eşleme aşağıda.
+Bileşenler aşağıdaki adlarla anılır. Kod dizinleri ve servis adları (`spring-idp`, `bff`, ...) lab'da olduğu gibi kalır; eşleme aşağıda.
 
 | Ad | Rol | Çalıştığı yer | Lab karşılığı |
 |---|---|---|---|
 | **Seal SDK** | Mobil uygulamanın içine gömülü SDK: login, işlem ve belge imzası, backend ile TLS haberleşmesi | Cihaz (mobil uygulama) | `mobile-app` istemcisi, PKCE + DPoP (konsol mobil kanalı) |
-| **Octopus** | Cihazda çalışan güvenlik tarayıcısı: kötü amaçlı yazılım tespiti, uygulama koruma (shielding), cihaz parmak izi | Cihaz (Seal SDK ile birlikte) | Lab'da yok; sinyali `identity-cluster/device-trust` servisi alır |
+| **Octopus** | Cihazda çalışan güvenlik tarayıcısı: kötü amaçlı yazılım tespiti, uygulama koruma (shielding), cihaz parmak izi | Cihaz (Seal SDK ile birlikte) | Lab'da yok; sinyali Seal Mobile alır (device-trust kaldırıldı) |
 | **Seal Mobile** | SDK'ya hizmet veren mobil backend; kimlik doğrulama ve imza işlemlerini yönetir (orkestrasyon) | DMZ'de internete açık kısım + iç orkestrasyon | DMZ: `gw-mobile`, `ext-authz`; iç: `bff` (mobil kanal), `spring-idp` |
 | **Seal Intranet** | Ayrı servis: backend-to-backend API (`/seal/v1/...`). Çağıran backend'in IdP `seal-b2b` token'ı (aud=seal-intranet) JWKS ile doğrulanır | Internal cluster, ns `seal-intranet`; `internal-cluster/seal-intranet/`, `manifests/seal-intranet.yaml`, `scripts/load-seal-intranet.sh`; gw-internal `/seal/` HTTPRoute | Doğrulandı (yerel): 9/9. Kümede kurulum bekliyor (internal cluster kapalı) |
 

@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# Cihaz güven (device trust) örneği için sertifikalar. Lab sertifikaları; üretimde cihaz kaydı (enrollment) ile üretilir.
+# Cihaz sertifikaları (Seal Mobile cihaz mTLS için; device CA). Lab sertifikaları; üretimde cihaz kaydı (enrollment) ile üretilir.
 #   device-ca      : cihaz CA'sı (ayrı; internal-ca ile karıştırılmaz)
-#   device-trust   : sunucu sertifikası (device-trust servisi)
 #   device-lab-01  : geçerli cihaz istemci sertifikası
 #   device-lab-02  : geçerli ama iptal edilecek cihaz (test)
 #   rogue-*        : başka CA'dan, negatif test için
@@ -38,7 +37,6 @@ ca_cnf "Lab Device CA" > device-ca.cnf
 openssl req -x509 -newkey rsa:2048 -nodes -keyout device-ca.key -out device-ca.crt -days 3650 -config device-ca.cnf 2>/dev/null
 rm -f device-ca.cnf
 
-issue device-trust "device-trust" device-ca "DNS:device.lab.local,DNS:device-trust.devtrust.svc,DNS:localhost,IP:127.0.0.1" "serverAuth"
 issue device-lab-01 "device-lab-01" device-ca "DNS:device-lab-01" "clientAuth"
 issue device-lab-02 "device-lab-02" device-ca "DNS:device-lab-02" "clientAuth"
 issue device-lab-03 "device-lab-03" device-ca "DNS:device-lab-03" "clientAuth"  # yeni cihaz senaryosu (enroll edilmemiş)

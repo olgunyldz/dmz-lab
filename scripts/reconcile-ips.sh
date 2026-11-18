@@ -26,11 +26,9 @@ apply identity identity-cluster/manifests/spring-idp.yaml
 apply internal internal-cluster/manifests/services.yaml
 apply internal internal-cluster/manifests/gateway.yaml
 apply internal internal-cluster/manifests/gateway-tracing.yaml
-apply internal internal-cluster/manifests/device-gateway.yaml
 apply internal internal-cluster/manifests/idp-internal.yaml
 apply internal internal-cluster/manifests/seal-pm-route.yaml
 apply dmz dmz-cluster/manifests/internal-backend.yaml
-apply dmz dmz-cluster/manifests/device-gateway.yaml
 apply dmz dmz-cluster/manifests/gateway-tracing.yaml
 apply dmz dmz-cluster/manifests/branch.yaml
 apply dmz dmz-cluster/manifests/extauth.yaml

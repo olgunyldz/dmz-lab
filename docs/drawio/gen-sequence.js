@@ -20,6 +20,18 @@ const FIRST_MSG_Y = 130;
 const STEP = 46;
 const NOTE_H = 44;
 const NOTE_STEP = 56;
+const LINE_H = 12;
+const LABEL = "text;html=1;fontSize=9;align=center;verticalAlign=bottom;whiteSpace=wrap;fillColor=none;strokeColor=none;fontColor=#1F2937;";
+
+// Etiket satır sayısı (≈34 karakter/satır, ok genişliğine göre)
+function labelLines(s) {
+  return Math.max(1, Math.ceil(String(s).length / 34));
+}
+
+// Bir ok için dikey adım: etiket kutusu okun üstünde sığsın diye uzun etiketler daha fazla yer kaplar
+function stepFor(m) {
+  return Math.max(STEP, labelLines(m.label) * LINE_H + 34);
+}
 
 const INVISIBLE = "shape=ellipse;perimeter=ellipsePerimeter;fillColor=none;strokeColor=none;";
 const LIFELINE = "endArrow=none;dashed=1;dashPattern=4 4;strokeColor=#94A3B8;strokeWidth=1.1;edgeStyle=none;";
@@ -29,6 +41,14 @@ const MSG_NOTE = "shape=note;whiteSpace=wrap;html=1;size=8;fillColor=#FEF9C3;str
 const LEGEND = "rounded=1;whiteSpace=wrap;html=1;align=left;verticalAlign=top;fillColor=#FFFFFF;strokeColor=#CBD5E1;fontSize=10;spacing=6;";
 
 const isFrag = (m) => Boolean(m.frag);
+
+// İşlem ismi (legend): HTTP çağrısı ise "METOD /yol", aksi halde etiketin başı (en fazla 48 karakter).
+function opName(m) {
+  const http = m.label.match(/\b(GET|POST|PUT|DELETE)\s+(\S+)/);
+  if (http) return `${http[1]} ${http[2].split("?")[0]}`;
+  if (/introspection/i.test(m.label)) return "introspection";
+  return m.label.split(/[:(]/)[0].trim().slice(0, 48);
+}
 
 function sequencePage(def) {
   const p = new Page(def.name);
@@ -43,7 +63,7 @@ function sequencePage(def) {
   const msgY = def.messages.map((m) => {
     if (m.gap) y += m.gap;
     const my = y;
-    if (!isFrag(m)) y += m.note ? NOTE_STEP : STEP;
+    if (!isFrag(m)) y += m.note ? NOTE_STEP : stepFor(m);
     return my;
   });
   const bottom = Math.max(...msgY, FIRST_MSG_Y) + 60;
@@ -116,7 +136,12 @@ function sequencePage(def) {
     if (m.internalToken) style = SEQ.internal;
     else if (m.plannedToken) style = SEQ.planned;
     else if (m.ret) style = SEQ.ret;
-    p.link(a, b, m.label, style);
+    // Ok çizgisi etiketsiz; metin, okun hemen üstünde ayrı bir kutuda (çizgiyi ve komşu okları örtmez)
+    p.link(a, b, "", style);
+    const lines = labelLines(m.label);
+    const x0 = Math.min(cx(m.from), cx(m.to)) + 6;
+    const w = Math.max(120, Math.abs(cx(m.to) - cx(m.from)) - 12);
+    p.box(null, x0, my - lines * LINE_H - 8, w, lines * LINE_H + 4, m.label, LABEL);
   });
 
   // Alt kutu: kontroller ve lab/prod farkı
@@ -134,8 +159,8 @@ function sequencePage(def) {
   };
   const steps = def.messages.filter((m) => !isFrag(m) && !m.note && !m.gap);
   const legendLines = steps.map((m, k) => (m.self
-    ? `${k + 1}. [${nameOf(m.from)}] kendi içinde: ${m.label}`
-    : `${k + 1}. [${nameOf(m.from)}] -> [${nameOf(m.to)}]: ${m.label}`));
+    ? `${k + 1}. ${opName(m)} | [${nameOf(m.from)}] kendi içinde: ${m.label}`
+    : `${k + 1}. ${opName(m)} | [${nameOf(m.from)}] -> [${nameOf(m.to)}]: ${m.label}`));
   const legendY = bottom + 10 + footerH + 16;
   const legendH = 26 + legendLines.length * 16;
   p.box(null, X0, legendY, Math.max(1000, def.participants.length * SPACING - 60), legendH,

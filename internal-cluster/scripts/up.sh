@@ -52,8 +52,6 @@ render "$ROOT/manifests/gateway.yaml" | $K apply -f -
 $K apply -f "$ROOT/manifests/listener-client-cert.yaml"
 render "$ROOT/manifests/gateway-tracing.yaml" | $K apply -f -
 $K apply -f "$ROOT/manifests/gw-internal-nodeport.yaml"
-# Cihaz güveni passthrough (gw-device-int, NodePort 30453 -> identity device-trust 30445)
-render "$ROOT/manifests/device-gateway.yaml" | $K apply -f -
 $K apply -f "$ROOT/manifests/internal-authz.yaml"
 $K apply -f "$ROOT/manifests/metrics.yaml"
 

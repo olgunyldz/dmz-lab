@@ -86,8 +86,7 @@ preflight() {
         branch-cluster/scripts/up.sh branch/server.py branch/probe.py branch/index.html
         shared/tracing.py shared/metrics.py
         identity-cluster/scripts/load-password-manager.sh identity-cluster/scripts/load-seal-intranet.sh
-        identity-cluster/scripts/load-device-trust.sh
-        internal-cluster/scripts/load-idp-internal.sh dmz-cluster/scripts/load-seal-mobile.sh
+                internal-cluster/scripts/load-idp-internal.sh dmz-cluster/scripts/load-seal-mobile.sh
     )
     local missing=0
     for f in "${required[@]}"; do
@@ -193,7 +192,6 @@ bash "$ROOT/identity-cluster/scripts/up.sh"
 # Mobil kimlik bileşenleri identity'de: Password Manager (PIN), Seal Intranet (vendor mock), cihaz güven servisi
 bash "$ROOT/identity-cluster/scripts/load-password-manager.sh"
 bash "$ROOT/identity-cluster/scripts/load-seal-intranet.sh"
-bash "$ROOT/identity-cluster/scripts/load-device-trust.sh"
 
 # 4) internal
 step "4/5 internal cluster (gw-internal, BFF, core)"
