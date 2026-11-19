@@ -6,11 +6,11 @@ datasources:
     access: proxy
     url: http://prometheus:9090
     isDefault: true
-  - name: Tempo
-    uid: tempo
-    type: tempo
+  - name: Jaeger
+    uid: jaeger
+    type: jaeger
     access: proxy
-    url: http://tempo:3200
+    url: http://jaeger:16686
   - name: Loki
     uid: loki
     type: loki

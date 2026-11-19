@@ -1,0 +1,41 @@
+# Prometheus agent (her cluster, ns observability): yerel servisleri kazır, merkezi Prometheus'a remote_write eder.
+# Yapılandırma (ConfigMap prometheus-agent-config) observability/install.sh ile cluster'a göre üretilir.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus-agent
+  namespace: observability
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: prometheus-agent}
+  template:
+    metadata:
+      labels: {app: prometheus-agent}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: prometheus
+          image: prom/prometheus:v3.7.3
+          args:
+            - --config.file=/etc/prometheus/prometheus.yml
+            - --agent
+            - --storage.agent.path=/agent
+            - --web.listen-address=0.0.0.0:9090
+          ports:
+            - {name: http, containerPort: 9090}
+          readinessProbe:
+            httpGet: {path: /-/ready, port: 9090}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: ["ALL"]}
+          volumeMounts:
+            - {name: config, mountPath: /etc/prometheus, readOnly: true}
+            - {name: data, mountPath: /agent}
+      volumes:
+        - name: config
+          configMap: {name: prometheus-agent-config}
+        - name: data
+          emptyDir: {}

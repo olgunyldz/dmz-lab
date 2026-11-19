@@ -5,7 +5,7 @@
 
 Akışlar:
   web    : splash -> OTP (lab: demo kod yanıtta) -> login-user (müşteri no + parola + captcha + OTP) -> client token
-  mobil  : splash -> IdP (mobile-app, PKCE) -> Seal (PIN, cihaz imzası) -> janus secure-login -> mobile-login -> client token
+  mobil  : splash -> auth-server (mobile-app, PKCE) -> Seal (PIN, cihaz imzası) -> janus secure-login -> mobile-login -> client token
   işlem  : client token ile /janus/transaction (Janus, içeri giderken server token üretir)
 
 Bağımlılıklar: edge (HAProxy, SNI/Host yönlendirme), bank-prod auth-server (port-forward), codevo seal-mobile (edge passthrough).
@@ -34,7 +34,7 @@ import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-# İzleme: span'ler platform (docker compose) Tempo OTLP girişine gider (127.0.0.1:14318)
+# İzleme: span'ler platform (docker compose) Jaeger OTLP girişine gider (127.0.0.1:14318)
 os.environ.setdefault("OTLP_ENDPOINT", "http://127.0.0.1:14318")
 os.environ.setdefault("SERVICE_NAME", "console")
 sys.path.insert(0, str(ROOT / "shared"))
@@ -85,9 +85,9 @@ DEVICE_CA_KEY = str(CERTS / "device" / "device-ca.key")
 EDGE = ("127.0.0.1", 8443)      # edge HAProxy host portu (container 443)
 
 PORT = 9000
-IDP_LOCAL_PORT = 18443          # bank-prod auth-server port-forward
-IDP_HOST = "id.bank.lab.local"
-IDP_REALM = "/realms/bank/protocol/openid-connect"
+AUTH_LOCAL_PORT = 18443          # bank-prod auth-server port-forward
+AUTH_HOST = "id.bank.lab.local"
+AUTH_REALM = "/realms/bank/protocol/openid-connect"
 SEAL_HOST = "seal.lab.local"
 DEMO_CUSTOMER = "C000000001"
 DEMO_CAPTCHA = "lab-captcha"    # FortunaUsersCGW lab değeri
@@ -104,7 +104,7 @@ LOCK = threading.Lock()
 
 
 # ---------------------------------------------------------------------------
-# Kurulum: IdP port-forward ve sırlar
+# Kurulum: auth-server port-forward ve sırlar
 # ---------------------------------------------------------------------------
 def load_secrets():
     out = subprocess.run(["kubectl", "--context", "kind-bank-prod", "-n", "auth", "get", "secret", "auth-secrets",
@@ -112,9 +112,9 @@ def load_secrets():
     SECRETS["alice"] = base64.b64decode(out).decode()
 
 
-def start_idp_forward():
+def start_auth_forward():
     proc = subprocess.Popen(["kubectl", "--context", "kind-bank-prod", "-n", "auth", "port-forward",
-                             "svc/auth-server", f"{IDP_LOCAL_PORT}:8443"],
+                             "svc/auth-server", f"{AUTH_LOCAL_PORT}:8443"],
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     atexit.register(proc.terminate)
     time.sleep(3)
@@ -150,14 +150,14 @@ def janus(channel, path, obj, splash, token=None):
     return post(EDGE, CHANNELS[channel]["host"], PUBLIC_CA, path, obj, h)
 
 
-def idp_token(password):
+def auth_token(password):
     """mobile-app (public, PKCE) ile alice için access token. Tarayıcı yok: giriş formu sunucudan doldurulur."""
     verifier = base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b"=").decode()
     challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
     q = urllib.parse.urlencode({"response_type": "code", "client_id": "mobile-app",
                                 "redirect_uri": "com.bank.app:/callback", "scope": "openid profile", "state": "c",
                                 "code_challenge": challenge, "code_challenge_method": "S256"})
-    cur, method, body, headers, jar = IDP_REALM + "/auth?" + q, "GET", None, {}, {}
+    cur, method, body, headers, jar = AUTH_REALM + "/auth?" + q, "GET", None, {}, {}
     code = None
     for _ in range(15):
         if jar:
@@ -181,25 +181,25 @@ def idp_token(password):
             method, cur = "POST", "/login"
             headers["Content-Type"] = "application/x-www-form-urlencoded"
             continue
-        raise RuntimeError(f"IdP beklenmeyen yanıt: {st}")
+        raise RuntimeError(f"auth-server beklenmeyen yanıt: {st}")
     if not code:
-        raise RuntimeError("IdP kodu alınamadı (parola veya oturum)")
+        raise RuntimeError("auth-server kodu alınamadı (parola veya oturum)")
     form = urllib.parse.urlencode({"grant_type": "authorization_code", "code": code,
                                    "redirect_uri": "com.bank.app:/callback", "client_id": "mobile-app",
                                    "code_verifier": verifier}).encode()
-    st, out = tls_call(("127.0.0.1", IDP_LOCAL_PORT), IDP_HOST, INTERNAL_CA, "POST", IDP_REALM + "/token",
+    st, out = tls_call(("127.0.0.1", AUTH_LOCAL_PORT), AUTH_HOST, INTERNAL_CA, "POST", AUTH_REALM + "/token",
                        {"Content-Type": "application/x-www-form-urlencoded"}, form)
     if st != 200:
-        raise RuntimeError(f"IdP token alınamadı: {st}")
+        raise RuntimeError(f"auth-server token alınamadı: {st}")
     return out["access_token"]
 
 
 def _raw(method, path, headers, body):
     ctx = ssl.create_default_context(cafile=INTERNAL_CA)
     ctx.minimum_version = ssl.TLSVersion.TLSv1_2
-    sock = ctx.wrap_socket(socket.create_connection(("127.0.0.1", IDP_LOCAL_PORT), timeout=20),
-                           server_hostname=IDP_HOST)
-    conn = http.client.HTTPConnection(IDP_HOST, timeout=20)
+    sock = ctx.wrap_socket(socket.create_connection(("127.0.0.1", AUTH_LOCAL_PORT), timeout=20),
+                           server_hostname=AUTH_HOST)
+    conn = http.client.HTTPConnection(AUTH_HOST, timeout=20)
     conn.sock = sock
     conn.request(method, path, body=body, headers={"Connection": "close", **_trace_header(), **headers})
     resp = conn.getresponse()
@@ -323,7 +323,7 @@ def _drop_pending(m):
 
 
 def _new_device_otp_request(sess, pin, customer):
-    """Yeni cihaz 1. aşama: splash, IdP, cihaz sertifikası, PIN yetkisi, secure-login, OTP üretimi.
+    """Yeni cihaz 1. aşama: splash, auth-server, cihaz sertifikası, PIN yetkisi, secure-login, OTP üretimi.
     OTP (lab) yanıtta döner ve ekranda gösterilir; cihaz durumu sonraki aşama için bekletilir."""
     m = sess["mobile"]
     _drop_pending(m)
@@ -332,8 +332,8 @@ def _new_device_otp_request(sess, pin, customer):
     steps = ["splash (cihaz " + dev + ")"]
     td = tempfile.mkdtemp(prefix="mobile-")
     try:
-        auth = {"Authorization": "Bearer " + idp_token(SECRETS["alice"])}
-        steps.append("IdP token (mobile-app, PKCE)")
+        auth = {"Authorization": "Bearer " + auth_token(SECRETS["alice"])}
+        steps.append("auth-server token (mobile-app, PKCE)")
         crt, key = make_device_cert(td, dev)
         cert = (crt, key)
         flow, _ = seal_authorize(auth, cert, key, td, pin)
@@ -401,8 +401,8 @@ def mobile_login(sess, pin, enroll, customer, new_device, otp=None):
         raise RuntimeError("bu oturumda aktive edilmiş cihaz yok; 'Yeni cihaz' ile aktive edin")
     m["splash"] = splash("mobile", dev)
     steps = ["splash (cihaz " + dev + ")"]
-    access = idp_token(SECRETS["alice"])
-    steps.append("IdP token (mobile-app, PKCE)")
+    access = auth_token(SECRETS["alice"])
+    steps.append("auth-server token (mobile-app, PKCE)")
     auth = {"Authorization": "Bearer " + access}
     with tempfile.TemporaryDirectory() as td:
         crt, key = make_device_cert(td, dev)
@@ -596,7 +596,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
 def main():
     load_secrets()
-    start_idp_forward()
+    start_auth_forward()
     print(f"konsol: http://127.0.0.1:{PORT}", flush=True)
     http.server.ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
 

@@ -1,0 +1,17 @@
+# auth-server girişi (nginx ingress, SSL passthrough): id.bank.lab.local -> auth-server (TLS uçtan uca)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: auth-server
+  namespace: auth
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-passthrough: "true"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: id.bank.lab.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend: {service: {name: auth-server, port: {number: 8443}}}

@@ -88,6 +88,10 @@
 
   .trace { font-size:13px; min-height:18px; margin-top:6px; overflow-wrap:anywhere; }
   .trace code { font-size:12px; color:var(--muted); }
+  .linkbtn { background:none; border:none; color:var(--accent); padding:0 4px; min-height:0; font-weight:600; text-decoration:underline; cursor:pointer; }
+  .bar-track { position:relative; height:10px; background:var(--soft); border-radius:4px; min-width:120px; }
+  .bar-fill { position:absolute; top:0; height:10px; background:var(--accent); border-radius:4px; }
+  .bar-fill.err { background:var(--bad); }
 
   /* Hesap işlemleri */
   .ops { display:grid; grid-template-columns:repeat(3, 1fr); gap:8px; margin:0 0 14px; }
@@ -257,24 +261,35 @@
   <!-- İSTEK İZLEME -->
   <section class="card">
     <h2>İstek izleme</h2>
-    <p class="muted">Her istek bir trace kimliği alır. "Log" Loki günlüğünü, "Trace" Tempo izini açar (Grafana girişi gerekebilir).</p>
+    <p class="muted">Her istek bir trace kimliği alır. "Trace" Jaeger'da span ağacını, "Log" Grafana'da Loki günlüğünü açar.</p>
     <div class="table-wrap">
       <table><thead><tr><th>Saat</th><th>İstek</th><th>Durum</th><th>Trace</th><th>Bağlantı</th></tr></thead>
       <tbody id="trace-log"></tbody></table>
     </div>
   </section>
+
 </main>
 
 <script>
 const $ = (id) => document.getElementById(id);
 const GRAFANA = "http://127.0.0.1:3000";
-function lokiLink(tid) {
-  const left = { datasource: "loki", queries: [{ refId: "A", expr: '{app="console"} |= "' + tid + '"' }], range: { from: "now-1h", to: "now" } };
-  return GRAFANA + "/explore?left=" + encodeURIComponent(JSON.stringify(left));
+// "İz bul" panosu: trace kimliği değişkeni ile açılır (üstte Loki günlüğü, altta Jaeger izi).
+// Explore bağlantıları yerine pano kullanılır: pano provision edildiği için sorgular sabit ve doğrulanmış.
+// Pano tek panel görünümüyle (viewPanel) açılmaz: o görünüm Grafana'da modül hatası (/react/jsx-runtime 404) veriyor.
+// Pano tamamı açılır; log ve iz panelleri yan yana gelir.
+function traceLookupLink(tid) {
+  return GRAFANA + "/d/dmz-lab-trace-lookup?orgId=1&from=now-1h&to=now&var-traceId=" + encodeURIComponent(tid);
 }
-function tempoLink(tid) {
-  const left = { datasource: "tempo", queries: [{ refId: "A", queryType: "traceId", query: tid }], range: { from: "now-1h", to: "now" } };
-  return GRAFANA + "/explore?left=" + encodeURIComponent(JSON.stringify(left));
+function lokiLink(tid) { return traceLookupLink(tid); }
+
+// Trace bağlantısı: Jaeger arayüzünde span ağacı (16686)
+const JAEGER = "http://127.0.0.1:16686";
+function jaegerLink(tid, text) {
+  const a = document.createElement("a");
+  a.href = JAEGER + "/trace/" + encodeURIComponent(tid);
+  a.target = "_blank"; a.rel = "noopener";
+  a.textContent = text;
+  return a;
 }
 function addTrace(method, path, status, tid) {
   const tr = document.createElement("tr");
@@ -284,8 +299,8 @@ function addTrace(method, path, status, tid) {
   if (tid) {
     const last = tr.lastChild;
     const a1 = document.createElement("a"); a1.href = lokiLink(tid); a1.target = "_blank"; a1.rel = "noopener"; a1.textContent = "Log";
-    const a2 = document.createElement("a"); a2.href = tempoLink(tid); a2.target = "_blank"; a2.rel = "noopener"; a2.textContent = " Trace";
-    last.appendChild(a1); last.appendChild(a2);
+    const b2 = jaegerLink(tid, " Trace");
+    last.appendChild(a1); last.appendChild(b2);
   }
   const body = $("trace-log");
   body.insertBefore(tr, body.firstChild);
@@ -307,7 +322,7 @@ async function api(path, body) {
   return { ok: r.ok, status: r.status, data, tid: r.headers.get("X-Trace-Id") || "" };
 }
 
-// Bir işlemin izi: Grafana'da Loki günlüğü ve Tempo trace'i (aynı trace kimliği ile)
+// Bir işlemin izi: Grafana'da Loki günlüğü ve Jaeger trace'i (aynı trace kimliği ile)
 function setTrace(id, tid, label) {
   const el = $(id);
   el.innerHTML = "";
@@ -317,8 +332,7 @@ function setTrace(id, tid, label) {
   span.textContent = (label || "İzleme") + ": ";
   const a1 = document.createElement("a");
   a1.href = lokiLink(tid); a1.target = "_blank"; a1.rel = "noopener"; a1.textContent = "Grafana · Log";
-  const a2 = document.createElement("a");
-  a2.href = tempoLink(tid); a2.target = "_blank"; a2.rel = "noopener"; a2.textContent = "Grafana · Trace";
+  const a2 = jaegerLink(tid, "Jaeger");
   const code = document.createElement("code");
   code.textContent = tid.slice(0, 12) + "…";
   code.title = tid;

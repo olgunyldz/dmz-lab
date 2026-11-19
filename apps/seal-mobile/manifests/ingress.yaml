@@ -1,0 +1,17 @@
+# Seal Mobile girişi (nginx ingress, SSL passthrough; mTLS istemci sertifikası uygulamada kalır)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: seal-mobile
+  namespace: seal-mobile
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-passthrough: "true"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: seal.lab.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend: {service: {name: seal-mobile, port: {number: 8443}}}

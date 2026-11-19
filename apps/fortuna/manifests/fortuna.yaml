@@ -1,0 +1,184 @@
+# Fortuna kimlik zinciri ve SmsOtpCGW (lab mock) — bank-prod cluster, ns channel.
+# Kod ConfigMap'i fortuna-code (scripts/load-fortuna.sh). Sırlar: fortuna-db (PGPASSWORD), fortuna-seed (SEED_PASSWORD).
+# ACL, LegacyDB'ye mgmt node IP:30432 (NodePort) üzerinden bağlanır; hostAliases: legacydb.data.svc -> mgmt IP.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fortuna-users-cgw
+  namespace: channel
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: fortuna-users-cgw}}
+  template:
+    metadata: {labels: {app: fortuna-users-cgw}}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: app
+          image: python:3.12-alpine
+          command: ["sh", "-c", "pip install -q --no-cache-dir psycopg[binary]==3.2.3 && python /app/fortuna_stack.py"]
+          env:
+            - {name: OTLP_ENDPOINT, value: "__OTLP_URL__"}
+            - {name: ROLE, value: cgw}
+            - {name: PORT, value: "8443"}
+            - {name: TLS_CERT, value: /tls/server.crt}
+            - {name: TLS_KEY, value: /tls/server.key}
+            - {name: TLS_CA, value: /tls/ca.crt}
+            - {name: NEXT_URL, value: "https://fortuna-user-api.channel.svc:8443"}
+            - {name: CLIENT_TLS_CERT, value: /mtls-client/client.crt}
+            - {name: CLIENT_TLS_KEY, value: /mtls-client/client.key}
+            - {name: CLIENT_TLS_CA, value: /mtls-client/ca.crt}
+            - {name: CAPTCHA_DEMO, value: lab-captcha}
+          ports: [{containerPort: 8443}]
+          readinessProbe: {httpGet: {path: /health, port: 8443, scheme: HTTPS}, initialDelaySeconds: 15, periodSeconds: 5}
+          volumeMounts:
+            - {name: app, mountPath: /app, readOnly: true}
+            - {name: tls, mountPath: /tls, readOnly: true}
+            - {name: mtls-client, mountPath: /mtls-client, readOnly: true}
+      volumes:
+        - name: app
+          configMap: {name: fortuna-code}
+        - name: tls
+          secret: {secretName: fortuna-cgw-tls}
+        - name: mtls-client
+          secret: {secretName: fortuna-cgw-client}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fortuna-user-api
+  namespace: channel
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: fortuna-user-api}}
+  template:
+    metadata: {labels: {app: fortuna-user-api}}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: app
+          image: python:3.12-alpine
+          command: ["sh", "-c", "pip install -q --no-cache-dir psycopg[binary]==3.2.3 && python /app/fortuna_stack.py"]
+          env:
+            - {name: OTLP_ENDPOINT, value: "__OTLP_URL__"}
+            - {name: ROLE, value: api}
+            - {name: PORT, value: "8443"}
+            - {name: TLS_CERT, value: /tls/server.crt}
+            - {name: TLS_KEY, value: /tls/server.key}
+            - {name: TLS_CA, value: /tls/ca.crt}
+            - {name: ALLOWED_CLIENTS, value: "fortuna-users-cgw"}
+            - {name: NEXT_URL, value: "https://fortuna-user-acl.channel.svc:8443"}
+            - {name: CLIENT_TLS_CERT, value: /mtls-client/client.crt}
+            - {name: CLIENT_TLS_KEY, value: /mtls-client/client.key}
+            - {name: CLIENT_TLS_CA, value: /mtls-client/ca.crt}
+          ports: [{containerPort: 8443}]
+          readinessProbe: {httpGet: {path: /health, port: 8443, scheme: HTTPS}, initialDelaySeconds: 15, periodSeconds: 5}
+          volumeMounts:
+            - {name: app, mountPath: /app, readOnly: true}
+            - {name: tls, mountPath: /tls, readOnly: true}
+            - {name: mtls-client, mountPath: /mtls-client, readOnly: true}
+      volumes:
+        - name: app
+          configMap: {name: fortuna-code}
+        - name: tls
+          secret: {secretName: fortuna-api-tls}
+        - name: mtls-client
+          secret: {secretName: fortuna-api-client}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fortuna-user-acl
+  namespace: channel
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: fortuna-user-acl}}
+  template:
+    metadata: {labels: {app: fortuna-user-acl}}
+    spec:
+      automountServiceAccountToken: false
+      hostAliases:
+        - ip: "__MGMT_NODE_IP__"
+          hostnames: ["legacydb.data.svc"]
+      containers:
+        - name: app
+          image: python:3.12-alpine
+          command: ["sh", "-c", "pip install -q --no-cache-dir psycopg[binary]==3.2.3 && python /app/fortuna_stack.py"]
+          env:
+            - {name: OTLP_ENDPOINT, value: "__OTLP_URL__"}
+            - {name: ROLE, value: acl}
+            - {name: PORT, value: "8443"}
+            - {name: TLS_CERT, value: /tls/server.crt}
+            - {name: TLS_KEY, value: /tls/server.key}
+            - {name: TLS_CA, value: /tls/ca.crt}
+            - {name: ALLOWED_CLIENTS, value: "fortuna-user-api"}
+            - {name: DB_DSN, value: "host=legacydb.data.svc port=30432 dbname=ibdb_fortuna user=fortuna"}
+            - name: PGPASSWORD
+              valueFrom: {secretKeyRef: {name: fortuna-db, key: POSTGRES_PASSWORD}}
+            - {name: SEED_USER, value: alice}
+            - name: SEED_PASSWORD
+              valueFrom: {secretKeyRef: {name: fortuna-seed, key: SEED_PASSWORD}}
+          ports: [{containerPort: 8443}]
+          readinessProbe: {httpGet: {path: /health, port: 8443, scheme: HTTPS}, initialDelaySeconds: 15, periodSeconds: 5}
+          volumeMounts:
+            - {name: app, mountPath: /app, readOnly: true}
+            - {name: tls, mountPath: /tls, readOnly: true}
+      volumes:
+        - name: app
+          configMap: {name: fortuna-code}
+        - name: tls
+          secret: {secretName: fortuna-acl-tls}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sms-otp-cgw
+  namespace: channel
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: sms-otp-cgw}}
+  template:
+    metadata: {labels: {app: sms-otp-cgw}}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: app
+          image: python:3.12-alpine
+          command: ["python", "/app/fortuna_stack.py"]
+          env:
+            - {name: OTLP_ENDPOINT, value: "__OTLP_URL__"}
+            - {name: ROLE, value: sms}
+            - {name: PORT, value: "8443"}
+            - {name: TLS_CERT, value: /tls/server.crt}
+            - {name: TLS_KEY, value: /tls/server.key}
+            - {name: TLS_CA, value: /tls/ca.crt}
+          ports: [{containerPort: 8443}]
+          readinessProbe: {httpGet: {path: /health, port: 8443, scheme: HTTPS}, initialDelaySeconds: 3, periodSeconds: 5}
+          volumeMounts:
+            - {name: app, mountPath: /app, readOnly: true}
+            - {name: tls, mountPath: /tls, readOnly: true}
+      volumes:
+        - name: app
+          configMap: {name: fortuna-code}
+        - name: tls
+          secret: {secretName: sms-otp-tls}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: fortuna-users-cgw, namespace: channel}
+spec: {selector: {app: fortuna-users-cgw}, ports: [{name: http, port: 8443, targetPort: 8443}]}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: fortuna-user-api, namespace: channel}
+spec: {selector: {app: fortuna-user-api}, ports: [{name: http, port: 8443, targetPort: 8443}]}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: fortuna-user-acl, namespace: channel}
+spec: {selector: {app: fortuna-user-acl}, ports: [{name: http, port: 8443, targetPort: 8443}]}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: sms-otp-cgw, namespace: channel}
+spec: {selector: {app: sms-otp-cgw}, ports: [{name: http, port: 8443, targetPort: 8443}]}

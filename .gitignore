@@ -24,3 +24,6 @@ node_modules/
 Thumbs.db
 edge/haproxy/haproxy.cfg
 .tools-forward/
+
+# Deploy kancalarının hazırladığı build bağlamları (apps/<ad>/hook.sh)
+.build/

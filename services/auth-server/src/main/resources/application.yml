@@ -1,0 +1,88 @@
+# Tüm değerler ortam değişkenlerinden gelir (repo'da sır yok).
+# Örnek: AUTH_ISSUER=https://id.bank.lab.local/realms/bank
+spring:
+  application:
+    name: auth-server
+  datasource:
+    url: ${AUTH_DB_URL:jdbc:postgresql://localhost:5432/auth}
+    username: ${AUTH_DB_USER:auth}
+    password: ${AUTH_DB_PASSWORD}
+  flyway:
+    enabled: true
+
+# Dağıtık izleme: OTLP HTTP -> Jaeger (mgmt NodePort 30318). Tüm istekler örneklenir (lab).
+management:
+  server:
+    port: 9100
+    ssl:
+      enabled: false   # metrik portu düz HTTP (ana port TLS'te kalır)
+  endpoints:
+    web:
+      exposure:
+        include: prometheus,health
+  tracing:
+    sampling:
+      probability: 1.0
+  opentelemetry:
+    tracing:
+      export:
+        otlp:
+          endpoint: ${AUTH_OTLP_ENDPOINT:http://localhost:4318/v1/traces}
+
+server:
+  port: 8443
+  ssl:
+    enabled: true
+    key-store: ${AUTH_TLS_KEYSTORE}
+    key-store-password: ${AUTH_TLS_KEYSTORE_PASSWORD}
+    key-store-type: PKCS12
+    # Exchange istemcileri (tls_client_auth) sertifika sunar; diğerleri sunmadan da bağlanabilir.
+    client-auth: want
+    # TLS 1.3'te isteğe bağlı istemci sertifikası (post-handshake auth) Tomcat'te desteklenmiyor;
+    # bu yüzden yalnız TLS 1.2. Edge (HAProxy) zaten TLS 1.2+ kullanır.
+    enabled-protocols: TLSv1.2
+    trust-store: ${AUTH_TLS_TRUSTSTORE}
+    trust-store-password: ${AUTH_TLS_TRUSTSTORE_PASSWORD}
+    trust-store-type: PKCS12
+
+auth:
+  # Mobil kimlik süreçleri (auth-server içinde): Seal Intranet (küme içi HTTPS, iç CA)
+  seal:
+    url: ${AUTH_SEAL_URL:https://seal-intranet.lab.local:30456}
+  # İç API (/internal/auth/*) çağıranları: istemci sertifikası CN allowlist'i
+  internal:
+    allowed-clients: ${AUTH_INTERNAL_CALLERS:gw-internal}
+  auth:
+    demo-otp: ${AUTH_DEMO_OTP:true}
+  issuer: ${AUTH_ISSUER:http://localhost:8443/realms/bank}
+  # İç kullanıcı oluşturma (demo kayıt) anahtarı; boşsa uç nokta kapalı
+  internal-api-key: ${AUTH_INTERNAL_API_KEY:}
+  # Token imzalama anahtarı: PKCS12 keystore (kalıcı; yeniden başlatmada aynı anahtar). Üretim: apps/auth-server/hook.sh.
+  signing:
+    keystore: ${AUTH_SIGNING_KEYSTORE}
+    keystore-password: ${AUTH_SIGNING_KEYSTORE_PASSWORD}
+    alias: auth-sign
+  # İç yol (düz HTTP, yalnız iç gateway/düğümler). XFCC ile istemci sertifikası bu porttan kabul edilir.
+  internal-port: ${AUTH_INTERNAL_PORT:8080}
+  # mTLS güven deposu: Boot 4 server.ssl.trust-store'u Tomcat'e geçirmediği için AuthServerConfig doğrudan Tomcat'e yazar.
+  tls:
+    truststore: ${AUTH_TLS_TRUSTSTORE}
+    truststore-password: ${AUTH_TLS_TRUSTSTORE_PASSWORD}
+  users:
+    alice:
+      password: ${ALICE_PASSWORD}
+    teller:
+      password: ${TELLER_PASSWORD}
+  clients:
+    web-app:
+      secret: ${WEB_APP_SECRET}
+    partner-acme:
+      secret: ${PARTNER_ACME_SECRET}
+    bff:
+      secret: ${BFF_SECRET}
+    core-svc:
+      secret: ${CORE_SVC_SECRET}
+    seal-b2b:
+      secret: ${SEAL_B2B_SECRET}
+    seal-mobile:
+      secret: ${SEAL_MOBILE_SECRET}

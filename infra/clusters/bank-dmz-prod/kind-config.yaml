@@ -1,0 +1,12 @@
+# bank-dmz-prod (kind): girişler nginx ingress NodePort 30802 üzerinden (Janus web ve mobil, host tabanlı).
+# Edge (HAProxy) yalnızca 127.0.0.1 üzerinden erişir; kind ağına bağlı değildir.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: bank-dmz-prod
+nodes:
+  - role: control-plane
+    extraPortMappings:
+      - containerPort: 30802   # nginx ingress HTTP (Janus web + mobil)
+        hostPort: 30802
+        listenAddress: "127.0.0.1"
+        protocol: TCP

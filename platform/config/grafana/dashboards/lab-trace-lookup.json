@@ -1,0 +1,70 @@
+{
+  "uid": "dmz-lab-trace-lookup",
+  "title": "DMZ Lab – İz bul",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": false,
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "traceId",
+        "label": "İz kimliği",
+        "type": "textbox",
+        "query": "",
+        "current": {
+          "text": "",
+          "value": ""
+        },
+        "options": [],
+        "hide": 0
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 901,
+      "type": "text",
+      "title": "Jaeger'da iz",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 3
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "[Jaeger'da trace'i aç (span ağacı)](http://127.0.0.1:16686/trace/$traceId)  \nTrace kimliğini yukarıdaki alana yazın."
+      }
+    },
+    {
+      "id": 1,
+      "type": "logs",
+      "title": "Loki günlüğü (console)",
+      "gridPos": {
+        "x": 0,
+        "y": 3,
+        "w": 24,
+        "h": 10
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "{app=\"console\"} |= \"$traceId\"",
+          "queryType": "range"
+        }
+      ]
+    }
+  ]
+}

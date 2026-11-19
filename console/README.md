@@ -25,7 +25,7 @@ Kanal uçları edge üzerinden (`127.0.0.1:8443`, SNI/Host): Janus `web.lab.loca
 | Kanal | Adımlar | Sonuç |
 |---|---|---|
 | Web | Müşteri no + parola → OTP iste (lab: kod ekranda) → SMS kodu → giriş → bakiye | Client token; `BALANCE` 200 |
-| Mobil | PIN → IdP (`mobile-app`, PKCE) → Seal PIN ve cihaz imzası → secure-login → mobile-login → bakiye | Client token; `BALANCE` 200 |
+| Mobil | PIN → auth-server (`mobile-app`, PKCE) → Seal PIN ve cihaz imzası → secure-login → mobile-login → bakiye | Client token; `BALANCE` 200 |
 | Mobil (yeni cihaz) | Yeni cihaz kimliği → Seal PIN + imza → OTP + parola (login-user) → aktivasyon (ACTIVE) → PIN kaydı → normal mobil giriş → bakiye | Client token; `BALANCE` 200 |
 
 Web'de Seal yoktur. Mobilde cihaz sertifikası her girişte geçici dizinde device CA ile üretilir ve silinir. Cihaz kimliği tarayıcı oturumunda tutulur: yeni cihazla aktive edilen cihaz, çıkıştan sonra da aynı oturumda "Yeni cihaz" kutusu işaretlenmeden kullanılabilir. Oturumda cihaz yoksa (yeni tarayıcı) önce yeni cihazla aktive edilmelidir. "İlk kez kurulum" kutusu PIN'i cihaza yeniden tanımlar (lab).
@@ -41,7 +41,7 @@ Web'de Seal yoktur. Mobilde cihaz sertifikası her girişte geçici dizinde devi
 - OTP lab'da SMS ile gönderilmez; kod yanıtta döner (demo).
 - Captcha değeri `lab-captcha` sabittir.
 - Token'lar tarayıcıya gönderilmez. İşlem yanıtları Janus ve channel-gateway'den gelen JSON'dur.
-- Her mobil girişte IdP'de yeni bir oturum açılır.
+- Her mobil girişte auth-server'de yeni bir oturum açılır.
 
 ## Güvenlik notu
 

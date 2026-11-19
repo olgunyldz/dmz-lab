@@ -1,0 +1,30 @@
+# Janus kanal girişleri (nginx ingress, HTTP): web.lab.local -> janus-web, mobile-api.lab.local -> janus-mobile
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: janus-web
+  namespace: janus
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: web.lab.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend: {service: {name: janus-web, port: {number: 8080}}}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: janus-mobile
+  namespace: janus
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: mobile-api.lab.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend: {service: {name: janus-mobile, port: {number: 8080}}}

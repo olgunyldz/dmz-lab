@@ -3,7 +3,7 @@
 # Önce: bash edge/scripts/gen-certs.sh (internal-ca.crt/key bu betikte üretilir).
 #   gw-internal          : iç kgateway sunucu sertifikası (SAN gw-internal, gw-internal.lab.local)
 #   dmz-client           : DMZ'nin iç gateway'e mTLS istemci sertifikası (CN=dmz-edge-client)
-#   dmz-exchange-{web,mobile,partner}: IdP client-x509 token exchange istemcileri (CN=dmz-exchange-<kanal>)
+#   dmz-exchange-{web,mobile,partner}: auth-server client-x509 token exchange istemcileri (CN=dmz-exchange-<kanal>)
 # dmz-exchange-branch gen-branch-certs.sh ile üretilir.
 set -euo pipefail
 

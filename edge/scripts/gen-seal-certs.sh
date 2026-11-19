@@ -22,7 +22,7 @@ issue() { # <name> <CN> <SAN>
     rm -f "$name.csr" "$name.cnf" "$name.ext"
 }
 
-issue seal-intranet "seal-intranet" "DNS:seal-intranet.seal-intranet.svc,DNS:seal-intranet"
+issue seal-intranet "seal-intranet" "DNS:seal-intranet.lab.local,DNS:seal-intranet.seal-intranet.svc,DNS:seal-intranet"
 issue bank-backend "bank-backend" "DNS:bank-backend.bank-auth.svc"
 issue seal-mobile "seal-mobile" "DNS:seal-mobile.seal-mobile.svc,DNS:seal.lab.local"
 cp "$CA_DIR/internal-ca.crt" "$OUT/internal-ca.crt"

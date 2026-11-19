@@ -3,7 +3,7 @@
 # Katmanlar:
 #   - edge ağı : haproxy (LB, TLS, DDoS, host yönlendirme). WAF yok (mock; demo).
 #   - DMZ cluster'ları host'a yayınlanmış NodePort'lar üzerinden (host.docker.internal) erişilir; edge kind ağına bağlı değildir.
-#                Kanal servisleri (Janus, Seal) bu compose'da değil, cluster'larda (bank-dmz-prod-cluster/, codevo-dmz-cluster/).
+#                Kanal servisleri (Janus, Seal) bu compose'da değil, cluster'larda (apps/janus, apps/seal-mobile).
 # Not: Lab'da gerçek firewall yoktur. Ayrımı docker ağları ve NetworkPolicy/firewall kuralları sağlar.
 
 name: dmz-edge-lab

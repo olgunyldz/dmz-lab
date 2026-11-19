@@ -1,0 +1,17 @@
+# Seal Intranet (iç API; bank-prod auth-server ve monolit çağırır). SSL passthrough, SNI seal-intranet.lab.local.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: seal-intranet
+  namespace: seal-intranet
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-passthrough: "true"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: seal-intranet.lab.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend: {service: {name: seal-intranet, port: {number: 8443}}}

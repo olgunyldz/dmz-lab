@@ -2,8 +2,8 @@
 # Edge kind ağına bağlı değildir. haproxy.cfg bu şablondan üretilir (edge/scripts/render-haproxy.sh).
 # DMZ Edge — HAProxy (lab), yeni cluster yapısı:
 #   seal.lab.local      -> codevo-dmz Seal Mobile (NodePort 30456), TLS passthrough (cihaz mTLS pod'da)
-#   web.lab.local       -> bank-dmz-prod janus-web (NodePort 30802), TLS edge'de sonlanır
-#   mobile-api.lab.local-> bank-dmz-prod janus-mobile (NodePort 30801), TLS edge'de sonlanır
+#   web.lab.local       -> bank-dmz-prod nginx ingress (NodePort 30802) -> janus-web, TLS edge'de sonlanır
+#   mobile-api.lab.local-> bank-dmz-prod nginx ingress (NodePort 30802) -> janus-mobile, TLS edge'de sonlanır
 # Bilinen sınır: Janus'a bağlantı düz HTTP (zone kuralındaki mTLS henüz uygulanmadı).
 
 global
@@ -75,6 +75,7 @@ frontend fe_https
 backend be_janus_web
     mode http
     balance roundrobin
+    http-request set-header Host web.lab.local
     option httpchk
     http-check send meth GET uri /janus/health ver HTTP/1.1 hdr host web.lab.local
     http-check expect status 200
@@ -83,10 +84,11 @@ backend be_janus_web
 backend be_janus_mobile
     mode http
     balance roundrobin
+    http-request set-header Host mobile-api.lab.local
     option httpchk
     http-check send meth GET uri /janus/health ver HTTP/1.1 hdr host mobile-api.lab.local
     http-check expect status 200
-    server janus-mobile host.docker.internal:30801 check inter 2s fall 2 rise 2
+    server janus-mobile host.docker.internal:30802 check inter 2s fall 2 rise 2
 
 frontend fe_stats
     mode http

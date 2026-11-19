@@ -29,7 +29,7 @@ function overview() {
 
   p.zone(850, 60, 430, 840, "bank-prod", "internal");
   p.ns(870, 110, 390, 130, "ns: auth", "#7C3AED");
-  p.node("idp", 890, 150, 350, 70, "auth-server (IdP)\nmobile-app: PKCE, access token", "identity");
+  p.node("auth", 890, 150, 350, 70, "auth-server\nmobile-app: PKCE, access token", "identity");
   p.ns(870, 270, 390, 205, "ns: channel", "#2563EB");
   p.node("cgw", 890, 300, 350, 35, "FortunaUsersCGW (captcha)", "internal", 10);
   p.node("api", 890, 342, 350, 35, "FortunaUserAPI", "internal", 10);
@@ -43,7 +43,7 @@ function overview() {
 
   p.zone(1310, 500, 280, 400, "mgmt", "mgmt");
   p.node("ldb", 1330, 560, 240, 70, "LegacyDB (PostgreSQL)\ncustomers, accounts,\nfortuna_users, customer_devices", "mgmt");
-  p.node("obs", 1330, 650, 240, 70, "Observability\nPrometheus, Loki, Tempo, Grafana", "mgmt");
+  p.node("obs", 1330, 650, 240, 70, "Observability\nPrometheus, Loki, Jaeger, Grafana", "mgmt");
   p.node("redis", 1330, 740, 240, 50, "Redis (kullanılmıyor)", "planned", 10);
 
   // Trafik
@@ -53,8 +53,8 @@ function overview() {
   p.edge("edge", "jmob", "mobile-api.lab.local → HTTP", "request");
   p.edge("edge", "seal", "seal.lab.local (passthrough, mTLS)", "internal");
   p.edge("seal", "fm", "PIN doğrulama (/seal-pm/*)", "request");
-  p.edge("seal", "idp", "introspection", "request");
-  p.edge("sint", "idp", "JWKS (B2B doğrulama)", "request");
+  p.edge("seal", "auth", "introspection", "request");
+  p.edge("sint", "auth", "JWKS (B2B doğrulama)", "request");
   p.edge("jweb", "cgw", "müşteri doğrulama", "request");
   p.edge("jmob", "cgw", "müşteri doğrulama", "request");
   p.edge("jweb", "cg", "server token (60 sn)", "internal");
@@ -144,7 +144,7 @@ const web = sequence("Web girişi ve işlem",
 const mobile = sequence("Mobil giriş (mevcut cihaz)",
   [
     { key: "m", label: "Mobil uygulama", kind: "client" },
-    { key: "idp", label: "auth-server (IdP)", kind: "identity" },
+    { key: "auth", label: "auth-server", kind: "identity" },
     { key: "seal", label: "Seal Mobile", kind: "dmz" },
     { key: "j", label: "Janus mobil", kind: "dmz" },
     { key: "fm", label: "Fortuna monolit", kind: "internal" },
@@ -152,8 +152,8 @@ const mobile = sequence("Mobil giriş (mevcut cihaz)",
   [
     { from: "m", to: "j", label: "POST /janus/splash (cihaz ACTIVE)" },
     { from: "j", to: "m", label: "splash token", type: "ret" },
-    { from: "m", to: "idp", label: "PKCE: /auth, /token (mobile-app)" },
-    { from: "idp", to: "m", label: "access token (aud channel-mobile)", type: "ret" },
+    { from: "m", to: "auth", label: "PKCE: /auth, /token (mobile-app)" },
+    { from: "auth", to: "m", label: "access token (aud channel-mobile)", type: "ret" },
     { from: "m", to: "seal", label: "login/begin (mTLS + Bearer)" },
     { from: "seal", to: "m", label: "flowId", type: "ret" },
     { from: "m", to: "seal", label: "login/pin" },
@@ -161,8 +161,8 @@ const mobile = sequence("Mobil giriş (mevcut cihaz)",
     { from: "fm", to: "seal", label: "ok", type: "ret" },
     { from: "seal", to: "m", label: "PIN_OK, nonce", type: "ret" },
     { from: "m", to: "seal", label: "login/authorize (cihaz imzası)" },
-    { from: "seal", to: "idp", label: "introspection (oturum aktif mi)" },
-    { from: "idp", to: "seal", label: "active", type: "ret" },
+    { from: "seal", to: "auth", label: "introspection (oturum aktif mi)" },
+    { from: "auth", to: "seal", label: "active", type: "ret" },
     { from: "seal", to: "m", label: "PIN_AUTHORIZED", type: "ret" },
     { from: "m", to: "j", label: "secure-login (flowId)" },
     { from: "j", to: "fm", label: "secure-login" },

@@ -165,3 +165,100 @@ def _worker():
 
 if OTLP_ENDPOINT:
     threading.Thread(target=_worker, daemon=True, name="otlp-export").start()
+
+
+# ---- Aktif span bağlamı ve otomatik yayılım (iç çağrılar tek izde birleşir) ----
+# instrument(Handler): gelen GET/POST için sunucu span'i açar ve aktif yapar.
+# client_span(...): giden çağrı için alt span; inject(headers) aktif span'in traceparent'ını ekler.
+# db_span(...): veritabanı sorgusu için istemci span'i (SQL değerleri yazılmaz, yalnız işlem adı).
+import contextlib as _contextlib
+
+_tls = threading.local()
+
+
+def current():
+    stack = getattr(_tls, "stack", None)
+    return stack[-1] if stack else None
+
+
+def _push(span):
+    if not hasattr(_tls, "stack"):
+        _tls.stack = []
+    _tls.stack.append(span)
+
+
+def _pop():
+    _tls.stack.pop()
+
+
+def inject(headers=None):
+    """Aktif span varsa giden isteğe traceparent ekler. Aktif span yoksa headers değişmeden döner."""
+    headers = {} if headers is None else headers
+    cur = current()
+    if cur is not None:
+        headers["traceparent"] = cur.header()
+    return headers
+
+
+@_contextlib.contextmanager
+def client_span(name, peer=None, attrs=None):
+    """İstemci çağrısı için alt span. Aktif bir iz yoksa no-op."""
+    parent = current()
+    if parent is None:
+        yield None
+        return
+    sp = Span(name, KIND_CLIENT, parent.trace_id, parent.span_id, {"peer.service": peer, **(attrs or {})})
+    _push(sp)
+    try:
+        yield sp
+    except Exception:
+        sp.status = 2
+        raise
+    finally:
+        _pop()
+        sp.end()
+
+
+def db_span(operation, table=None, peer="postgresql"):
+    """Veritabanı sorgusu span'i. SQL değerleri yazılmaz; yalnız işlem ve tablo."""
+    return client_span(f"db {operation} {table or ''}".strip(), peer=peer,
+                       attrs={"db.system": "postgresql", "db.operation": operation, "db.sql.table": table})
+
+
+_SKIP_SUFFIX = ("health", "/metrics")
+
+
+def instrument(handler_cls):
+    """BaseHTTPRequestHandler sınıfını izler. Durum kodu send_response'tan alınır."""
+    orig_send = handler_cls.send_response
+
+    def send_response(self, code, message=None):
+        self._trace_status = code
+        return orig_send(self, code, message)
+
+    handler_cls.send_response = send_response
+
+    def wrap(method, orig):
+        def inner(self, *args, **kwargs):
+            path = self.path.split("?")[0]
+            if path.endswith(_SKIP_SUFFIX):
+                return orig(self, *args, **kwargs)
+            span = start_server_span(f"{SERVICE} {method} {path}", self.headers.get("traceparent"),
+                                     {"http.method": method, "http.target": path})
+            self._trace_status = None
+            _push(span)
+            try:
+                return orig(self, *args, **kwargs)
+            except Exception:
+                span.status = 2
+                raise
+            finally:
+                _pop()
+                span.end(http_status=getattr(self, "_trace_status", None))
+        return inner
+
+    for m in ("GET", "POST", "PUT", "DELETE"):
+        name = "do_" + m
+        if hasattr(handler_cls, name):
+            setattr(handler_cls, name, wrap(m, getattr(handler_cls, name)))
+    return handler_cls

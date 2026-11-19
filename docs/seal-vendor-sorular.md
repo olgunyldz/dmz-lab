@@ -32,8 +32,8 @@ Amaç: Lab'da Seal Intranet ve Seal Mobile'ın davranışını (mock) gerçek ü
 
 ### 4. Kalıcılık, güvenlik ve entegrasyon
 12. Seal'in kayıtları (cihaz, PIN, durum) ürün tarafından kalıcı mı tutulur? Yedekleme ve yeniden başlatma davranışı nedir?
-13. Seal'e erişim için beklenen kimlik doğrulama nedir (mTLS, bearer, IdP entegrasyonu)? Cihaz sertifikası (device CA) ürünün sözleşmesinde bir gereklilik mi?
-14. Seal Mobile ↔ IdP introspection ve Seal Intranet ↔ IdP JWKS için ürünün beklentisi nedir?
+13. Seal'e erişim için beklenen kimlik doğrulama nedir (mTLS, bearer, auth-server entegrasyonu)? Cihaz sertifikası (device CA) ürünün sözleşmesinde bir gereklilik mi?
+14. Seal Mobile ↔ auth-server introspection ve Seal Intranet ↔ auth-server JWKS için ürünün beklentisi nedir?
 15. Ürünün denetim kaydı (audit) ve olay bildirimi (SIEM) özellikleri nelerdir?
 
 ## Yanıt sonrası
