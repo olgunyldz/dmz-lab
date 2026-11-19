@@ -59,7 +59,6 @@ spec:
             - {name: device-ca, mountPath: /certs/device-ca.crt, subPath: device-ca.crt, readOnly: true}
             - {name: internal-ca, mountPath: /certs/internal-ca.crt, subPath: internal-ca.crt, readOnly: true}
             - {name: client, mountPath: /client, readOnly: true}
-            - {name: tracing, mountPath: /app/tracing.py, subPath: tracing.py, readOnly: true}
           securityContext:
             allowPrivilegeEscalation: false
             runAsNonRoot: true
@@ -75,8 +74,6 @@ spec:
           secret: {secretName: sm-internal-ca}
         - name: client
           secret: {secretName: sm-auth-client}
-        - name: tracing
-          configMap: {name: seal-mobile-code}
 ---
 apiVersion: v1
 kind: Service

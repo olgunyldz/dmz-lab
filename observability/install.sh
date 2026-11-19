@@ -7,8 +7,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 source "$ROOT/scripts/lib/cluster.sh"
 
-LOKI="http://$(docker_ip platform-loki):30100/loki/api/v1/push"
-REMOTE_WRITE="http://$(docker_ip platform-prometheus):30090/api/v1/write"
+LOKI="http://$(docker_ip bridge-loki):30100/loki/api/v1/push"
+REMOTE_WRITE="http://$(docker_ip bridge-prometheus):30090/api/v1/write"
 JOBS_DIR="$(mktemp -d)"
 trap 'rm -rf "$JOBS_DIR"' EXIT
 

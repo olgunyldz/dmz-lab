@@ -1,48 +1,44 @@
-# DMZ lab konsolu (web ve mobil)
+# DMZ lab konsolu (Next.js)
 
-Web ve mobil kanal akışlarını tarayıcıdan çalıştırmak için yerel bir arayüz. **Yalnız lab.**
+Operatör ve demo konsolu. Arayüz React bileşeni (`components/Console.jsx`), sunucu tarafı ise Next.js route handler'ları (`app/api/*`). Tarayıcı DMZ servislerine doğrudan gitmez; yalnız konsol sunucusu, edge (HAProxy, `127.0.0.1:8443`) üzerinden DMZ servislerini çağırır (`lib/edge.js`). **Yalnız lab.**
 
 ## Çalıştırma
-
-Ön koşullar: edge ayakta (`cd edge && docker compose up -d`), bank-prod (auth-server, Fortuna, channel-gateway), bank-dmz-prod (Janus), codevo-dmz (Seal Mobile) kurulu, `kubectl` erişimi, `openssl` PATH'te.
-
-Repo kökünden:
-
 ```
-bash console/start.sh
+cd console
+npm install
+npm run dev        # geliştirme sunucusu (http://localhost:9000)
+npm run build      # üretim derlemesi
+npm run start      # derlenmiş sürümü 9000 portunda çalıştırır
 ```
 
-Sonra tarayıcıda: http://127.0.0.1:9000
+Önkoşul: edge (HAProxy) `127.0.0.1:8443` üzerinde çalışıyor olmalı ve `edge/certs/public-ca.crt` mevcut olmalı.
 
-Sunucu başlarken iki şey yapar:
-1. `kubectl` ile bank-prod `auth-secrets` secret'ından alice parolasını okur. Yalnız bellekte tutulur, tarayıcıya gönderilmez.
-2. bank-prod `auth-server` için `kubectl port-forward` açar (127.0.0.1:18443). Kapanışta sonlandırılır.
+## Yapı
+| Yol | Görev |
+|---|---|
+| `app/[[...slug]]/page.jsx`, `components/Console.jsx` | Ekranlar |
+| `app/api/state`, `app/api/sms` | Oturum durumu, lab SMS kutusu |
+| `app/api/web/otp`, `app/api/web/login` | Web: tek seferlik kod, giriş (Janus `/janus/otp/request`, `/janus/login-user`) |
+| `app/api/transaction` | BALANCE, HISTORY, TRANSFER; 401'de token yenileme ve tekrar deneme |
+| `app/api/logout` | Oturumu temizler |
+| `lib/edge.js` | Edge'e TLS çağrısı (SNI ve Host başlığı kanal hostu) |
+| `lib/janus.js` | Kanal tanımları ve Janus çağrıları |
+| `lib/sessions.js` | Sunucu tarafı oturum deposu (`sid` çerezi, httpOnly) |
 
-Kanal uçları edge üzerinden (`127.0.0.1:8443`, SNI/Host): Janus `web.lab.local` ve `mobile-api.lab.local`, Seal `seal.lab.local`.
+## Ekranlar
+| Adres | Ekran |
+|---|---|
+| `/` | Kanal kartları |
+| `/web` | Web girişi (tek seferlik kod, giriş), sonra hesap işlemleri |
+| `/mobil` | Mobil uygulama: cihaz ve PIN, SMS, alt menü, çıkış (**henüz Next.js'e bağlı değil**, aşağıya bakın) |
+| `/islemler` | Hesap işlemleri (giriş yapılmış kanal) |
+| `/sms` | Lab SMS kutusu (2 sn'de bir yenilenir) |
 
-## Akışlar
+## Durum
+- Web akışı (OTP, giriş, işlemler, çıkış) Next.js route handler'ları üzerinden edge'e bağlanır.
+- Mobil akış henüz taşınmadı. Konsolun yalnız DMZ servislerine gitmesi kuralı nedeniyle mobil token, Janus'a eklenecek bir mobil token uç noktasıyla alınacak; o değişiklik onaylandıktan sonra Seal ve yeni cihaz akışı port edilecek.
+- Eski Python konsolu (`app.py`) ve Vite demo uygulaması (`ui/`) kaldırılmak üzere; bu README yalnız Next.js sürümünü anlatır.
 
-| Kanal | Adımlar | Sonuç |
-|---|---|---|
-| Web | Müşteri no + parola → OTP iste (lab: kod ekranda) → SMS kodu → giriş → bakiye | Client token; `BALANCE` 200 |
-| Mobil | PIN → auth-server (`mobile-app`, PKCE) → Seal PIN ve cihaz imzası → secure-login → mobile-login → bakiye | Client token; `BALANCE` 200 |
-| Mobil (yeni cihaz) | Yeni cihaz kimliği → Seal PIN + imza → OTP + parola (login-user) → aktivasyon (ACTIVE) → PIN kaydı → normal mobil giriş → bakiye | Client token; `BALANCE` 200 |
-
-Web'de Seal yoktur. Mobilde cihaz sertifikası her girişte geçici dizinde device CA ile üretilir ve silinir. Cihaz kimliği tarayıcı oturumunda tutulur: yeni cihazla aktive edilen cihaz, çıkıştan sonra da aynı oturumda "Yeni cihaz" kutusu işaretlenmeden kullanılabilir. Oturumda cihaz yoksa (yeni tarayıcı) önce yeni cihazla aktive edilmelidir. "İlk kez kurulum" kutusu PIN'i cihaza yeniden tanımlar (lab).
-
-İşlem (`BALANCE`) her zaman client token ile `/janus/transaction` üzerinden gider. Janus içeri giderken server token üretir ve channel-gateway'e iletir.
-
-## Bilinen sınırlar (lab)
-
-- Yeni cihaz her seferinde yeni bir cihaz kimliğiyle (`mob-…`) aktive edilir ve LegacyDB'de kalır (lab).
-- Client token (15 dk) ve splash (15 dk) dolunca konsol yenileme token'ı ile (8 saat, tek kullanımlık, her yenilemede döner) otomatik yeniler. Yenileme token'ı da geçersizse "oturum süresi doldu" mesajıyla yeniden giriş gerekir.
-- Mobil yenilemede cihaz durumu kontrol edilir: iptal edilmiş ya da kilitli cihaz yenileme yapamaz. Müşteri durumu yenilemede kontrol edilmez (lab sınırı).
-- PIN durumları Türkçe mesajla gösterilir: hatalı, kilitli, süresi dolmuş (`PIN_MESSAGES`). Yalnız "hatalı" durumu canlı test edildi; kilit ve süre dolumu eşleme olarak tanımlı, uçtan uca denenmedi.
-- OTP lab'da SMS ile gönderilmez; kod yanıtta döner (demo).
-- Captcha değeri `lab-captcha` sabittir.
-- Token'lar tarayıcıya gönderilmez. İşlem yanıtları Janus ve channel-gateway'den gelen JSON'dur.
-- Her mobil girişte auth-server'de yeni bir oturum açılır.
-
-## Güvenlik notu
-
-Sunucu yalnız `127.0.0.1:9000`'e bağlanır. Oturum çerezi `HttpOnly; SameSite=Strict`. Parola ve token'lar diske yazılmaz. Cihaz sertifikası yalnız geçici dizinde üretilir ve giriş bitince silinir. Bu konsol prod'da kullanılmaz.
+## Sınırlar
+- Demo bankası (tarayıcı içi veri) kaldırıldı; veriler DMZ servislerinden gelir.
+- Oturum bilgisi sunucu bellekte tutulur; konsol yeniden başlatılırsa oturumlar düşer.

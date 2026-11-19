@@ -3,8 +3,6 @@ ensure_seal_certs
 load_seal_keys
 SEAL_CERTS="$ROOT/edge/certs/seal"
 
-BUILD_CONTEXT=$(stage_build_context seal-intranet "$ROOT/services/seal-intranet" "tracing.py=$ROOT/shared/tracing.py")
-
 apply_secret "$CLUSTER" "$NAMESPACE" seal-intranet-tls --from-file=server.crt="$SEAL_CERTS/seal-intranet.crt" --from-file=server.key="$SEAL_CERTS/seal-intranet.key"
 apply_secret "$CLUSTER" "$NAMESPACE" si-mock --from-literal=SEAL_MOCK_KEY="$SEAL_MOCK_KEY"
 

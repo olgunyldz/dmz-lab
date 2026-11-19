@@ -4,11 +4,18 @@
 ```bash
 bash scripts/install-all.sh
 ```
-Sıra: cluster'lar → edge CA → nginx ingress controller'ları → Vault → auth-server → platform (compose) → Fortuna → Janus → channel-gateway → Seal Intranet → Seal Mobile → HAProxy → gözlemlenebilirlik.
+Sıra: cluster'lar → taban imajlar (`images/build-base.sh`) → edge CA ve cihaz sertifikaları → nginx ingress controller'ları → Vault → platform (compose) → auth-server → Fortuna → Janus → channel-gateway → Seal Intranet → Seal Mobile → HAProxy → gözlemlenebilirlik.
 
 Betik tekrar çalıştırılabilir (idempotent). Hata durumunda hangi adımda kaldığı günlükte görünür; düzeltilip yeniden çalıştırılabilir.
 
-Önkoşullar: Docker, kind, kubectl, helm, openssl, python3, maven (auth-server derlemesi Docker içinde yapılır).
+Önkoşullar: Docker, kind, kubectl, helm, openssl, python3. Maven ayrı kurulmaz; auth-server derlemesi Docker içinde yapılır.
+
+## Taban imajlar
+```bash
+bash images/build-base.sh                                  # yerel
+BASE_PUSH=1 REGISTRY=<adres> bash images/build-base.sh   # registry'ye gönder
+```
+Sürümler `images/versions.env` içinde. Uygulama imajları bu tabanlardan türer; dağıtımdan önce derlenmiş olmalıdır.
 
 ## Tek uygulama dağıtımı
 ```bash

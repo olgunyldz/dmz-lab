@@ -18,5 +18,5 @@ mtls_secret "$CLUSTER" "$NAMESPACE" fortuna-cgw-client fortuna-cgw-client client
 mtls_secret "$CLUSTER" "$NAMESPACE" fortuna-api-client fortuna-api-client client
 
 SUBST_EXPRS=(
-    "$(subst_ip __MGMT_NODE_IP__ platform-legacydb)"
+    "$(subst_ip __MGMT_NODE_IP__ bridge-legacydb)"
 )

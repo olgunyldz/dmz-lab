@@ -1,5 +1,5 @@
 -- LegacyDB (PostgreSQL 16, ibdb_fortuna) şeması. Tekrar çalıştırılabilir (IF NOT EXISTS).
--- Referans şema (LegacyDB). Monolit başlangıçta tabloları kendisi oluşturur; bu dosya el ile inceleme içindir.
+-- Compose legacydb ilk başlatmasında (docker-entrypoint-initdb.d) yüklenir. Monolit yalnız transactions tablosunu ekler.
 -- Sırlar bu dosyada yok. Demo verisi: seed.sql.
 
 CREATE TABLE IF NOT EXISTS customers (

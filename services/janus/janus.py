@@ -3,6 +3,8 @@
 import hashlib
 import hmac
 import base64
+import http.client
+import re
 import json
 import os
 import secrets
@@ -11,7 +13,7 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.error import HTTPError
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlencode, urlparse, urlsplit
 from urllib.request import Request, urlopen
 
 os.environ.setdefault("SERVICE_NAME", "janus-" + os.environ.get("CHANNEL", "mobile"))
@@ -29,9 +31,22 @@ FORTUNA_CGW_URL = os.environ.get("FORTUNA_CGW_URL", "")
 SMS_OTP_URL = os.environ.get("SMS_OTP_URL", "")
 FORTUNA_URL = os.environ.get("FORTUNA_URL", "")  # Fortuna monolith (legacy-demo, NodePort 30890)
 CHANNEL_GATEWAY_URL = os.environ.get("CHANNEL_GATEWAY_URL", "")  # channel-gateway (bank-prod)
+IDP_USERS_URL = os.environ.get("IDP_USERS_URL", "")  # auth-server kullanıcı oluşturma (HTTPS, Janus CN'i ile mTLS)
 SERVER_TTL = 60  # iç (server) token: kısa ömürlü, yalnız Janus -> channel-gateway
 _PENDING = {}  # flowId -> {customerId, exp}; tek replika (lab)
 _PLOCK = threading.Lock()
+
+
+FIRST_NAMES = ["Ayşe", "Mehmet", "Elif", "Ahmet", "Zeynep", "Mustafa", "Fatma", "Emre", "Derya", "Can",
+               "Selin", "Burak", "Merve", "Kerem", "Gizem", "Oğuz", "Ceren", "Tolga", "Hande", "Serkan"]
+LAST_NAMES = ["Yılmaz", "Kaya", "Demir", "Çelik", "Şahin", "Öztürk", "Aydın", "Arslan", "Doğan", "Kılıç",
+              "Aslan", "Çetin", "Koç", "Kurt", "Özdemir", "Polat", "Güneş", "Erdoğan", "Acar", "Tuncer"]
+
+
+def random_amount(lo, hi):
+    """lo..hi arası rastgele TL tutarı (kuruş dahil), metin olarak."""
+    cents = secrets.randbelow((hi - lo) * 100 + 1)
+    return f"{lo + cents // 100}.{cents % 100:02d}"
 
 
 def b64u(data):
@@ -79,10 +94,101 @@ def _client_ctx():
     return _TLS_CTX
 
 
+# ---- IdP (auth-server) token: yalnız mobil kanal. Parola bu süreçte geçici kullanılır, saklanmaz/loglanmaz. ----
+IDP_HOST = os.environ.get("IDP_HOST", "id.bank.lab.local")
+IDP_PORT = int(os.environ.get("IDP_PORT", "30543"))
+IDP_REALM = "/realms/bank/protocol/openid-connect"
+IDP_CLIENTS = {"web": ("web-app", "https://web.lab.local:8443/callback"),
+               "mobile": ("mobile-app", "com.bank.app:/callback")}
+IDP_CLIENT, IDP_REDIRECT = IDP_CLIENTS.get(CHANNEL, IDP_CLIENTS["mobile"])  # kanala göre IdP istemcisi (PKCE zorunlu)
+# Yenileme token'ı yalnız mobilde (web: oturum Janus client token'ı ile yürür)
+IDP_SCOPE = "openid profile offline_access" if CHANNEL == "mobile" else "openid profile"
+IDP_CLIENT_SECRET = os.environ.get("IDP_CLIENT_SECRET", "")  # mobile-app gizli anahtarı (Janus'ta; konsolda yok)
+
+
+class IdpError(Exception):
+    pass
+
+
+def _idp_conn():
+    ctx = ssl.create_default_context(cafile=TLS_CA)
+    ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+    return http.client.HTTPSConnection(IDP_HOST, IDP_PORT, context=ctx, timeout=15)
+
+
+def _idp_token(form):
+    basic = base64.b64encode(f"{IDP_CLIENT}:{IDP_CLIENT_SECRET}".encode()).decode()
+    conn = _idp_conn()
+    try:
+        conn.request("POST", IDP_REALM + "/token", body=urlencode(form),
+                     headers={"Content-Type": "application/x-www-form-urlencoded", "Authorization": "Basic " + basic})
+        r = conn.getresponse()
+        data = r.read()
+    finally:
+        conn.close()
+    if r.status != 200:
+        raise IdpError(r.status)
+    return json.loads(data or b"{}")
+
+
+def idp_password_login(customer, password):
+    """Authorization Code + PKCE: giriş formu IdP'de doldurulur, kod token'a çevrilir."""
+    verifier = b64u(secrets.token_bytes(32))
+    challenge = b64u(hashlib.sha256(verifier.encode()).digest())
+    q = urlencode({"response_type": "code", "client_id": IDP_CLIENT, "redirect_uri": IDP_REDIRECT,
+                   "scope": IDP_SCOPE, "state": "janus", "code_challenge": challenge,
+                   "code_challenge_method": "S256"})
+    conn = _idp_conn()
+    cookies, code, posted = {}, None, False
+    try:
+        path, method, body, headers = IDP_REALM + "/auth?" + q, "GET", None, {}
+        for _ in range(15):
+            if cookies:
+                headers["Cookie"] = "; ".join(f"{k}={v}" for k, v in cookies.items())
+            conn.request(method, path, body=body, headers=headers)
+            r = conn.getresponse()
+            data = r.read()
+            for sc in r.headers.get_all("Set-Cookie") or []:
+                k, v = sc.split(";")[0].split("=", 1)
+                cookies[k] = v
+            if r.status in (301, 302, 303, 307):
+                loc = r.getheader("Location") or ""
+                if loc.startswith(IDP_REDIRECT):
+                    qs = parse_qs(urlsplit(loc).query)
+                    if "code" not in qs:
+                        raise IdpError(400)     # IdP hata döndü (örn. istemci/kapsam reddi)
+                    code = qs["code"][0]
+                    break
+                p = urlsplit(loc)
+                path, method, body, headers = p.path + ("?" + p.query if p.query else ""), "GET", None, {}
+                continue
+            if r.status == 200 and b'name="_csrf"' in data:
+                if posted:
+                    raise IdpError(401)          # giriş formu tekrar geldi: parola yanlış
+                m = re.search(rb'name="_csrf"[^>]*value="([^"]+)"', data) or re.search(rb'value="([^"]+)"[^>]*name="_csrf"', data)
+                if not m:
+                    raise IdpError(502)
+                body = urlencode({"username": customer.lower(), "password": password, "_csrf": m.group(1).decode()})
+                path, method, headers, posted = "/login", "POST", {"Content-Type": "application/x-www-form-urlencoded"}, True
+                continue
+            raise IdpError(r.status)
+    finally:
+        conn.close()
+    if not code:
+        raise IdpError(502)
+    return _idp_token({"grant_type": "authorization_code", "code": code, "redirect_uri": IDP_REDIRECT,
+                       "code_verifier": verifier})
+
+
+def idp_refresh(refresh_token):
+    return _idp_token({"grant_type": "refresh_token", "refresh_token": refresh_token})
+
+
 def call_upstream(url, body, headers=None):
     path = urlparse(url).path
     peer = ("channel-gateway" if path.startswith("/cg/") else "sms-otp" if path.startswith("/sms/")
-            else "fortuna" if path.startswith("/fortuna/") else "upstream")
+            else "fortuna" if path.startswith("/fortuna/") else "auth-server" if path.startswith("/internal/")
+            else "upstream")
     with tracing.client_span(f"janus->{peer} POST {path}", peer=peer, attrs={"http.url": url}) as sp:
         # traceparent: aktif istemci span'inden; alt servis bu span'i üst kabul eder
         req = Request(url, data=json.dumps(body).encode(), method="POST",
@@ -222,23 +328,27 @@ class Handler(BaseHTTPRequestHandler):
                                     {"flowId": str(req.get("flowId", "")), "code": str(req.get("smsCode", ""))})
             return self._json(st, out)
         if path == "/janus/login-user":
-            # LoginUser: kullanıcı (müşteri no + parola + captcha) Fortuna'da, OTP SmsOtpCGW'de doğrulanır
+            # Web girişi: parola IdP'de doğrulanır (web-app istemcisi, PKCE); ardından SMS OTP (SmsOtpCGW).
+            # Janus client token'ı kanal anahtarıyla (JANUS_KEY_WEB) imzalanır; IdP token'ı saklanmaz.
             flow = str(req.get("flowId", ""))
-            st, out = call_upstream(FORTUNA_CGW_URL, {"customerId": str(req.get("customerId", "")),
-                                                     "password": str(req.get("password", "")),
-                                                     "captcha": str(req.get("captcha", ""))})
-            if st != 200:
-                return self._json(st, out)
+            cust = str(req.get("customerId", "")).strip().upper()
+            try:
+                idp_password_login(cust, str(req.get("password", "")))
+            except IdpError as e:
+                code = e.args[0] if e.args else 502
+                if code in (400, 401):
+                    return self._json(401, {"error": "kimlik doğrulanamadı"})
+                return self._json(502, {"error": "IdP erişilemedi (" + str(code) + ")"})
             st2, out2 = call_upstream(SMS_OTP_URL + "/sms/otp/verify", {"flowId": flow, "code": str(req.get("smsCode", ""))})
             if st2 != 200:
                 return self._json(st2, out2)
-            # Web girişi: Seal yok; OTP tamam -> client token (kanal web). fullName Fortuna'dan gelirse eklenir.
-            cust = str(out.get("customerId") or req.get("customerId", ""))
+            st3, prof = call_upstream(FORTUNA_URL + "/fortuna/customer/profile", {"customerId": cust})
+            full = prof.get("fullName") if st3 == 200 else None
             now = int(time.time())
             token = sign({"sub": cust, "customerId": cust, "ch": CHANNEL, "sid": splash.get("sid"),
                           "iat": now, "exp": now + LOGIN_TTL, "typ": "client", "iss": f"janus-{CHANNEL}"})
             return self._json(200, {"status": "OTP_OK", "customerId": cust, "channel": CHANNEL,
-                                    "fullName": out.get("fullName"), "token": token, "expiresIn": LOGIN_TTL,
+                                    "fullName": full, "token": token, "expiresIn": LOGIN_TTL,
                                     "refreshToken": issue_refresh(cust, splash.get("dev"))})
         if path == "/janus/activation/token":
             # CreateActivationToken: Fortuna -> Seal Intranet (createActivationToken)
@@ -285,6 +395,51 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, {"status": "REFRESHED", "token": token, "expiresIn": LOGIN_TTL,
                                     "customerId": entry["cust"], "channel": CHANNEL,
                                     "refreshToken": issue_refresh(entry["cust"], entry["dev"])})
+        if path == "/janus/mobile/idp-token":
+            # IdP access/refresh token (yalnız mobil). grant=password: yeni cihaz aktivasyonu; grant=refresh: sonraki girişler.
+            if CHANNEL != "mobile":
+                return self._json(404, {"error": "bilinmeyen uç nokta"})
+            try:
+                if req.get("grant") == "refresh":
+                    tok = idp_refresh(str(req.get("refreshToken", "")))
+                else:
+                    tok = idp_password_login(str(req.get("customerId", "")), str(req.get("password", "")))
+            except IdpError as e:
+                code = e.args[0] if e.args else 502
+                if code in (400, 401):
+                    return self._json(401, {"error": "kimlik doğrulanamadı veya oturum yenilenemedi"})
+                return self._json(502, {"error": "IdP erişilemedi (" + str(code) + ")"})
+            return self._json(200, {"accessToken": tok["access_token"], "refreshToken": tok.get("refresh_token"),
+                                    "expiresIn": tok.get("expires_in")})
+        if path == "/janus/customer/create":
+            # Müşteri ekleme: Fortuna (müşteri, hesaplar, açılış bakiyesi) -> IdP (kullanıcı, parola).
+            # Parola yalnız IdP'ye iletilir; Janus saklamaz, loglamaz. IdP başarısızsa Fortuna kaydı geri alınır.
+            if not (IDP_USERS_URL and FORTUNA_URL):
+                return self._json(503, {"error": "müşteri uç noktaları tanımlı değil"})
+            password = str(req.get("password", ""))
+            if len(password) < 8:
+                return self._json(400, {"error": "parola en az 8 karakter olmalı"})
+            for _ in range(5):
+                cust = "C" + f"{secrets.randbelow(10 ** 9):09d}"
+                name = f"{secrets.choice(FIRST_NAMES)} {secrets.choice(LAST_NAMES)}"
+                accounts = [{"type": "vadesiz", "balance": random_amount(1000, 60000)},
+                            {"type": "birikim", "balance": random_amount(500, 25000)}]
+                st, out = call_upstream(FORTUNA_URL + "/fortuna/customer/create",
+                                        {"customerId": cust, "fullName": name, "accounts": accounts})
+                if st == 409:
+                    continue
+                if st != 201:
+                    return self._json(st if st < 500 else 502, {"error": out.get("error") or "Fortuna hatası"})
+                st2, out2 = call_upstream(IDP_USERS_URL, {"username": cust.lower(), "password": password})
+                if st2 == 201:
+                    return self._json(201, {"customerId": cust, "fullName": name, "accounts": out.get("accounts", []),
+                                            "channel": CHANNEL})
+                # IdP yazılamadı: Fortuna kaydını geri al (yarım müşteri kalmasın)
+                call_upstream(FORTUNA_URL + "/fortuna/customer/delete", {"customerId": cust})
+                if st2 == 409:
+                    continue
+                return self._json(st2 if st2 < 500 else 502, {"error": out2.get("error") or "IdP hatası"})
+            return self._json(409, {"error": "müşteri no üretilemedi, yeniden deneyin"})
         return self._json(404, {"error": "bilinmeyen uç nokta"})
 
     def log_message(self, fmt, *args):

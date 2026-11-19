@@ -7,9 +7,41 @@
 | DMZ | `bank-dmz-prod` cluster'ı | Janus web ve mobil (kanal girişleri, ingress arkasında) |
 | DMZ | `codevo-dmz` cluster'ı | Seal Mobile (cihaz tarafı), Seal Intranet (iç API) |
 | Bank | `bank-prod` cluster'ı | auth-server (kimlik sağlayıcı, Spring Authorization Server), Fortuna zinciri, channel-gateway, Vault |
-| Platform | `platform/` (docker compose, host) | LegacyDB, Fortuna monolit (eski çekirdek), Prometheus, Loki, Jaeger, Grafana, köprüler |
+| Platform | `platform/` (docker compose, host) | LegacyDB (lab: PostgreSQL; as-is: MSSQL), Fortuna monolit, Prometheus, Loki, Jaeger, Grafana, köprüler |
 
 Kimlik sağlayıcı (auth-server) ayrı bir kimlik cluster'ında değildir; bank-prod'da `auth` namespace'indedir.
+
+## Kanallar (as-is)
+| Kanal | Durum | Giriş |
+|---|---|---|
+| Mobil | aktif | Janus mobil (mobile-api.lab.local), Seal Mobile |
+| Web | planlı | Janus web (web.lab.local) |
+| Şube | planlı | — |
+| Çağrı merkezi | planlı | — |
+| POS | planlı | — |
+| ATM | planlı | — |
+| Partner | planlı | B2B entegrasyon |
+
+Aktif akışlar web ve mobildir; diğer kanallar planlıdır ve demoda yoktur. Konsolda diğer kanallar "Yakında" olarak gösterilir.
+
+## Fortuna monolit
+As-is mimaride Fortuna monolit **Windows IIS** üzerinde, on-prem bir Windows Server'da çalışır (hesap, hareket, havale, PIN doğrulayıcı, mobil cihaz kaydı). Kubernetes içindeki Fortuna zinciri (CGW, API, ACL, SMS) bu monolitle ve LegacyDB ile konuşur.
+Lab'da monolit bir Python mock'udur ve platform compose içinde çalışır (`services/legacy-monolith`); uç noktaları ve sözleşmesi as-is ile aynıdır.
+
+## Veritabanı (as-is)
+LegacyDB as-is mimaride **MSSQL**'dir (on-prem). Lab'da aynı şemanın karşılığı PostgreSQL 16'dır (platform compose); sorgu ve şema farkları lab'a özgüdür.
+
+## Kurumsal servisler (as-is)
+| Bileşen | As-is rolü | Durum |
+|---|---|---|
+| Kafka | olay akışı | varsayım, doğrulanacak |
+| RabbitMQ | asenkron kuyruk | varsayım, doğrulanacak |
+| Redis | önbellek / oturum | varsayım, doğrulanacak |
+| Dynatrace | APM, uçtan uca iz | kurumsal |
+| Prometheus, Grafana | metrik ve panolar | kurumsal ve lab'da var |
+| ELK (Elasticsearch, Logstash, Kibana) | log | kurumsal |
+
+Lab karşılıkları: Dynatrace → Jaeger, ELK → Loki. Kafka, RabbitMQ ve Redis lab'da yoktur.
 
 ## Trafik akışları (özet)
 - **Web / mobil girişi:** tarayıcı veya mobil uygulama → edge (HAProxy, TLS sonlandırma) → bank-dmz-prod nginx ingress (host tabanlı) → Janus → channel-gateway → Fortuna zinciri (CGW → API → ACL) → LegacyDB. Kimlik doğrulama ve token'lar auth-server'dan alınır.
@@ -32,3 +64,19 @@ Kimlik sağlayıcı (auth-server) ayrı bir kimlik cluster'ında değildir; bank
 
 ## Servis adları
 Servis adları küme içi DNS'te ve sertifikalarda kullanılır. Kimlik sağlayıcı `auth-server` adıyla geçer; Java paketi `dev.dmzlab.auth`'tır; yapılandırma öneki `auth.*`, ortam değişkenleri `AUTH_*`'tır.
+
+## As-is mimari: aktif-aktif ve DR (kurumsal mimari; bu demoda gösterilmez)
+- **Siteler:** Site A ve Site B aktif çalışır; Site C bölgesel felaket kurtarma (DR) sitesidir (ılık yedek: veri replikası, Vault DR, manifest ve imaj hazır).
+- **Yük dengeleme:** GSLB/DNS, sağlık kontrolüyle A ve B arasında dağıtır; her sitede edge HAProxy HA çifti (VIP).
+- **Durumsuz katman:** auth-server, Fortuna zinciri, channel-gateway, Janus ve Seal çoklu örnekle çalışır.
+- **Veri:** LegacyDB'nin bugünkü tek yazıcılı modeli korunur; B'deki yazmalar A'ya yönlenir, A → B senkron replika, A → C asenkron replika.
+- **Sırlar:** Vault raft kümesi A ve B'de üye, DR'de replika.
+
+### Demoda gösterilmeyen konular (as-is'te tanımlı)
+1. LegacyDB yazma modeli: bölüm (müşteri) bazlı sahiplik veya çok yazıcılı çözüm.
+2. Seal Intranet cihaz kaydı bellek içinde; çoklu örnek için kalıcı depo.
+3. Oturum ve tek aktif giriş durumu auth-server veritabanında (durumsuz örnekler).
+4. Jaeger bellek içi depolama; merkezi arka uç.
+5. RTO/RPO hedefleri ve DNS TTL'si.
+
+Diyagramlar: `docs/dmz-lab.drawio` (Demo, As-is mimari, Topoloji sayfaları). Demo yalnızca tek site ve tek örneği çalıştırır.

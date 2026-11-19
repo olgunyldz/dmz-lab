@@ -18,14 +18,14 @@ services/<ad>/   kaynak kod, Dockerfile, testler (imajın bağlamı)
 | `NAMESPACE` | evet | Hedef namespace; yoksa oluşturulur (etiketlerle) |
 | `MANIFEST` | evet | Boşlukla ayrılmış manifest yolları; **`apps/<ad>/` altına göredir** (örn. `manifests/janus.yaml manifests/ingress.yaml`) |
 | `ROLLOUT` | evet | Yeniden başlatılıp beklenecek deployment adları |
-| `IMAGE`, `BUILD_CONTEXT` | hayır | İmaj adı ve build bağlamı; **repo köküne göre** (örn. `services/janus`) |
-| `CODE_CM`, `CODE_FILES` | hayır | Kod ConfigMap'i ve kaynakları (`hedef=kaynak`, repo köküne göre) |
+| `IMAGE`, `BUILD_CONTEXT` | evet (uygulama imajı) | İmaj adı ve build bağlamı; **repo köküne göre** (örn. `services/janus`). Her uygulamanın bir imajı vardır. |
+| `CODE_CM`, `CODE_FILES` | hayır | Yalnızca konfigürasyon dosyaları için ConfigMap (kod için değil; örn. iç CA). Kod imajın içindedir. |
 | `PRE_HOOK` | hayır | Hook dosyası; **`apps/<ad>/` altına göre** (genelde `hook.sh`) |
 | `METRICS` | hayır | Prometheus scrape hedefleri: `job\|scheme\|host:port\|path` (boşlukla ayrılmış) |
 
 ## Hook sözleşmesi (`hook.sh`)
 - **Girdi:** `ROOT`, `CLUSTER`, `NAMESPACE`. Hook, deploy script'i tarafından `source` edilir.
-- **Çıktı:** `SUBST_EXPRS` dizisi (sed ifadeleri; `subst_ip`, `subst_expr` ile üretilir). İsteğe bağlı `BUILD_CONTEXT` (ör. `stage_build_context` ile `.build/<ad>` hazırlanır).
+- **Çıktı:** `SUBST_EXPRS` dizisi (sed ifadeleri; `subst_ip`, `subst_expr` ile üretilir).
 - **Yasak:** ham `kubectl`, `openssl`, `docker` çağrısı yerine `scripts/lib/cluster.sh` helper'ları kullanılır.
 
 Kullanılabilir helper'lar:
@@ -35,7 +35,6 @@ Kullanılabilir helper'lar:
 | `secret_value`, `secret_exists` | Secret okuma ve varlık kontrolü (cross-cluster okumalar dahil) |
 | `mtls_secret`, `ensure_mtls_certs` | mTLS secret'ı (server.* / client.* anahtarları) |
 | `subst_ip`, `subst_expr` | Placeholder doldurma |
-| `stage_build_context` | Build klasörü hazırlama |
 | `ensure_seal_certs`, `load_seal_keys` | Seal sertifikaları ve paylaşılan anahtarlar |
 | `vault_get`, `vault_kv_set`, `vault_exec`, `vault_bootstrapped` | Vault erişimi |
 | `env_get` | `platform/.env` okuma |
@@ -58,17 +57,17 @@ Kullanılabilir helper'lar:
 ## Mevcut uygulamalar
 | Ad | Cluster / ns | İmaj | Not |
 |---|---|---|---|
-| auth-server | bank-prod / auth | evet | Spring Boot, Postgres aynı manifest'te, ingress: id.bank.lab.local |
-| fortuna | bank-prod / channel | hayır (ConfigMap) | CGW, API, ACL, SMS mock; NodePort 30880/30881 |
-| janus | bank-dmz-prod / janus | hayır (ConfigMap) | web ve mobil; ingress: web.lab.local, mobile-api.lab.local |
-| channel-gateway | bank-prod / channel | hayır (ConfigMap) | janus-keys'e bağlı |
-| seal-intranet | codevo-dmz / seal-intranet | evet | ingress: seal-intranet.lab.local (passthrough) |
-| seal-mobile | codevo-dmz / seal-mobile | evet | ingress: seal.lab.local (passthrough) |
+| auth-server | bank-prod / auth | dmz-lab/auth-server (Java) | Postgres aynı manifest'te, ingress: id.bank.lab.local |
+| fortuna | bank-prod / channel | dmz-lab/fortuna (4 rol, ROLE ile) | CGW, API, ACL, SMS mock; NodePort 30880/30881. Monolit (as-is: Windows IIS) bu uygulamanın parçası değil |
+| janus | bank-dmz-prod / janus | dmz-lab/janus | web ve mobil; ingress: web.lab.local, mobile-api.lab.local |
+| channel-gateway | bank-prod / channel | dmz-lab/channel-gateway | janus-keys'e bağlı |
+| seal-intranet | codevo-dmz / seal-intranet | dmz-lab/seal-intranet | ingress: seal-intranet.lab.local (passthrough) |
+| seal-mobile | codevo-dmz / seal-mobile | dmz-lab/seal-mobile | ingress: seal.lab.local (passthrough) |
 
 ## Yeni uygulama eklemek
 1. `apps/<ad>/app.env` yaz (yukarıdaki anahtarlar).
 2. Gerekiyorsa `apps/<ad>/hook.sh` yaz.
 3. `apps/<ad>/manifests/` altına manifest'leri koy.
-4. `services/<ad>/` altına kaynağı ve Dockerfile'ı koy (imaj gerekiyorsa).
+4. `services/<ad>/` altına kaynağı ve Dockerfile'ı koy (taban imajdan başlasın).
 5. `Jenkinsfile` içindeki seçenek listesine ve gerekiyorsa `all` sırasına ekle.
 6. `bash scripts/deploy-app.sh <ad>` ile dene.

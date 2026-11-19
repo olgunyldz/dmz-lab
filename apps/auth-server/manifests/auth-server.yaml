@@ -87,6 +87,7 @@ spec:
             - name: AUTH_DB_PASSWORD
               valueFrom: {secretKeyRef: {name: auth-secrets, key: AUTH_DB_PASSWORD}}
             - {name: AUTH_INTERNAL_CALLERS, value: "gw-internal,seal-mobile"}
+            - {name: AUTH_INTERNAL_USER_ADMINS, value: "janus-web,janus-mobile"}
             - {name: AUTH_SEAL_URL, value: "https://seal-intranet.lab.local:30456"}
             - name: AUTH_INTERNAL_API_KEY
               valueFrom: {secretKeyRef: {name: auth-secrets, key: AUTH_INTERNAL_API_KEY}}
@@ -115,6 +116,8 @@ spec:
               valueFrom: {secretKeyRef: {name: auth-secrets, key: SEAL_B2B_SECRET}}
             - name: SEAL_MOBILE_SECRET
               valueFrom: {secretKeyRef: {name: auth-secrets, key: SEAL_MOBILE_SECRET}}
+            - name: MOBILE_APP_SECRET
+              valueFrom: {secretKeyRef: {name: auth-secrets, key: MOBILE_APP_SECRET}}
           ports:
             - containerPort: 8443
             - containerPort: 8080

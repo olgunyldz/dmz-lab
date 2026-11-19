@@ -16,13 +16,12 @@ spec:
       automountServiceAccountToken: false
       hostAliases:
         - ip: "__BANKPROD_NODE_IP__"
-          hostnames: ["fortuna-users-cgw.channel.svc", "sms-otp-cgw.channel.svc", "channel-gateway.channel.svc"]
+          hostnames: ["fortuna-users-cgw.channel.svc", "sms-otp-cgw.channel.svc", "channel-gateway.channel.svc", "id.bank.lab.local"]
         - ip: "__LEGACY_NODE_IP__"
           hostnames: ["fortuna-mock.fortuna.svc"]
       containers:
         - name: janus
-          image: python:3.12-alpine
-          command: ["python", "/app/janus.py"]
+          image: dmz-lab/janus:0.1.0
           env:
             - {name: OTLP_ENDPOINT, value: "__OTLP_URL__"}
             - {name: CHANNEL, value: mobile}
@@ -31,6 +30,9 @@ spec:
             - {name: SMS_OTP_URL, value: "https://sms-otp-cgw.channel.svc:30881"}
             - {name: FORTUNA_URL, value: "https://fortuna-mock.fortuna.svc:30890"}
             - {name: CHANNEL_GATEWAY_URL, value: "https://channel-gateway.channel.svc:30990"}
+            - {name: IDP_USERS_URL, value: "https://id.bank.lab.local:30543/internal/users"}
+            - name: IDP_CLIENT_SECRET
+              valueFrom: {secretKeyRef: {name: janus-idp, key: MOBILE_APP_SECRET}}
             - {name: JANUS_TLS_CERT, value: /mtls/client.crt}
             - {name: JANUS_TLS_KEY, value: /mtls/client.key}
             - {name: JANUS_TLS_CA, value: /mtls/ca.crt}
@@ -49,11 +51,8 @@ spec:
             readOnlyRootFilesystem: true
             capabilities: {drop: ["ALL"]}
           volumeMounts:
-            - {name: app, mountPath: /app, readOnly: true}
             - {name: mtls, mountPath: /mtls, readOnly: true}
       volumes:
-        - name: app
-          configMap: {name: janus-code}
         - name: mtls
           secret: {secretName: janus-mtls-mobile}
 ---
@@ -73,13 +72,12 @@ spec:
       automountServiceAccountToken: false
       hostAliases:
         - ip: "__BANKPROD_NODE_IP__"
-          hostnames: ["fortuna-users-cgw.channel.svc", "sms-otp-cgw.channel.svc", "channel-gateway.channel.svc"]
+          hostnames: ["fortuna-users-cgw.channel.svc", "sms-otp-cgw.channel.svc", "channel-gateway.channel.svc", "id.bank.lab.local"]
         - ip: "__LEGACY_NODE_IP__"
           hostnames: ["fortuna-mock.fortuna.svc"]
       containers:
         - name: janus
-          image: python:3.12-alpine
-          command: ["python", "/app/janus.py"]
+          image: dmz-lab/janus:0.1.0
           env:
             - {name: OTLP_ENDPOINT, value: "__OTLP_URL__"}
             - {name: CHANNEL, value: web}
@@ -88,6 +86,9 @@ spec:
             - {name: SMS_OTP_URL, value: "https://sms-otp-cgw.channel.svc:30881"}
             - {name: FORTUNA_URL, value: "https://fortuna-mock.fortuna.svc:30890"}
             - {name: CHANNEL_GATEWAY_URL, value: "https://channel-gateway.channel.svc:30990"}
+            - {name: IDP_USERS_URL, value: "https://id.bank.lab.local:30543/internal/users"}
+            - name: IDP_CLIENT_SECRET
+              valueFrom: {secretKeyRef: {name: janus-idp, key: WEB_APP_SECRET}}
             - {name: JANUS_TLS_CERT, value: /mtls/client.crt}
             - {name: JANUS_TLS_KEY, value: /mtls/client.key}
             - {name: JANUS_TLS_CA, value: /mtls/ca.crt}
@@ -106,11 +107,8 @@ spec:
             readOnlyRootFilesystem: true
             capabilities: {drop: ["ALL"]}
           volumeMounts:
-            - {name: app, mountPath: /app, readOnly: true}
             - {name: mtls, mountPath: /mtls, readOnly: true}
       volumes:
-        - name: app
-          configMap: {name: janus-code}
         - name: mtls
           secret: {secretName: janus-mtls-web}
 ---

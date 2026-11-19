@@ -5,14 +5,14 @@
 
 LIB_REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
-# Bir kind container'ının kind ağındaki IP'si (düğüm IP'si, köprü IP'si). Örn: docker_ip platform-tempo
+# Bir kind container'ının kind ağındaki IP'si (düğüm IP'si, köprü IP'si). Örn: docker_ip bridge-jaeger
 docker_ip() {
     docker inspect -f '{{ index .NetworkSettings.Networks "kind" "IPAddress" }}' "$1"
 }
 
-# Platform OTLP kabulü (Jaeger, kind ağındaki platform-tempo köprüsü, port 30318). Çıktı: http://IP:30318
+# Platform OTLP kabulü (Jaeger, kind ağındaki bridge-jaeger köprüsü, port 30318). Çıktı: http://IP:30318
 otlp_url() {
-    echo "http://$(docker_ip platform-tempo):30318"
+    echo "http://$(docker_ip bridge-jaeger):30318"
 }
 
 # Cluster yoksa oluşturur. <cluster>
@@ -164,22 +164,11 @@ subst_expr() { printf 's|%s|%s|' "$1" "$2"; }
 # Kind düğümü (docker container) IP'si ile placeholder: subst_ip <__PLACEHOLDER__> <container>
 subst_ip() { subst_expr "$1" "$(docker_ip "$2")"; }
 
-# Build bağlamı hazırla: <app> <kaynak-klasör> [ek dosya kaynakları...] -> .build/<app>; çıktı yolu
-# Ek dosyalar "hedef=kaynak" biçiminde ya da yalnızca kaynak (taban adıyla kopyalanır).
-stage_build_context() {
-    local app="$1" src="$2"; shift 2
-    local dst="$LIB_REPO/.build/$app"
-    rm -rf "$dst" && mkdir -p "$dst"
-    cp -r "$src/." "$dst/"
-    local pair
-    for pair in "$@"; do
-        if [[ "$pair" == *=* ]]; then cp "${pair#*=}" "$dst/${pair%%=*}"; else cp "$pair" "$dst/"; fi
-    done
-    echo "$dst"
-}
-
 # Seal sertifikaları (edge/certs/seal, edge/certs/device) yoksa üretilir.
-ensure_seal_certs() { [[ -f "$LIB_REPO/edge/certs/seal/seal-mobile.crt" ]] || bash "$LIB_REPO/edge/scripts/gen-seal-certs.sh"; }
+ensure_seal_certs() {
+    local d="$LIB_REPO/edge/certs/seal"
+    [[ -f "$d/seal-mobile.crt" && -f "$d/seal-mobile-internal.crt" ]] || bash "$LIB_REPO/edge/scripts/gen-seal-certs.sh"
+}
 
 # Seal paylaşılan anahtarları (SEAL_PM_KEY, SEAL_MOCK_KEY) Vault'tan yükler/üretir.
 load_seal_keys() { source "$LIB_REPO/scripts/seal-keys.sh"; }

@@ -42,6 +42,7 @@ class Seeder implements ApplicationRunner {
     private final String coreSecret;
     private final String sealB2bSecret;
     private final String sealMobileSecret;
+    private final String mobileAppSecret;
 
     Seeder(RegisteredClientRepository clients, UserDetailsManager users, PasswordEncoder encoder,
            @Value("${auth.users.alice.password}") String alicePassword,
@@ -51,7 +52,8 @@ class Seeder implements ApplicationRunner {
            @Value("${auth.clients.bff.secret}") String bffSecret,
            @Value("${auth.clients.core-svc.secret}") String coreSecret,
            @Value("${auth.clients.seal-b2b.secret}") String sealB2bSecret,
-           @Value("${auth.clients.seal-mobile.secret}") String sealMobileSecret) {
+           @Value("${auth.clients.seal-mobile.secret}") String sealMobileSecret,
+           @Value("${auth.clients.mobile-app.secret}") String mobileAppSecret) {
         this.clients = clients;
         this.users = users;
         this.encoder = encoder;
@@ -63,6 +65,7 @@ class Seeder implements ApplicationRunner {
         this.coreSecret = coreSecret;
         this.sealB2bSecret = sealB2bSecret;
         this.sealMobileSecret = sealMobileSecret;
+        this.mobileAppSecret = mobileAppSecret;
     }
 
     @Override
@@ -104,15 +107,18 @@ class Seeder implements ApplicationRunner {
                 .clientSettings(ClientSettings.builder().requireProofKey(true).build())
                 .build();
 
-        // Mobil: public istemci, PKCE zorunlu
+        // Mobil: gizli anahtarlı istemci (sır Janus'ta), PKCE zorunlu. Public istemcilere Spring AS yenileme
+        // token'ı vermez; mobilde parolasız yeniden giriş için yenileme token'ı gerekir.
         RegisteredClient mobileApp = RegisteredClient.withId(UUID.randomUUID().toString())
                 .clientId("mobile-app")
-                .clientAuthenticationMethod(ClientAuthenticationMethod.NONE)
+                .clientSecret(encoder.encode(mobileAppSecret))
+                .clientAuthenticationMethod(ClientAuthenticationMethod.CLIENT_SECRET_BASIC)
                 .authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
                 .authorizationGrantType(AuthorizationGrantType.REFRESH_TOKEN)
                 .redirectUri("com.bank.app:/callback")
                 .scope(OidcScopes.OPENID)
                 .scope(OidcScopes.PROFILE)
+                .scope("offline_access") // yenileme token'ı (mobil: parolasız yeniden giriş)
                 .clientSettings(ClientSettings.builder().requireProofKey(true).build())
                 .build();
 

@@ -7,6 +7,7 @@ import hashlib
 import hmac
 import http.client
 import psycopg
+from decimal import Decimal
 import secrets
 import json
 import os
@@ -105,6 +106,71 @@ def customer_accounts(customer_id):
 
 # ---- Bankacılık işlemleri (lab): hesap hareketleri ve havale. Tek transaction, satır kilidi ile. ----
 TRANSFER_LIMIT = 50000  # TRY, tek işlem üst sınırı (lab)
+
+# ---- Müşteri oluşturma (Janus üzerinden, lab): müşteri + hesaplar + açılış hareketi tek transaction ----
+CUSTOMER_ID_RE = re.compile(r"^C\d{9}$")
+ACCOUNT_TYPES = ("vadesiz", "birikim")
+
+
+def customer_create(req):
+    cid = str(req.get("customerId", ""))
+    name = str(req.get("fullName", "")).strip()
+    accts = req.get("accounts") or []
+    if not CUSTOMER_ID_RE.match(cid):
+        return 400, {"error": "müşteri no geçersiz"}
+    if not (3 <= len(name) <= 60):
+        return 400, {"error": "ad geçersiz"}
+    if not isinstance(accts, list) or not (1 <= len(accts) <= 3):
+        return 400, {"error": "hesap listesi geçersiz"}
+    rows = []
+    for a in accts:
+        t = str(a.get("type", ""))
+        if t not in ACCOUNT_TYPES:
+            return 400, {"error": "hesap türü geçersiz"}
+        try:
+            bal = Decimal(str(a.get("balance"))).quantize(Decimal("0.01"))
+        except Exception:
+            return 400, {"error": "bakiye geçersiz"}
+        if bal < 0 or bal > Decimal("1000000000"):
+            return 400, {"error": "bakiye aralık dışı"}
+        rows.append((t, bal))
+    out = []
+    with psycopg.connect(DB_DSN) as conn:  # tek transaction: hata olursa hiçbir satır kalmaz
+        if conn.execute("SELECT 1 FROM customers WHERE customer_id = %s", (cid,)).fetchone():
+            return 409, {"error": "müşteri zaten var"}
+        conn.execute("INSERT INTO customers (customer_id, seal_owner_id, full_name, status) "
+                     "VALUES (%s, %s, %s, 'ACTIVE')", (cid, cid.lower(), name))
+        for t, bal in rows:
+            no = None
+            for _ in range(10):
+                cand = "TR" + f"{secrets.randbelow(10 ** 12):012d}"
+                if not conn.execute("SELECT 1 FROM accounts WHERE account_no = %s", (cand,)).fetchone():
+                    no = cand
+                    break
+            if no is None:
+                raise RuntimeError("hesap numarası üretilemedi")
+            conn.execute("INSERT INTO accounts (account_no, customer_id, account_type, balance, currency) "
+                         "VALUES (%s, %s, %s, %s, 'TRY')", (no, cid, t, bal))
+            conn.execute("INSERT INTO transactions (account_no, direction, counterpart, amount, balance_after, description) "
+                         "VALUES (%s, 'CREDIT', 'AÇILIŞ', %s, %s, 'Hesap açılış bakiyesi')", (no, bal, bal))
+            out.append({"id": no, "type": t, "balance": str(bal), "currency": "TRY"})
+    return 201, {"customerId": cid, "fullName": name, "accounts": out}
+
+
+def customer_delete(req):
+    # Yalnız bu akışla oluşturulmuş müşteriler (seal_owner_id = küçük harf müşteri no) silinir; seed verisi korunur.
+    cid = str(req.get("customerId", ""))
+    if not CUSTOMER_ID_RE.match(cid):
+        return 400, {"error": "müşteri no geçersiz"}
+    with psycopg.connect(DB_DSN) as conn:
+        ok = conn.execute("SELECT 1 FROM customers WHERE customer_id = %s AND seal_owner_id = %s",
+                          (cid, cid.lower())).fetchone()
+        if not ok:
+            return 404, {"error": "silinecek müşteri bulunamadı"}
+        conn.execute("DELETE FROM transactions WHERE account_no IN (SELECT account_no FROM accounts WHERE customer_id = %s)", (cid,))
+        conn.execute("DELETE FROM accounts WHERE customer_id = %s", (cid,))
+        conn.execute("DELETE FROM customers WHERE customer_id = %s", (cid,))
+    return 200, {"deleted": cid}
 
 
 class TxError(Exception):
@@ -366,6 +432,18 @@ class Handler(BaseHTTPRequestHandler):
         req = self._body()
         if req is None:
             return self._json(400, {"error": "geçersiz JSON"})
+        if path == "/fortuna/customer/profile":
+            cid = str(req.get("customerId", ""))
+            name = customer_name(cid) if CUSTOMER_ID_RE.match(cid) else None
+            if not name:
+                return self._json(404, {"error": "müşteri bulunamadı"})
+            return self._json(200, {"customerId": cid, "fullName": name})
+        if path == "/fortuna/customer/create":
+            code, out = customer_create(req)
+            return self._json(code, out)
+        if path == "/fortuna/customer/delete":
+            code, out = customer_delete(req)
+            return self._json(code, out)
         if path.startswith("/seal-pm/"):
             code, out = pm_handle(self.headers.get("X-Seal-Key", ""), path, req)
             return self._json(code, out)

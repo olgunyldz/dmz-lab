@@ -12,12 +12,13 @@ Amaç, kurumsal bir ortamın (Jenkins ile dağıtım, ayrı cluster'lar, ayrı k
 | [operasyon.md](operasyon.md) | Kurulum, tek uygulama dağıtımı, Jenkins, purge, araçlar |
 | [gozlemlenebilirlik.md](gozlemlenebilirlik.md) | Log, metrik ve iz akışı |
 | [seal-vendor-sorular.md](seal-vendor-sorular.md) | Seal ürünü tedarikçisine sorulacak sorular |
-| `drawio/` | Diyagram üretici kodu. Çıktı diyagramları bu dokümanın son halini yansıtmayabilir. |
+| `dmz-lab.drawio` | Diyagramlar (14 sayfa: demo, lab cluster/namespace/pod yapısı, ingress kuralları, web ve mobil uçtan uca, sırlar ve veri, as-is batıdan doğuya, as-is DR, topoloji, ağ/portlar, dağıtım, üç sıra diyagramı). Kaynak: `node docs/drawio/gen-all.js` |
 
 ## Dizin yapısı
 ```
 apps/<ad>/            uygulama: app.env (katalog), hook.sh (sır/sertifika), manifests/ (K8s)
-services/<ad>/        uygulama kaynağı, Dockerfile, testler
+services/<ad>/        uygulama kaynağı, Dockerfile (taban imajdan), testler
+images/               taban imajlar (python, java), sürüm sabitleri, build-base.sh
 infra/clusters/<c>/   cluster tanımı (kind-config.yaml)
 infra/vault/          Vault manifest'i ve ilk başlatma betiği
 platform/             host üzerindeki docker compose yığını (LegacyDB, monolit, Prometheus, Loki, Jaeger, Grafana, köprüler)

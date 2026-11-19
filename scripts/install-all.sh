@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # Sıfırdan kurulum (tekrar çalıştırılabilir). Sıra bağımlılıklara göre:
-#   1) kind cluster'ları (infra/clusters/<ad>/kind-config.yaml)
+#   1) kind cluster'ları (infra/clusters/<ad>/kind-config.yaml) ve taban imajlar (images/build-base.sh)
 #   2) edge iç CA sertifikaları
 #   3) nginx ingress controller (her cluster'da; helm, scripts/lib/cluster.sh: install_ingress)
 #   4) Vault (bank-prod, infra/vault/load-vault.sh)
-#   5) auth-server          apps/auth-server   (manifest + ingress)
-#   6) Platform (compose)   platform/scripts/up.sh (LegacyDB, monolit, Loki, Jaeger, Prometheus, Grafana, köprüler)
+#   5) Platform (compose)   platform/scripts/up.sh (LegacyDB, monolit, Loki, Jaeger, Prometheus, Grafana, köprüler)
+#                           auth-server'dan önce: iz köprüsü ve sırlar Vault'tan gelir
+#   6) auth-server          apps/auth-server   (manifest + ingress)
 #   7) Fortuna zinciri      apps/fortuna
 #   8) Janus web/mobil      apps/janus         (manifest + ingress)
 #   9) channel-gateway      apps/channel-gateway
@@ -24,8 +25,12 @@ source "$ROOT/scripts/lib/cluster.sh"
 echo "== 1) kind cluster'ları"
 for c in bank-prod bank-dmz-prod codevo-dmz; do ensure_cluster "$c"; done
 
-echo "== 2) edge iç CA sertifikaları"
+echo "== 1b) taban imajlar (dmz-lab/base-python, dmz-lab/base-java)"
+bash images/build-base.sh
+
+echo "== 2) edge CA ve cihaz sertifikaları"
 [[ -f edge/certs/internal-ca.crt ]] || { bash edge/scripts/gen-certs.sh; bash edge/scripts/gen-internal-certs.sh; }
+[[ -f edge/certs/device/device-ca.crt ]] || bash edge/scripts/gen-device-certs.sh
 
 echo "== 3) nginx ingress controller"
 helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx >/dev/null 2>&1 || true
@@ -35,8 +40,8 @@ install_ingress codevo-dmz    30080 30456 true
 install_ingress bank-prod     30081 30543 true
 
 echo "== 4) Vault";              bash infra/vault/load-vault.sh
-echo "== 5) auth-server";        bash scripts/deploy-app.sh auth-server
-echo "== 6) Platform";           bash platform/scripts/up.sh
+echo "== 5) Platform";           bash platform/scripts/up.sh
+echo "== 6) auth-server";        bash scripts/deploy-app.sh auth-server
 echo "== 7) Fortuna";            bash scripts/deploy-app.sh fortuna
 echo "== 8) Janus";              bash scripts/deploy-app.sh janus
 echo "== 9) channel-gateway";    bash scripts/deploy-app.sh channel-gateway

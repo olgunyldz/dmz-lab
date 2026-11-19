@@ -9,5 +9,5 @@ mtls_secret "$CLUSTER" "$NAMESPACE" channel-gateway-tls channel-gateway server
 mtls_secret "$CLUSTER" "$NAMESPACE" channel-gateway-client channel-gateway-client client
 
 SUBST_EXPRS=(
-    "$(subst_ip __LEGACY_NODE_IP__ platform-fortuna-bridge)"
+    "$(subst_ip __LEGACY_NODE_IP__ bridge-fortuna)"
 )

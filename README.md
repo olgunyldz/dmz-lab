@@ -9,6 +9,7 @@ Ayrıntılı dokümantasyon: [docs/README.md](docs/README.md)
 |---|---|
 | `apps/<ad>/` | Uygulama: katalog (`app.env`), hook (`hook.sh`), manifest'ler |
 | `services/<ad>/` | Uygulama kaynağı ve Dockerfile |
+| `images/` | Taban imajlar (python, java) ve sürüm sabitleri |
 | `infra/` | Cluster tanımları ve Vault |
 | `platform/` | Host üzerindeki docker compose yığını |
 | `edge/` | HAProxy ve sertifika betikleri |

@@ -15,8 +15,7 @@ spec:
       automountServiceAccountToken: false
       containers:
         - name: app
-          image: python:3.12-alpine
-          command: ["sh", "-c", "pip install -q --no-cache-dir psycopg[binary]==3.2.3 && python /app/fortuna_stack.py"]
+          image: dmz-lab/fortuna:0.1.0
           env:
             - {name: OTLP_ENDPOINT, value: "__OTLP_URL__"}
             - {name: ROLE, value: cgw}
@@ -32,12 +31,9 @@ spec:
           ports: [{containerPort: 8443}]
           readinessProbe: {httpGet: {path: /health, port: 8443, scheme: HTTPS}, initialDelaySeconds: 15, periodSeconds: 5}
           volumeMounts:
-            - {name: app, mountPath: /app, readOnly: true}
             - {name: tls, mountPath: /tls, readOnly: true}
             - {name: mtls-client, mountPath: /mtls-client, readOnly: true}
       volumes:
-        - name: app
-          configMap: {name: fortuna-code}
         - name: tls
           secret: {secretName: fortuna-cgw-tls}
         - name: mtls-client
@@ -57,8 +53,7 @@ spec:
       automountServiceAccountToken: false
       containers:
         - name: app
-          image: python:3.12-alpine
-          command: ["sh", "-c", "pip install -q --no-cache-dir psycopg[binary]==3.2.3 && python /app/fortuna_stack.py"]
+          image: dmz-lab/fortuna:0.1.0
           env:
             - {name: OTLP_ENDPOINT, value: "__OTLP_URL__"}
             - {name: ROLE, value: api}
@@ -74,12 +69,9 @@ spec:
           ports: [{containerPort: 8443}]
           readinessProbe: {httpGet: {path: /health, port: 8443, scheme: HTTPS}, initialDelaySeconds: 15, periodSeconds: 5}
           volumeMounts:
-            - {name: app, mountPath: /app, readOnly: true}
             - {name: tls, mountPath: /tls, readOnly: true}
             - {name: mtls-client, mountPath: /mtls-client, readOnly: true}
       volumes:
-        - name: app
-          configMap: {name: fortuna-code}
         - name: tls
           secret: {secretName: fortuna-api-tls}
         - name: mtls-client
@@ -102,8 +94,7 @@ spec:
           hostnames: ["legacydb.data.svc"]
       containers:
         - name: app
-          image: python:3.12-alpine
-          command: ["sh", "-c", "pip install -q --no-cache-dir psycopg[binary]==3.2.3 && python /app/fortuna_stack.py"]
+          image: dmz-lab/fortuna:0.1.0
           env:
             - {name: OTLP_ENDPOINT, value: "__OTLP_URL__"}
             - {name: ROLE, value: acl}
@@ -121,11 +112,8 @@ spec:
           ports: [{containerPort: 8443}]
           readinessProbe: {httpGet: {path: /health, port: 8443, scheme: HTTPS}, initialDelaySeconds: 15, periodSeconds: 5}
           volumeMounts:
-            - {name: app, mountPath: /app, readOnly: true}
             - {name: tls, mountPath: /tls, readOnly: true}
       volumes:
-        - name: app
-          configMap: {name: fortuna-code}
         - name: tls
           secret: {secretName: fortuna-acl-tls}
 ---
@@ -143,8 +131,7 @@ spec:
       automountServiceAccountToken: false
       containers:
         - name: app
-          image: python:3.12-alpine
-          command: ["python", "/app/fortuna_stack.py"]
+          image: dmz-lab/fortuna:0.1.0
           env:
             - {name: OTLP_ENDPOINT, value: "__OTLP_URL__"}
             - {name: ROLE, value: sms}
@@ -155,11 +142,8 @@ spec:
           ports: [{containerPort: 8443}]
           readinessProbe: {httpGet: {path: /health, port: 8443, scheme: HTTPS}, initialDelaySeconds: 3, periodSeconds: 5}
           volumeMounts:
-            - {name: app, mountPath: /app, readOnly: true}
             - {name: tls, mountPath: /tls, readOnly: true}
       volumes:
-        - name: app
-          configMap: {name: fortuna-code}
         - name: tls
           secret: {secretName: sms-otp-tls}
 ---

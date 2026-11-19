@@ -52,6 +52,8 @@ auth:
   # İç API (/internal/auth/*) çağıranları: istemci sertifikası CN allowlist'i
   internal:
     allowed-clients: ${AUTH_INTERNAL_CALLERS:gw-internal}
+    # HTTPS portunda /internal/users çağırabilen istemci sertifikası CN'leri (müşteri oluşturma: Janus)
+    user-admins: ${AUTH_INTERNAL_USER_ADMINS:}
   auth:
     demo-otp: ${AUTH_DEMO_OTP:true}
   issuer: ${AUTH_ISSUER:http://localhost:8443/realms/bank}
@@ -86,3 +88,5 @@ auth:
       secret: ${SEAL_B2B_SECRET}
     seal-mobile:
       secret: ${SEAL_MOBILE_SECRET}
+    mobile-app:
+      secret: ${MOBILE_APP_SECRET}

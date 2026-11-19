@@ -19,6 +19,9 @@ pipeline {
                 sh 'if [ "$APP" != "all" ]; then test -f apps/$APP/app.env; fi'
             }
         }
+        stage('Taban imajlar') {
+            steps { sh "BASE_PUSH=${params.REGISTRY_MODE == 'registry' ? 1 : 0} bash images/build-base.sh" }
+        }
         stage('Deploy') {
             steps {
                 script {

@@ -15,6 +15,8 @@ services:
       - "127.0.0.1:30432:5432"   # cluster'lardan (Fortuna ACL, monolit) erişim
     volumes:
       - legacydb-data:/var/lib/postgresql/data
+      - ../platform/db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ../platform/db/seed.sql:/docker-entrypoint-initdb.d/02-seed.sql:ro
     networks: [lab-platform]
 
   prometheus:
@@ -54,7 +56,7 @@ services:
       SPAN_STORAGE_TYPE: memory
       MAX_TRACES: "20000"
     ports:
-      - "127.0.0.1:30318:4318"    # OTLP (cluster'lar; kind köprüsü platform-tempo bu porta gider)
+      - "127.0.0.1:30318:4318"    # OTLP (cluster'lar; kind köprüsü bridge-jaeger bu porta gider)
       - "127.0.0.1:14318:4318"    # OTLP (konsol ve host süreçleri)
       - "127.0.0.1:16686:16686"   # Jaeger arayüzü (trace UI)
     networks: [lab-platform]
@@ -77,9 +79,9 @@ services:
 
   # ---- Fortuna monolit (services/legacy-monolith) ----
   fortuna-mock:
-    image: python:3.12-alpine
+    build: ../services/legacy-monolith      # taban: dmz-lab/base-python (images/build-base.sh)
+    image: dmz-lab/legacy-monolith:0.1.0
     restart: unless-stopped
-    command: ["sh", "-c", "pip install -q --no-cache-dir --target /tmp/pylib psycopg[binary]==3.2.3 && PYTHONPATH=/tmp/pylib:/shared python /app/server.py"]
     environment:
       PORT: "8443"
       TLS_CERT: /tls/fortuna-mock.crt
@@ -98,8 +100,6 @@ services:
       SEAL_B2B_SECRET: ${SEAL_B2B_SECRET}
       OTLP_ENDPOINT: http://jaeger:4318
     volumes:
-      - ../services/legacy-monolith:/app:ro
-      - ../shared/tracing.py:/shared/tracing.py:ro
       - ../edge/certs/mtls:/tls:ro
       - ../edge/certs/internal-ca.crt:/certs/ca.crt:ro
     networks: [lab-platform]
@@ -108,7 +108,7 @@ services:
   # ---- Köprüler: cluster'lara ve cluster'lardan giden trafik (yalnızca bu servisler kind ağında) ----
   auth-bridge:            # monolit -> auth-server (bank-prod node:30543); takma ad id.bank.lab.local
     image: alpine/socat:1.8.0.0
-    container_name: platform-auth-bridge
+    container_name: bridge-auth
     restart: unless-stopped
     command: ["TCP-LISTEN:30543,fork,reuseaddr", "TCP:${BANKPROD_NODE_IP}:30543"]
     networks:
@@ -118,7 +118,7 @@ services:
 
   si-bridge:             # monolit -> Seal Intranet (codevo node:30456, nginx ingress passthrough); takma ad seal-intranet.lab.local
     image: alpine/socat:1.8.0.0
-    container_name: platform-si-bridge
+    container_name: bridge-si
     restart: unless-stopped
     command: ["TCP-LISTEN:30456,fork,reuseaddr", "TCP:${CODEVO_NODE_IP}:30456"]
     networks:
@@ -128,7 +128,7 @@ services:
 
   fortuna-bridge:        # cluster'lar -> monolit (kind tarafında :30890, monolit :8443)
     image: alpine/socat:1.8.0.0
-    container_name: platform-fortuna-bridge
+    container_name: bridge-fortuna
     restart: unless-stopped
     command: ["TCP-LISTEN:30890,fork,reuseaddr", "TCP:fortuna-mock:8443"]
     networks: [lab-platform, kind]
@@ -136,25 +136,25 @@ services:
   # ---- Kind tarafı köprüleri: cluster'lar bu adreslere kind ağından ulaşır, host.docker.internal'a yönlenir ----
   legacydb-kbridge:
     image: alpine/socat:1.8.0.0
-    container_name: platform-legacydb
+    container_name: bridge-legacydb
     restart: unless-stopped
     command: ["TCP-LISTEN:30432,fork,reuseaddr", "TCP:host.docker.internal:30432"]
     networks: [kind]
   prometheus-kbridge:
     image: alpine/socat:1.8.0.0
-    container_name: platform-prometheus
+    container_name: bridge-prometheus
     restart: unless-stopped
     command: ["TCP-LISTEN:30090,fork,reuseaddr", "TCP:host.docker.internal:30090"]
     networks: [kind]
   loki-kbridge:
     image: alpine/socat:1.8.0.0
-    container_name: platform-loki
+    container_name: bridge-loki
     restart: unless-stopped
     command: ["TCP-LISTEN:30100,fork,reuseaddr", "TCP:host.docker.internal:30100"]
     networks: [kind]
-  tempo-kbridge:
+  jaeger-kbridge:
     image: alpine/socat:1.8.0.0
-    container_name: platform-tempo
+    container_name: bridge-jaeger
     restart: unless-stopped
     command: ["TCP-LISTEN:30318,fork,reuseaddr", "TCP:host.docker.internal:30318"]
     networks: [kind]

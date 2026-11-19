@@ -19,8 +19,7 @@ spec:
           hostnames: ["fortuna-mock.fortuna.svc"]
       containers:
         - name: app
-          image: python:3.12-alpine
-          command: ["python", "/app/channel_gateway.py"]
+          image: dmz-lab/channel-gateway:0.1.0
           env:
             - {name: OTLP_ENDPOINT, value: "__OTLP_URL__"}
             - {name: PORT, value: "8443"}
@@ -44,12 +43,9 @@ spec:
             readOnlyRootFilesystem: true
             capabilities: {drop: ["ALL"]}
           volumeMounts:
-            - {name: app, mountPath: /app, readOnly: true}
             - {name: tls, mountPath: /tls, readOnly: true}
             - {name: mtls-client, mountPath: /mtls-client, readOnly: true}
       volumes:
-        - name: app
-          configMap: {name: channel-gateway-code}
         - name: tls
           secret: {secretName: channel-gateway-tls}
         - name: mtls-client

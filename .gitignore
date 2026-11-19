@@ -11,7 +11,7 @@ edge/certs/
 .env
 .env.*
 *.secret.yaml
-
+.next/
 # Bağımlılıklar ve derleme çıktıları
 node_modules/
 **/target/
@@ -27,3 +27,7 @@ edge/haproxy/haproxy.cfg
 
 # Deploy kancalarının hazırladığı build bağlamları (apps/<ad>/hook.sh)
 .build/
+
+# Konsol (Vite) çıktıları
+console/ui/node_modules/
+console/ui/dist/

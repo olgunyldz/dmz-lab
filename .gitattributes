@@ -1,0 +1,8 @@
+# Satır sonları: depoda LF, Windows çalışma kopyasında da LF (Git autocrlf ayarından bağımsız)
+* text=auto eol=lf
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+*.png binary
+*.jpg binary
+*.jar binary
+*.p12 binary

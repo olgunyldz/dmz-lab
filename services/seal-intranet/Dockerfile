@@ -1,10 +1,12 @@
-# Seal Intranet: iç backend-to-backend API servisi (ayrı deployment, namespace seal-intranet).
-FROM python:3.12-alpine
-WORKDIR /app
+# Seal Intranet (iç backend API). Taban: dmz-lab/base-python.
+ARG BASE_PYTHON=dmz-lab/base-python:3.12
+FROM ${BASE_PYTHON}
 COPY requirements.txt /app/requirements.txt
+# Bağımlılıklar sistem dizinine kurulur (root); çalışma kullanıcısı 10001 aşağıda
+USER root
 RUN pip install --no-cache-dir -r /app/requirements.txt
-COPY server.py /app/server.py
-COPY tracing.py /app/tracing.py
 USER 10001
-EXPOSE 8080
+COPY server.py /app/server.py
+ENV SI_PORT=8443
+EXPOSE 8443
 ENTRYPOINT ["python", "/app/server.py"]
