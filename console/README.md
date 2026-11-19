@@ -3,13 +3,16 @@
 Operatör ve demo konsolu. Arayüz React bileşeni (`components/Console.jsx`), sunucu tarafı ise Next.js route handler'ları (`app/api/*`). Tarayıcı DMZ servislerine doğrudan gitmez; yalnız konsol sunucusu, edge (HAProxy, `127.0.0.1:8443`) üzerinden DMZ servislerini çağırır (`lib/edge.js`). **Yalnız lab.**
 
 ## Çalıştırma
+Kurulum betiği (`scripts/install-all.sh`) adım 14'te konsolu `run.sh up` ile kurar ve başlatır. Elle:
 ```
-cd console
-npm install
-npm run dev        # geliştirme sunucusu (http://localhost:9000)
-npm run build      # üretim derlemesi
-npm run start      # derlenmiş sürümü 9000 portunda çalıştırır
+bash console/run.sh install   # npm bağımlılıkları (package-lock.json)
+bash console/run.sh build     # üretim derlemesi (.next)
+bash console/run.sh start     # arka planda, http://127.0.0.1:9000 (CONSOLE_PORT ile değiştirilebilir)
+bash console/run.sh status    # çalışıyor mu
+bash console/run.sh stop      # durdur
+bash console/run.sh up        # install + build + start
 ```
+Günlük: `console/.run/console.log`.
 
 Önkoşul: edge (HAProxy) `127.0.0.1:8443` üzerinde çalışıyor olmalı ve `edge/certs/public-ca.crt` mevcut olmalı.
 

@@ -14,8 +14,8 @@
 #  11) Seal Mobile          apps/seal-mobile   (manifest + ingress)
 #  12) Edge (HAProxy)       edge/scripts/render-haproxy.sh
 #  13) Gözlemlenebilirlik   observability/install.sh (Alloy, Prometheus agent)
+#  14) Konsol (Next.js)     console/run.sh up (host, http://127.0.0.1:9000); edge hazır olmalı
 # Uygulamalar scripts/deploy-app.sh ile kurulur; Jenkins da aynı script'i çağırır.
-# Console (python console/app.py) ayrı başlatılır.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -49,4 +49,5 @@ echo "== 10) Seal Intranet";     bash scripts/deploy-app.sh seal-intranet
 echo "== 11) Seal Mobile";       bash scripts/deploy-app.sh seal-mobile
 echo "== 12) Edge";              bash edge/scripts/render-haproxy.sh
 echo "== 13) Gözlemlenebilirlik"; bash observability/install.sh
-echo "Kurulum tamam. Console: nohup python console/app.py (http://127.0.0.1:9000)"
+echo "== 14) Konsol (Next.js)"; bash console/run.sh up
+echo "Kurulum tamam. Konsol: http://127.0.0.1:${CONSOLE_PORT:-9000}"

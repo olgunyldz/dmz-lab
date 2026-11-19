@@ -31,3 +31,6 @@ edge/haproxy/haproxy.cfg
 # Konsol (Vite) çıktıları
 console/ui/node_modules/
 console/ui/dist/
+
+# konsol çalışma dosyaları (run.sh: pid, günlük)
+console/.run/
