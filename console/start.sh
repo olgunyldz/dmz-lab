@@ -11,8 +11,8 @@ fail() { echo "HATA: $1" >&2; exit 1; }
 running=$(docker ps --format '{{.Names}}' | grep -c "dmz-edge-lab-haproxy-1" || true)
 [[ "$running" -ge 1 ]] || fail "edge ayakta değil. Çalıştırın: cd edge && docker compose up -d"
 
-# 2) Gerekli cluster context'leri
-for c in identity dmz; do
+# 2) Gerekli cluster context'leri (bank-prod: auth + Fortuna; bank-dmz-prod: Janus; codevo-dmz: Seal)
+for c in bank-prod bank-dmz-prod codevo-dmz; do
     kubectl config get-contexts -o name | grep -qx "kind-$c" || fail "kubectl context kind-$c yok (cluster kurulu mu?)"
 done
 
@@ -22,6 +22,6 @@ if curl -s -o /dev/null --max-time 2 "http://127.0.0.1:$PORT/"; then
     exit 0
 fi
 
-echo "Organizer başlatılıyor (identity port-forward dahil)..."
+echo "Konsol başlatılıyor (auth-server port-forward dahil)..."
 cd "$ROOT"
 PYTHONIOENCODING=utf-8 exec python console/app.py

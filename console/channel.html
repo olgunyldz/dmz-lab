@@ -2,411 +2,669 @@
 <html lang="tr">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>DMZ Lab – Kanal</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>DMZ Lab Konsolu</title>
 <style>
-  :root { --bg:#f6f7f9; --card:#fff; --ink:#1d2330; --muted:#6b7280; --line:#e3e6ec; --accent:#2563eb;
-          --ok:#15803d; --bad:#b91c1c; }
+  :root { --bg:#f6f7f9; --fg:#1d2330; --muted:#5b6474; --card:#fff; --line:#d9dde5; --accent:#2157d4; --accent-fg:#fff; --soft:#eef3ff; --ok:#117a3d; --bad:#b42318; --radius:12px; }
   @media (prefers-color-scheme: dark) {
-    :root { --bg:#0f141c; --card:#171e29; --ink:#e6e9ef; --muted:#97a1b2; --line:#263041; --accent:#60a5fa;
-            --ok:#4ade80; --bad:#f87171; }
+    :root:not([data-theme="light"]) { --bg:#12151b; --fg:#e6e9ef; --muted:#a3acbb; --card:#1b2029; --line:#2d3441; --accent:#7aa2ff; --accent-fg:#0b1020; --soft:#202a40; --ok:#5fd38d; --bad:#ff8a80; }
   }
-  body { margin:0; background:var(--bg); color:var(--ink); font:14px/1.45 system-ui, sans-serif; }
-  header { padding:12px 20px; border-bottom:1px solid var(--line); background:var(--card);
-           display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
-  header h1 { margin:0; font-size:17px; }
-  nav a { color:var(--accent); text-decoration:none; margin-left:12px; font-size:13px; }
-  nav a:hover { text-decoration:underline; }
-  main { display:grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap:14px; padding:14px; }
-  section { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px; }
-  section h2 { margin:0 0 8px; font-size:15px; }
-  .state { font-size:12px; color:var(--muted); white-space:pre-wrap; min-height:44px; margin-bottom:8px; }
-  .row { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:6px; }
-  input { padding:6px 8px; border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--ink); }
-  button { padding:7px 12px; border:1px solid var(--line); border-radius:6px; background:var(--bg);
-           color:var(--ink); cursor:pointer; font-size:13px; }
-  button:hover { border-color:var(--accent); }
-  button.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
-  button:disabled { opacity:.5; cursor:wait; }
-  .hint { font-size:12px; color:var(--muted); margin:4px 0 8px; }
-  #log-wrap { padding:0 14px 14px; }
-  #log { width:100%; border-collapse:collapse; background:var(--card); border:1px solid var(--line); border-radius:10px; overflow:hidden; }
-  #log th, #log td { padding:6px 8px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; font-size:12px; }
-  #log th { background:var(--bg); }
-  .pass { color:var(--ok); font-weight:600; } .fail { color:var(--bad); font-weight:600; } .none { color:var(--muted); }
-  .flag { color:var(--muted); font-size:12px; }
-  @media (max-width: 600px) { main { padding:10px; } #log-wrap { padding:0 10px 10px; } }
+  :root[data-theme="dark"] { --bg:#12151b; --fg:#e6e9ef; --muted:#a3acbb; --card:#1b2029; --line:#2d3441; --accent:#7aa2ff; --accent-fg:#0b1020; --soft:#202a40; --ok:#5fd38d; --bad:#ff8a80; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; -webkit-text-size-adjust:100%; }
+  main { max-width:720px; margin:0 auto; padding:16px; padding-bottom:40px; }
+  h1 { font-size:20px; margin:8px 4px 14px; }
+  h2 { font-size:17px; margin:0 0 10px; }
+  .muted { color:var(--muted); font-size:14px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:var(--radius); padding:16px; margin-bottom:14px; }
+  .hidden { display:none !important; }
+
+  /* Sekmeler */
+  .tabs { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:14px; background:var(--card); border:1px solid var(--line); border-radius:var(--radius); padding:4px; }
+
+  /* Form alanları: etiket üstte, dokunma hedefi 44px+ */
+  .field { display:flex; flex-direction:column; gap:6px; margin:0 0 14px; }
+  .field > span { font-size:14px; font-weight:600; color:var(--muted); }
+  input[type=text], input[type=password], input:not([type]) {
+    font:inherit; width:100%; min-height:46px; padding:10px 12px; border:1px solid var(--line); border-radius:10px;
+    background:var(--bg); color:var(--fg);
+  }
+  input:focus { outline:3px solid var(--soft); border-color:var(--accent); }
+  input[readonly] { opacity:.75; }
+
+  /* Düğmeler */
+  button { font:inherit; min-height:46px; padding:10px 18px; border-radius:10px; border:1px solid var(--line); background:var(--card); color:var(--fg); cursor:pointer; font-weight:600; }
+  button:focus-visible { outline:3px solid var(--soft); }
+  button.primary { background:var(--accent); border-color:var(--accent); color:var(--accent-fg); }
+  button.ghost { background:transparent; border-color:transparent; color:var(--muted); font-weight:500; }
+  button:disabled { opacity:.5; cursor:default; }
+  .actions { display:grid; grid-template-columns:1fr 2fr; gap:10px; margin-top:6px; }
+  .actions.single { grid-template-columns:1fr; }
+  .actions button.primary { width:100%; }
+
+  /* Kanal seçici (mevcut / yeni cihaz) */
+  .choices { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin:0 0 14px; }
+  .choice { position:relative; display:flex; flex-direction:column; gap:4px; padding:12px; border:1px solid var(--line); border-radius:10px; cursor:pointer; background:var(--bg); }
+  .choice input { position:absolute; opacity:0; pointer-events:none; }
+  .choice strong { font-size:15px; }
+  .choice small { color:var(--muted); font-size:13px; }
+  .choice:has(input:checked) { border-color:var(--accent); background:var(--soft); }
+  .choice:has(input:focus-visible) { outline:3px solid var(--soft); }
+
+  /* Adım göstergesi */
+  .steps { display:grid; grid-template-columns:repeat(4, 1fr); gap:6px; margin:0 0 16px; padding:0; list-style:none; }
+  .steps li { font-size:12px; text-align:center; color:var(--muted); padding-top:8px; border-top:3px solid var(--line); }
+  .steps li.done { border-color:var(--ok); color:var(--ok); }
+  .steps li.active { border-color:var(--accent); color:var(--fg); font-weight:700; }
+  .steps li.skip { display:none; }
+
+  /* Bilgi kutusu */
+  .info { background:var(--soft); border-radius:10px; padding:10px 12px; font-size:14px; margin:0 0 14px; }
+
+  /* Özet */
+  dl.summary { display:grid; grid-template-columns:auto 1fr; gap:8px 14px; margin:0 0 14px; padding:12px; border:1px solid var(--line); border-radius:10px; background:var(--bg); }
+  dl.summary dt { color:var(--muted); font-size:14px; }
+  dl.summary dd { margin:0; font-weight:600; overflow-wrap:anywhere; }
+
+  /* Durum mesajları */
+  .status { font-size:15px; min-height:22px; margin-top:10px; }
+  .ok { color:var(--ok); } .bad { color:var(--bad); }
+  .result { font-size:16px; font-weight:600; margin:0 0 8px; overflow-wrap:anywhere; }
+
+  /* İşlem alanı */
+  .who { font-size:16px; font-weight:600; margin:0 0 12px; }
+  .toolbar { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  pre { white-space:pre-wrap; word-break:break-word; background:var(--bg); border:1px solid var(--line); border-radius:10px; padding:12px; font-size:13px; margin:12px 0 0; }
+
+  /* Demo kod */
+  .demo { font-family:ui-monospace, Menlo, Consolas, monospace; font-weight:700; color:var(--accent); }
+
+  /* İstek izleme tablosu */
+  .table-wrap { overflow-x:auto; -webkit-overflow-scrolling:touch; }
+  table { width:100%; border-collapse:collapse; font-size:12px; min-width:520px; }
+  th, td { text-align:left; padding:6px; border-bottom:1px solid var(--line); vertical-align:top; word-break:break-all; }
+  a { color:var(--accent); }
+
+  .trace { font-size:13px; min-height:18px; margin-top:6px; overflow-wrap:anywhere; }
+  .trace code { font-size:12px; color:var(--muted); }
+
+  /* Hesap işlemleri */
+  .ops { display:grid; grid-template-columns:repeat(3, 1fr); gap:8px; margin:0 0 14px; }
+  .ops button { min-height:46px; padding:8px 6px; font-size:15px; }
+  .pane { margin-top:4px; }
+  .num { text-align:right; white-space:nowrap; }
+  select { font:inherit; width:100%; min-height:46px; padding:10px 12px; border:1px solid var(--line); border-radius:10px; background:var(--bg); color:var(--fg); }
+  select:focus { outline:3px solid var(--soft); border-color:var(--accent); }
+
+  /* Dar ekran (telefon) */
+  @media (max-width:480px) {
+    main { padding:12px; padding-bottom:32px; }
+    h1 { font-size:18px; }
+    .choices { grid-template-columns:1fr; }
+    .actions { grid-template-columns:1fr; }
+    .actions button { width:100%; }
+    .toolbar { grid-template-columns:1fr; }
+    .steps li { font-size:11px; }
+    .card { padding:14px; }
+  }
 </style>
 </head>
 <body>
-<header>
-  <h1 id="title">Kanal</h1>
-  <nav><a href="/">← Organizer</a></nav>
-</header>
-
 <main>
-  <section id="login-sec">
-    <h2>Giriş ve çıkış</h2>
-    <div class="state" id="st">durum: yükleniyor…</div>
-    <div class="row" id="login-fields">
-      <input id="u" placeholder="kullanıcı (varsayılan)" size="12">
-      <input id="p" type="password" placeholder="parola (boş = lab varsayılanı)" size="18">
-    </div>
-    <div class="row">
-      <button class="primary" id="btn-login">Giriş yap</button>
-      <button id="btn-logout">Çıkış yap</button>
-    </div>
-    <div class="hint" id="hint"></div>
-    <div id="web-approval" style="display:none">
-      <div class="state" id="wa-st"></div>
-      <div class="row"><button class="primary" id="btn-wa-poll">Onayı kontrol et</button></div>
+  <h1>DMZ Lab Konsolu <span class="muted">(yalnız lab)</span></h1>
+
+  <nav class="tabs" role="tablist">
+    <button id="tab-web" class="primary" role="tab">Web</button>
+    <button id="tab-mobile" role="tab">Mobil</button>
+  </nav>
+
+  <!-- WEB -->
+  <section id="sec-web" class="card">
+    <h2>Web girişi</h2>
+    <p class="info">1) Müşteri no ve parolanızı girin. 2) "Tek seferlik kod iste"ye basın; kodu "SMS kutusunu aç" bağlantısından alın. 3) Kodu girip "Giriş yap"a basın.</p>
+    <div id="web-login">
+      <label class="field"><span>Müşteri no</span><input id="w-cust" type="text" value="C000000001" autocomplete="username" inputmode="numeric"></label>
+      <label class="field"><span>Parola</span><input id="w-pass" type="password" autocomplete="current-password"></label>
+      <label class="field"><span>Güvenlik doğrulaması</span><input id="w-captcha" value="lab-captcha" readonly></label>
+      <div class="actions single">
+        <button id="w-otp">Tek seferlik kod iste</button>
+      </div>
+      <p class="muted" style="margin:8px 0 0"><a id="w-sms-link" class="hidden" href="/sms" target="_blank" rel="noopener">SMS kutusunu aç ↗ (lab kodu orada)</a></p>
+      <label class="field" style="margin-top:14px"><span>SMS kodu</span><input id="w-sms" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="6 haneli kod"></label>
+      <div class="actions single"><button class="primary" id="w-go">Giriş yap</button></div>
+      <div class="status" id="w-status"></div>
+      <div class="trace" id="w-trace"></div>
     </div>
   </section>
 
-  <section id="seal-sec" style="display:none">
-    <h2>Mobil cihaz (Seal) akışı</h2>
-    <div class="row">
-      <button class="primary" id="tab-first">İlk kez kurulum</button>
-      <button id="tab-again">Tekrar giriş</button>
+  <!-- MOBİL SİHİRBAZ -->
+  <section id="sec-mobile" class="card hidden">
+    <h2>Mobil giriş</h2>
+    <ol class="steps" id="steps">
+      <li data-s="1">Cihaz ve PIN</li>
+      <li data-s="2">Onay</li>
+      <li data-s="3">SMS kodu</li>
+      <li data-s="4">Sonuç</li>
+    </ol>
+
+    <!-- Adım 1: cihaz ve PIN -->
+    <div class="wz" data-step="1">
+      <p class="info">Bu tarayıcıda aktive edilmiş bir cihazınız varsa <b>Mevcut cihaz</b>ı seçin. İlk kez kullanıyorsanız <b>Yeni cihaz</b>ı seçin.</p>
+      <label class="field"><span>Müşteri no</span><input id="m-cust" type="text" value="C000000001" autocomplete="off" inputmode="numeric"></label>
+      <div class="field">
+        <span>Cihaz</span>
+        <div class="choices" role="radiogroup">
+          <label class="choice"><input type="radio" name="m-mode" value="existing" checked>
+            <strong>Mevcut cihaz</strong><small>Bu tarayıcıda aktif</small></label>
+          <label class="choice"><input type="radio" name="m-mode" value="new">
+            <strong>Yeni cihaz</strong><small>İlk kez aktivasyon</small></label>
+        </div>
+      </div>
+      <label class="field"><span>PIN</span><input id="m-pin" type="password" inputmode="numeric" autocomplete="off" maxlength="6" value="4321"></label>
+      <div class="actions single"><button class="primary" id="wz-next1">İleri</button></div>
     </div>
-    <div id="pane-first">
-      <div class="hint">Uygulama ilk kez kuruluyor: yeni cihaz kaydı, PIN, demo OTP ve aktivasyon.</div>
-      <div class="row"><input id="f-pin" size="6" placeholder="PIN" value="4321"></div>
-      <div class="row"><button class="primary" id="btn-first">Kur ve giriş yap</button></div>
-      <div class="row">
-        <input id="f-otp" size="8" placeholder="OTP">
-        <button id="btn-otp">OTP doğrula + aktivasyon</button>
+
+    <!-- Adım 2: özet ve onay -->
+    <div class="wz hidden" data-step="2">
+      <p class="info">Bilgileri kontrol edin. Yeni cihazda bir sonraki adımda SMS kodu gönderilecek.</p>
+      <dl class="summary" id="m-summary"></dl>
+      <div class="actions">
+        <button id="wz-back3">Geri</button>
+        <button class="primary" id="wz-submit">Giriş yap</button>
       </div>
     </div>
-    <div id="pane-again" style="display:none">
-      <div class="hint">Uygulama daha önce kurulmuş: aynı cihazda PIN ile giriş (OTP yok). Önce "İlk kez kurulum" yapılmış olmalı.</div>
-      <div class="row"><input id="a-pin" size="6" placeholder="PIN" value="4321"></div>
-      <div class="row"><button class="primary" id="btn-again">PIN ile giriş</button></div>
+
+    <!-- Adım 3: SMS kodu (yalnız yeni cihaz) -->
+    <div class="wz hidden" data-step="3">
+      <p class="info">SMS kodu telefonunuza gönderildi. Kodu SMS kutusundan alıp aşağıya yazın.</p>
+      <p><a href="/sms" target="_blank" rel="noopener">SMS kutusunu aç ↗ (lab kodu orada)</a></p>
+      <label class="field"><span>SMS kodu</span><input id="m-sms" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="6 haneli kod"></label>
+      <div class="actions">
+        <button id="wz-back-sms">Geri</button>
+        <button class="primary" id="wz-sms-go">Giriş yap</button>
+      </div>
     </div>
-    <div class="state" id="seal-st">Bir sekme seçin. Sonuç log tablosunda adım adım görünür.</div>
-    <div class="row"><button id="btn-seal-reset">Cihazı sıfırla</button></div>
-    <div class="row"><button id="btn-seal-approvals">Bekleyen onayları getir</button></div>
-    <div id="seal-approvals"></div>
+
+    <!-- Adım 4: sonuç -->
+    <div class="wz hidden" data-step="4">
+      <p class="result" id="m-result"></p>
+      <p class="info">Giriş tamamlandı. Bakiyenizi sorgulamak için devam edin.</p>
+      <div class="actions single"><button class="primary" id="wz-done">Bakiye sorgula</button></div>
+    </div>
+
+    <div class="actions single" style="margin-top:12px"><button id="wz-cancel" class="ghost">Sihirbazı iptal et</button></div>
+    <div class="status" id="m-status"></div>
+    <div class="trace" id="m-trace"></div>
+    <p class="muted" style="margin:12px 0 0">Cihaz doğrulaması Seal üzerinden yapılır. Mevcut cihaz bu tarayıcıda daha önce aktive edilmiş olmalıdır.</p>
   </section>
 
-  <section>
-    <h2>Menü: yapılabilen ve yapılamayan işlemler</h2>
-    <div class="state">Yapılabilenler çalıştırılabilir; yapılamayanların gerekçesi listelenir.</div>
-    <div id="menu"></div>
+  <!-- İŞLEM -->
+  <section class="card" id="sec-ops">
+    <h2>Hesap işlemleri</h2>
+    <p class="who" id="who">Oturum yok</p>
+    <nav class="ops">
+      <button id="op-balance" class="primary" disabled>Bakiye</button>
+      <button id="op-history" disabled>Hareketler</button>
+      <button id="op-transfer" disabled>Havale / EFT</button>
+    </nav>
+
+    <!-- Bakiye -->
+    <div id="pane-balance" class="pane">
+      <div class="table-wrap">
+        <table><thead><tr><th>Hesap</th><th>Tür</th><th class="num">Bakiye</th></tr></thead>
+        <tbody id="bal-body"><tr><td colspan="3" class="muted">Bakiyeleri görmek için "Bakiye"ye basın.</td></tr></tbody></table>
+      </div>
+    </div>
+
+    <!-- Hareketler -->
+    <div id="pane-history" class="pane hidden">
+      <label class="field"><span>Hesap</span><select id="h-acc"></select></label>
+      <div class="actions single"><button class="primary" id="h-go">Hareketleri göster</button></div>
+      <div class="table-wrap">
+        <table><thead><tr><th>Tarih</th><th>Açıklama</th><th>Karşı taraf</th><th class="num">Tutar</th><th class="num">Bakiye</th></tr></thead>
+        <tbody id="h-body"></tbody></table>
+      </div>
+    </div>
+
+    <!-- Havale / EFT: form -> onay -> makbuz -->
+    <div id="pane-transfer" class="pane hidden">
+      <div id="t-form">
+        <label class="field"><span>Gönderen hesap</span><select id="t-from"></select></label>
+        <label class="field"><span>Alıcı hesap no</span><input id="t-to" type="text" placeholder="örn. TR000000000002" autocomplete="off"></label>
+        <label class="field"><span>Tutar (TRY)</span><input id="t-amt" type="text" inputmode="decimal" placeholder="örn. 150 veya 150,50" autocomplete="off"></label>
+        <label class="field"><span>Açıklama (isteğe bağlı)</span><input id="t-desc" type="text" maxlength="140" autocomplete="off"></label>
+        <div class="actions single"><button class="primary" id="t-review">Devam</button></div>
+      </div>
+      <div id="t-confirm" class="hidden">
+        <p class="info">Bilgileri kontrol edin. "Onayla ve gönder" ile havale yapılır.</p>
+        <dl class="summary" id="t-sum"></dl>
+        <div class="actions"><button id="t-back">Düzenle</button><button class="primary" id="t-send">Onayla ve gönder</button></div>
+      </div>
+      <div id="t-receipt" class="hidden">
+        <p class="result ok" id="t-ok"></p>
+        <dl class="summary" id="t-rec"></dl>
+        <div class="actions single"><button class="primary" id="t-new">Yeni havale</button></div>
+      </div>
+    </div>
+
+    <div class="status" id="op-status"></div>
+    <div class="trace" id="op-trace"></div>
+    <div class="actions single" style="margin-top:12px"><button id="btn-logout" class="ghost" disabled>Çıkış yap</button></div>
+    <details style="margin-top:10px"><summary class="muted">Ham yanıt</summary><pre id="result"></pre></details>
   </section>
 
-  <section>
-    <h2>Kanal çağrıları</h2>
-    <div class="state">Beklenen sonuç her satırda; PASS/FAIL günlükte.</div>
-    <div class="row" id="checks"></div>
-    <div class="hint" id="check-hint"></div>
+  <!-- İSTEK İZLEME -->
+  <section class="card">
+    <h2>İstek izleme</h2>
+    <p class="muted">Her istek bir trace kimliği alır. "Log" Loki günlüğünü, "Trace" Tempo izini açar (Grafana girişi gerekebilir).</p>
+    <div class="table-wrap">
+      <table><thead><tr><th>Saat</th><th>İstek</th><th>Durum</th><th>Trace</th><th>Bağlantı</th></tr></thead>
+      <tbody id="trace-log"></tbody></table>
+    </div>
   </section>
 </main>
 
-<div id="log-wrap">
-  <table id="log">
-    <thead><tr><th>Zaman</th><th>Kanal</th><th>İstek</th><th>Auth</th><th>Beklenen</th><th>Gerçek</th><th>Sonuç</th><th>Yanıt (kısa)</th><th>İz</th></tr></thead>
-    <tbody></tbody>
-  </table>
-</div>
-
-<script src="/ops.js"></script>
 <script>
-
-// İşlem başına X-Trace-Id: çağıran traceId verirse onu kullanır, vermezse yenisini üretir (mevcut kimliği ezmez).
-function newTraceId(){const a=new Uint8Array(16);crypto.getRandomValues(a);return Array.from(a,b=>b.toString(16).padStart(2,'0')).join('');}
-function apiFetch(url, opts = {}) {
-  const headers = Object.assign({}, opts.headers || {});
-  // Tek trace kimliği: X-Trace-Id (uygulama) > traceparent (W3C) > opts.traceId > yeni. Varsa üzerine yazılmaz.
-  const tp = (headers['traceparent'] || '').split('-');
-  const tid = headers['X-Trace-Id'] || (tp.length === 4 ? tp[1] : '') || opts.traceId || newTraceId();
-  headers['X-Trace-Id'] = tid;
-  if (!headers['traceparent']) {
-    const sp = new Uint8Array(8); crypto.getRandomValues(sp);
-    headers['traceparent'] = '00-' + tid + '-' + Array.from(sp, b => b.toString(16).padStart(2, '0')).join('') + '-01';
+const $ = (id) => document.getElementById(id);
+const GRAFANA = "http://127.0.0.1:3000";
+function lokiLink(tid) {
+  const left = { datasource: "loki", queries: [{ refId: "A", expr: '{app="console"} |= "' + tid + '"' }], range: { from: "now-1h", to: "now" } };
+  return GRAFANA + "/explore?left=" + encodeURIComponent(JSON.stringify(left));
+}
+function tempoLink(tid) {
+  const left = { datasource: "tempo", queries: [{ refId: "A", queryType: "traceId", query: tid }], range: { from: "now-1h", to: "now" } };
+  return GRAFANA + "/explore?left=" + encodeURIComponent(JSON.stringify(left));
+}
+function addTrace(method, path, status, tid) {
+  const tr = document.createElement("tr");
+  const t = new Date().toLocaleTimeString("tr-TR");
+  const cells = [t, method + " " + path, String(status), tid || "-", ""];
+  cells.forEach((c) => { const td = document.createElement("td"); td.textContent = c; tr.appendChild(td); });
+  if (tid) {
+    const last = tr.lastChild;
+    const a1 = document.createElement("a"); a1.href = lokiLink(tid); a1.target = "_blank"; a1.rel = "noopener"; a1.textContent = "Log";
+    const a2 = document.createElement("a"); a2.href = tempoLink(tid); a2.target = "_blank"; a2.rel = "noopener"; a2.textContent = " Trace";
+    last.appendChild(a1); last.appendChild(a2);
   }
-  const o = Object.assign({ credentials: 'same-origin' }, opts, { headers });
-  delete o.traceId;
-  return fetch(url, o).then((r) => { r.sentTraceId = tid; return r; });
+  const body = $("trace-log");
+  body.insertBefore(tr, body.firstChild);
+  while (body.children.length > 200) body.removeChild(body.lastChild);
+}
+let channel = "web";
+let state = { web: {}, mobile: {} };
+let curStep = 1;
+
+async function api(path, body) {
+  const r = await fetch(path, {
+    method: body === undefined ? "GET" : "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "same-origin",
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const data = await r.json().catch(() => ({}));
+  addTrace(body === undefined ? "GET" : "POST", path, r.status, r.headers.get("X-Trace-Id") || "");
+  return { ok: r.ok, status: r.status, data, tid: r.headers.get("X-Trace-Id") || "" };
 }
 
-// Kanal sayfasının kontrolleri. Yollar iç cluster'daki kanala özel endpoint'lere gider.
-// cert:false -> cihaz/partner sertifikası sunulmaz (beklenen: TLS red). token_from: başka kanalın oturumu.
-const CHECKS = {
-  web: [
-    { label: 'BFF hesaplar (web)', channel: 'web', method: 'GET', path: '/bff/web/accounts', auth: 'session', expect: '200' },
-    { label: 'Token yok (401)', channel: 'web', method: 'GET', path: '/bff/web/accounts', auth: 'none', expect: '401' },
-    { label: 'Web token → partner (403)', channel: 'partner', method: 'GET', path: '/partner/payments', auth: 'session', token_from: 'web', expect: '403', hint: 'Önce web girişi yapın' },
-    { label: 'Web token → şube endpoint (403)', channel: 'branch', method: 'GET', path: '/bff/branch/accounts', auth: 'session', token_from: 'web', expect: '403', hint: 'Önce web girişi yapın' },
-  ],
-  mobile: [
-    { label: 'BFF hesaplar (200)', channel: 'mobile', method: 'GET', path: '/bff/mobile/accounts', auth: 'session', expect: '200' },
-    { label: 'Token yok (401)', channel: 'mobile', method: 'GET', path: '/bff/mobile/accounts', auth: 'none', expect: '401' },
-  ],
-  partner: [
-    { label: 'Partner payments (200)', channel: 'partner', method: 'GET', path: '/partner/payments', auth: 'session', expect: '200' },
-    { label: 'Token yok (401)', channel: 'partner', method: 'GET', path: '/partner/payments', auth: 'none', expect: '401' },
-    { label: 'Sertifikasız (TLS red)', channel: 'partner', method: 'GET', path: '/partner/payments', auth: 'none', cert: false, expect: 'TLS' },
-  ],
-  branch: [
-    { label: 'Hesaplar (200)', channel: 'branch', method: 'GET', path: '/bff/branch/accounts', auth: 'session', expect: '200' },
-    { label: 'Token yok (401)', channel: 'branch', method: 'GET', path: '/bff/branch/accounts', auth: 'none', expect: '401' },
-    { label: 'Cihaz sertifikasız (TLS red)', channel: 'branch', method: 'GET', path: '/bff/branch/accounts', auth: 'none', cert: false, expect: 'TLS' },
-    { label: '/partner şubede yok (404)', channel: 'branch', method: 'GET', path: '/partner/payments', auth: 'session', expect: '404' },
-  ],
-  public: [
-    { label: 'GET /public (200)', channel: 'public', method: 'GET', path: '/public/branches', auth: 'none', expect: '200' },
-    { label: 'POST /public (404)', channel: 'public', method: 'POST', path: '/public/branches', auth: 'none', expect: '404' },
-    { label: '/bff token yok (401)', channel: 'public', method: 'GET', path: '/bff/web/accounts', auth: 'none', expect: '401' },
-  ],
+// Bir işlemin izi: Grafana'da Loki günlüğü ve Tempo trace'i (aynı trace kimliği ile)
+function setTrace(id, tid, label) {
+  const el = $(id);
+  el.innerHTML = "";
+  if (!tid) return;
+  const span = document.createElement("span");
+  span.className = "muted";
+  span.textContent = (label || "İzleme") + ": ";
+  const a1 = document.createElement("a");
+  a1.href = lokiLink(tid); a1.target = "_blank"; a1.rel = "noopener"; a1.textContent = "Grafana · Log";
+  const a2 = document.createElement("a");
+  a2.href = tempoLink(tid); a2.target = "_blank"; a2.rel = "noopener"; a2.textContent = "Grafana · Trace";
+  const code = document.createElement("code");
+  code.textContent = tid.slice(0, 12) + "…";
+  code.title = tid;
+  el.append(span, a1, " · ", a2, " ", code);
+}
+
+function setStatus(id, msg, ok) {
+  const el = $(id);
+  el.textContent = msg;
+  el.className = "status " + (ok ? "ok" : "bad");
+}
+
+function show(ch) {
+  channel = ch;
+  accounts = []; // hesap listesi kanala özel
+  $("sec-web").classList.toggle("hidden", ch !== "web");
+  $("sec-mobile").classList.toggle("hidden", ch !== "mobile");
+  $("tab-web").classList.toggle("primary", ch === "web");
+  $("tab-mobile").classList.toggle("primary", ch === "mobile");
+  $("tab-web").setAttribute("aria-selected", String(ch === "web"));
+  $("tab-mobile").setAttribute("aria-selected", String(ch === "mobile"));
+  render();
+}
+
+function render() {
+  const c = state[channel] || {};
+  const who = c.loggedIn
+    ? `${channel === "web" ? "Web" : "Mobil"}: ${c.fullName || c.customerId} (${c.customerId})`
+    : "Henüz giriş yapılmadı";
+  $("who").textContent = who;
+  ["op-balance", "op-history", "op-transfer", "btn-logout"].forEach((id) => { $(id).disabled = !c.loggedIn; });
+}
+
+async function refresh() {
+  const r = await api("/api/state");
+  if (r.ok) state = r.data;
+  render();
+}
+
+// Enter tuşu: alanda Enter, ilgili ana düğmeyi tetikler
+function onEnter(inputId, buttonId) {
+  $(inputId).addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !$(buttonId).disabled) { e.preventDefault(); $(buttonId).click(); }
+  });
+}
+
+$("tab-web").onclick = () => show("web");
+$("tab-mobile").onclick = () => show("mobile");
+
+$("w-otp").onclick = async () => {
+  const r = await api("/api/web/otp", {});
+  setTrace("w-trace", r.tid, "SMS kodu");
+  if (r.ok) {
+    $("w-sms-link").classList.remove("hidden");
+    setStatus("w-status", "Kod gönderildi. Kodu SMS kutusundan alıp yazın.", true);
+  } else setStatus("w-status", r.data.error || "Kod isteği başarısız", false);
 };
 
-const KEY = location.pathname.split('/').pop();
-const $ = (id) => document.getElementById(id);
-const now = () => new Date().toLocaleTimeString();
-const tbody = document.querySelector('#log tbody');
-
-// trace: {url, id} -> son sütunda Jaeger bağlantısı (dağıtık iz)
-function addRow(cols, trace) {
-  const tr = document.createElement('tr');
-  cols.forEach((c) => {
-    const td = document.createElement('td');
-    if (c && c.cls) { td.className = c.cls; td.textContent = c.text; } else td.textContent = c == null ? '' : String(c);
-    tr.appendChild(td);
+$("w-go").onclick = async () => {
+  const r = await api("/api/web/login", {
+    customerId: $("w-cust").value.trim(), password: $("w-pass").value, smsCode: $("w-sms").value.trim(),
   });
-  const last = document.createElement('td');
-  if (trace && (trace.url || trace.sent)) {
-    const sent = document.createElement('div');
-    sent.className = 'sentid'; sent.textContent = 'gönderilen X-Trace-Id: ' + (trace.sent || trace.id || '');
-    sent.style.cssText = 'font-family:ui-monospace,Consolas,monospace;font-size:11px;color:#64748B;word-break:break-all;';
-    last.appendChild(sent);
-  }
-  if (trace && trace.url) {
-    const a = document.createElement('a');
-    a.href = trace.url; a.target = '_blank'; a.textContent = 'izi aç (' + String(trace.id || '').slice(0, 8) + ')';
-    last.appendChild(a);
-  }
-  tr.appendChild(last);
-  tbody.insertBefore(tr, tbody.firstChild);
-}
+  setTrace("w-trace", r.tid, "Giriş");
+  if (r.ok) {
+    setStatus("w-status", "Giriş başarılı", true);
+    $("w-pass").value = ""; $("w-sms").value = "";
+  } else setStatus("w-status", r.data.error || "Giriş reddedildi", false);
+  await refresh();
+};
+onEnter("w-pass", "w-go");
+onEnter("w-sms", "w-go");
 
-async function post(url, body) {
-  const r = await apiFetch(url, { method: 'POST', credentials: 'same-origin',
-    headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
-  return { ok: r.ok, status: r.status, data: await r.json(), traceId: r.sentTraceId };
-}
-
-async function refreshState() {
-  const s = await (await apiFetch('/api/state', { credentials: 'same-origin' })).json();
-  const e = s[KEY];
-  if (KEY === 'public') { $('st').textContent = 'public kanal: oturum yok'; return; }
-  if (!e) { $('st').textContent = 'durum: oturum kapalı'; return; }
-  const t = e.token;
-  $('st').textContent = [
-    `durum: oturum açık (kullanıcı: ${e.user || '-'})`,
-    `channel: ${t.channel || '-'}  auth_method: ${t.auth_method || '-'}`,
-    `aud: ${Array.isArray(t.aud) ? t.aud.join(',') : t.aud}  azp: ${t.azp || '-'}`,
-    `sender-constrained: ${t.sender_constrained ? 'evet' : 'hayır'}`
-  ].join('\n');
-}
-
-function setupPage(channels) {
-  $('title').textContent = channels[KEY] ? channels[KEY].title : 'Kanal';
-  if (KEY === 'public') {
-    $('login-fields').style.display = 'none';
-    $('btn-login').disabled = true;
-    $('btn-logout').disabled = true;
-    $('hint').textContent = 'Public kanalda giriş ve çıkış yok (token gerekmez). Çağrılar aşağıda.';
-  }
-  if (KEY === 'partner') $('hint').textContent = 'Partner girişi client credentials ile (mTLS). Çıkış yerel token siler.';
-  if (KEY === 'branch') $('hint').textContent = 'Şube girişi: şube UI pod’u (branch-cluster, cihaz sertifikası pod’da). Giriş: teller kullanıcısı.';
-  if (KEY === 'mobile') { $('hint').textContent = 'Mobil giriş yalnız Seal ile (cihaz + PIN). Çıkış oturumu kapatır.'; $('login-fields').style.display = 'none'; $('btn-login').style.display = 'none'; }
-  if (KEY === 'web') $('hint').textContent = 'Web girişi PKCE ile. Çıkış IdP oturumunu kapatır.';
-  if (KEY === 'mobile') { $('seal-sec').style.display = ''; sealTab('first'); }
-
-  renderMenu($('menu'), KEY, (op, cfg, res) => {
-    const ok = res.pass === true || String(res.status) === String(cfg.expect || '200');
-    addRow([now(), KEY, `menü: ${op.label}`, cfg.auth || '-', cfg.expect || '200', res.status,
-      { cls: ok ? 'pass' : 'fail', text: ok ? 'PASS' : 'FAIL' }, String(res.body || '').replace(/\s+/g, ' ').slice(0, 140)],
-      { url: res.trace_url, id: res.trace_id });
+// Adım göstergesi: yeni cihazda 4 adım, mevcut cihazda "Kimlik" adımı atlanır
+function updateSteps(n) {
+  curStep = n;
+  const isNew = mode() === "new";
+  document.querySelectorAll("#steps li").forEach((li) => {
+    const s = Number(li.dataset.s);
+    const skipped = s === 3 && !isNew; // mevcut cihazda SMS adımı yok
+    li.classList.toggle("skip", skipped);
+    li.classList.toggle("active", s === n);
+    li.classList.toggle("done", s < n && !skipped);
   });
-
-  const box = $('checks');
-  (CHECKS[KEY] || []).forEach((c) => {
-    const b = document.createElement('button');
-    b.textContent = c.label;
-    b.title = c.hint || '';
-    b.addEventListener('click', () => runCheck(b, c));
-    box.appendChild(b);
-  });
+  document.querySelectorAll("#sec-mobile .wz").forEach((el) => el.classList.toggle("hidden", el.dataset.step !== String(n)));
+}
+function wzShow(n) { updateSteps(n); }
+function wzReset() {
+  wzShow(1);
+}
+function mode() {
+  return document.querySelector('input[name="m-mode"]:checked').value;
+}
+function wzSummary() {
+  $("wz-submit").textContent = mode() === "new" ? "SMS kodu gönder" : "Giriş yap";
+  const rows = [
+    ["Müşteri no", $("m-cust").value.trim()],
+    ["Cihaz", mode() === "new" ? "Yeni cihaz (aktivasyon)" : "Mevcut cihaz"],
+  ];
+  $("m-summary").innerHTML = rows.map(([k, v]) => `<dt>${k}</dt><dd></dd>`).join("");
+  const dds = $("m-summary").querySelectorAll("dd");
+  rows.forEach(([, v], i) => { dds[i].textContent = v; });
+}
+function mobileDone(d) {
+  $("m-result").textContent = "Hoş geldiniz, " + (d.fullName || d.customerId) + ".";
+  wzShow(4);
+  setStatus("m-status", "Giriş tamamlandı", true);
 }
 
-async function runCheck(btn, c) {
+document.querySelectorAll('input[name="m-mode"]').forEach((el) => {
+  el.addEventListener("change", () => { if (curStep >= 2) updateSteps(curStep); });
+});
+
+$("wz-next1").onclick = () => {
+  if (!$("m-cust").value.trim()) { setStatus("m-status", "Müşteri no girin", false); return; }
+  if (!$("m-pin").value) { setStatus("m-status", "PIN girin", false); return; }
+  wzSummary(); wzShow(2); setStatus("m-status", "Bilgileri kontrol edip giriş yapın", true);
+};
+$("wz-back3").onclick = () => { wzShow(1); setStatus("m-status", "", true); };
+$("wz-submit").onclick = async () => {
+  const btn = $("wz-submit");
+  const isNew = mode() === "new";
   btn.disabled = true;
-  try {
-    const body = { channel: c.channel, method: c.method, path: c.path, auth: c.auth,
-      cert: c.cert !== false, token_from: c.token_from || null, expect: c.expect };
-    const r = await post('/api/call', body);
-    const d = r.data;
-    const ok = !!d.pass;
-    addRow([now(), c.channel, `${c.method} ${c.path}`, c.auth + (c.token_from ? ` (${c.token_from})` : ''),
-      c.expect, d.status, { cls: ok ? 'pass' : 'fail', text: ok ? 'PASS' : 'FAIL' },
-      (d.body || d.error || '').replace(/\s+/g, ' ').slice(0, 140)],
-      { url: d.trace_url, id: d.trace_id, sent: r.traceId });
-  } catch (e) {
-    addRow([now(), c.channel, c.label, '-', c.expect, 'hata', { cls: 'fail', text: 'FAIL' }, String(e)]);
-  } finally { btn.disabled = false; }
-}
-
-async function login() {
-  const btn = $('btn-login'); btn.disabled = true;
-  try {
-    const r = await post('/api/login', { channel: KEY, username: $('u').value.trim(), password: $('p').value });
-    if (r.data.status === 'APPROVAL_PENDING') {
-      showWebApproval(r.data);
-      addRow([now(), KEY, 'giriş', '-', '-', 'onay bekleniyor', { cls: 'none', text: 'BEKLİYOR' },
-        'mobil cihazda onay: ' + (r.data.approvalId || '-')], { url: r.data.trace_url, id: r.data.trace_id });
-    }
-    else if (r.ok) addRow([now(), KEY, 'giriş', '-', '-', 'token alındı', { cls: 'pass', text: 'PASS' }, 'oturum açıldı'],
-      { url: r.data.trace_url, id: r.data.trace_id });
-    else addRow([now(), KEY, 'giriş', '-', '-', r.status, { cls: 'fail', text: 'FAIL' }, r.data.error]);
-  } catch (e) { addRow([now(), KEY, 'giriş', '-', '-', 'hata', { cls: 'fail', text: 'FAIL' }, String(e)]); }
-  finally { btn.disabled = false; await refreshState(); }
-}
-
-async function logout() {
-  const btn = $('btn-logout'); btn.disabled = true;
-  try {
-    const r = await post('/api/logout', { channel: KEY });
-    const note = r.data.note || '';
-    addRow([now(), KEY, 'çıkış', '-', '200/204', r.data.idp_status ?? '-',
-      { cls: r.data.ok ? 'pass' : 'fail', text: r.data.ok ? 'PASS' : 'FAIL' }, note || 'oturum kapatıldı'],
-      { url: r.data.trace_url, id: r.data.trace_id });
-  } catch (e) { addRow([now(), KEY, 'çıkış', '-', '-', 'hata', { cls: 'fail', text: 'FAIL' }, String(e)]); }
-  finally { btn.disabled = false; await refreshState(); }
-}
-
-// Seal akışı: sunucu adımları döner; her adım log'a bir satır, son satırın İz bağlantısı ile.
-function sealRows(d, sent) {
-  (d.steps || []).forEach((st) => {
-    addRow([now(), KEY, st.name, 'seal', st.expect || '-', st.status,
-      { cls: st.ok ? 'pass' : 'fail', text: st.ok ? 'PASS' : 'FAIL' }, st.result],
-      { url: d.trace_url, id: d.trace_id, sent });
+  setStatus("m-status", isNew ? "SMS kodu hazırlanıyor…" : "Cihaz ve kimlik doğrulanıyor…", true);
+  const r = await api("/api/mobile/login", {
+    customerId: $("m-cust").value.trim(), pin: $("m-pin").value, enroll: false, newDevice: isNew,
   });
-}
-async function sealRun(payload, btn) {
-  if (btn) btn.disabled = true;
-  try {
-    const r = await post('/api/seal', payload);
-    sealRows(r.data, r.traceId);
-    return r.data;
-  } catch (e) {
-    addRow([now(), KEY, 'seal', 'seal', '-', 'hata', { cls: 'fail', text: 'FAIL' }, String(e)]);
-    return null;
-  } finally { if (btn) btn.disabled = false; }
-}
-function sealTab(which) {
-  const first = which === 'first';
-  $('pane-first').style.display = first ? '' : 'none';
-  $('pane-again').style.display = first ? 'none' : '';
-  $('tab-first').className = first ? 'primary' : '';
-  $('tab-again').className = first ? '' : 'primary';
-}
-// mode: 'first' (yeni cihaz: OTP + aktivasyon) | 'again' (kayıtlı cihaz: PIN)
-async function sealStart(mode) {
-  const pinId = mode === 'first' ? 'f-pin' : 'a-pin';
-  const btn = $(mode === 'first' ? 'btn-first' : 'btn-again');
-  const d = await sealRun({ action: 'start', mode, username: $('u').value.trim(), password: $('p').value,
-    pin: $(pinId).value.trim() }, btn);
-  if (!d) return;
-  if (d.status === 'NEW_DEVICE') {
-    $('f-otp').value = d.demoOtp || '';
-    $('seal-st').textContent = 'Yeni cihaz: demo OTP ekranda: ' + (d.demoOtp || '-') + ' (SMS gönderilmez). OTP doğrulayın.';
+  btn.disabled = false;
+  setTrace("m-trace", r.tid, "Mobil giriş");
+  if (!r.ok) {
+    setStatus("m-status", r.data.error || "Mobil giriş başarısız", false);
+    wzShow(1);
+  } else if (r.data.needOtp) {
+    // Yeni cihaz: kod SMS kutusunda; kullanıcı kodu oradan alıp yazar
+    $("m-sms").value = "";
+    wzShow(3);
+    setStatus("m-status", "SMS kodu gönderildi. Kodu SMS kutusundan alıp girin.", true);
   } else {
-    $('seal-st').textContent = 'Seal durumu: ' + d.status;
+    mobileDone(r.data);
   }
-  await refreshState();
-}
-async function sealOtp() {
-  const d = await sealRun({ action: 'otp', otp: $('f-otp').value.trim() }, $('btn-otp'));
-  if (!d) return;
-  $('seal-st').textContent = 'Seal durumu: ' + d.status;
-  await refreshState();
-}
-async function sealReset() {
-  await sealRun({ action: 'reset' }, $('btn-seal-reset'));
-  $('seal-st').textContent = 'Cihaz sıfırlandı; sonraki "Tekrar giriş" için önce kurulum gerekir.';
-}
-$('tab-first').addEventListener('click', () => sealTab('first'));
-$('tab-again').addEventListener('click', () => sealTab('again'));
-$('btn-first').addEventListener('click', () => sealStart('first'));
-$('btn-again').addEventListener('click', () => sealStart('again'));
-$('btn-otp').addEventListener('click', sealOtp);
-$('btn-seal-reset').addEventListener('click', sealReset);
-
-// Web onayı: giriş mobil cihaz onayı bekliyorsa kutu gösterilir; "Onayı kontrol et" durumu sorgular.
-function showWebApproval(d) {
-  $('web-approval').style.display = '';
-  $('wa-st').textContent = 'Mobil cihazda onay bekleniyor (onay no: ' + (d.approvalId || '-') +
-    '). Mobil sayfada "Bekleyen onayları getir" ile onaylayın, sonra kontrol edin.';
-}
-async function webPoll() {
-  const btn = $('btn-wa-poll'); btn.disabled = true;
-  try {
-    const r = await post('/api/login/poll', { channel: KEY });
-    const d = r.data;
-    if (d.status === 'PENDING') { $('wa-st').textContent = 'Hâlâ onay bekleniyor.'; return; }
-    $('web-approval').style.display = 'none';
-    if (d.status === 'APPROVED') {
-      addRow([now(), KEY, 'giriş (onaylı)', '-', '-', 'token alındı', { cls: 'pass', text: 'PASS' }, 'mobil onayı alındı; oturum açıldı']);
-    } else {
-      addRow([now(), KEY, 'giriş (onaylı)', '-', '-', d.status, { cls: 'fail', text: 'FAIL' }, 'onay tamamlanmadı: ' + d.status]);
-    }
-  } catch (e) { addRow([now(), KEY, 'giriş (onaylı)', '-', '-', 'hata', { cls: 'fail', text: 'FAIL' }, String(e)]); }
-  finally { btn.disabled = false; await refreshState(); }
-}
-
-// Mobil onaylar: bekleyenleri listeler; Onayla/Reddet cihaz imzasıyla karar gönderir.
-async function sealApprovals() {
-  const d = await sealRun({ action: 'approvals' }, $('btn-seal-approvals'));
-  if (!d) return;
-  renderApprovals(d.approvals || []);
-}
-function renderApprovals(list) {
-  const box = $('seal-approvals'); box.textContent = '';
-  if (!list.length) {
-    const p = document.createElement('div'); p.className = 'hint'; p.textContent = 'Bekleyen onay yok.';
-    box.appendChild(p); return;
+  await refresh();
+};
+async function finishMobile() {
+  const btn = $("wz-sms-go");
+  const code = $("m-sms").value.trim();
+  if (!code) { setStatus("m-status", "SMS kodunu girin", false); return; }
+  btn.disabled = true; btn.textContent = "Giriş yapılıyor…";
+  const r = await api("/api/mobile/login", {
+    customerId: $("m-cust").value.trim(), pin: $("m-pin").value, enroll: false, newDevice: true, smsCode: code,
+  });
+  btn.disabled = false; btn.textContent = "Giriş yap";
+  setTrace("m-trace", r.tid, "Mobil giriş");
+  if (r.ok) {
+    mobileDone(r.data);
+  } else {
+    // Hatalı kodda süreç baştan başlar: "SMS kodu gönder" ile yeni kod istenir
+    setStatus("m-status", (r.data.error || "Giriş başarısız") + " Yeniden 'SMS kodu gönder' ile kod isteyin.", false);
+    wzShow(2);
   }
-  list.forEach((a) => {
-    const row = document.createElement('div'); row.className = 'row';
-    const label = document.createElement('span'); label.className = 'flag';
-    label.textContent = 'onay ' + String(a.approvalId).slice(0, 8);
-    const ok = document.createElement('button'); ok.className = 'primary'; ok.textContent = 'Onayla';
-    ok.addEventListener('click', () => sealDecide(a.approvalId, 'APPROVE'));
-    const no = document.createElement('button'); no.textContent = 'Reddet';
-    no.addEventListener('click', () => sealDecide(a.approvalId, 'DENY'));
-    row.append(label, ok, no);
-    box.appendChild(row);
+  await refresh();
+}
+$("wz-sms-go").onclick = finishMobile;
+$("wz-back-sms").onclick = async () => { await api("/api/mobile/cancel", {}); wzShow(2); setStatus("m-status", "", true); };
+$("wz-cancel").onclick = async () => {
+  await api("/api/mobile/cancel", {});
+  wzReset(); setStatus("m-status", "Giriş iptal edildi", true);
+};
+onEnter("m-sms", "wz-sms-go");
+$("wz-done").onclick = () => { wzReset(); setStatus("m-status", "", true); $("op-balance").click(); };
+
+onEnter("m-cust", "wz-next1");
+onEnter("m-pin", "wz-next1");
+
+// ---- Hesap işlemleri: bakiye, hareketler, havale ----
+let accounts = [];
+let pendingTransfer = null;
+const fmtTRY = (s) => Number(s).toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " TL";
+const opStatus = (msg, ok) => setStatus("op-status", msg, ok);
+
+function showPane(name) {
+  ["balance", "history", "transfer"].forEach((p) => {
+    $("pane-" + p).classList.toggle("hidden", p !== name);
+    $("op-" + p).classList.toggle("primary", p === name);
+  });
+  opStatus("", true);
+}
+function fillSummary(id, rows) {
+  const dl = $(id);
+  dl.innerHTML = "";
+  rows.forEach(([k, v]) => {
+    const dt = document.createElement("dt"); dt.textContent = k;
+    const dd = document.createElement("dd"); dd.textContent = v;
+    dl.append(dt, dd);
   });
 }
-async function sealDecide(approvalId, decision) {
-  const d = await sealRun({ action: 'decide', approvalId: approvalId, decision: decision }, null);
-  $('seal-st').textContent = d ? ('Onay kararı: ' + (decision === 'APPROVE' ? 'onaylandı' : 'reddedildi'))
-                               : 'karar iletilemedi';
-  await sealApprovals();
+function cell(text, cls) {
+  const td = document.createElement("td");
+  td.textContent = text;
+  if (cls) td.className = cls;
+  return td;
 }
-$('btn-wa-poll').addEventListener('click', webPoll);
-$('btn-seal-approvals').addEventListener('click', sealApprovals);
-$('btn-login').addEventListener('click', login);
-$('btn-logout').addEventListener('click', logout);
+async function txOp(code, params) {
+  const r = await api("/api/transaction", { channel, code, params: params || {} });
+  setTrace("op-trace", r.tid, { BALANCE: "Bakiye", HISTORY: "Hareketler", TRANSFER: "Havale" }[code] || code);
+  $("result").textContent = JSON.stringify(r.data, null, 2);
+  if (r.data && r.data.expired) { state[channel] = {}; render(); }
+  return r;
+}
+function fillAccountSelects() {
+  ["h-acc", "t-from"].forEach((id) => {
+    const sel = $(id);
+    const prev = sel.value;
+    sel.innerHTML = "";
+    accounts.forEach((a) => {
+      const o = document.createElement("option");
+      o.value = a.id;
+      o.textContent = a.id + " · " + fmtTRY(a.balance);
+      sel.appendChild(o);
+    });
+    if (accounts.some((a) => a.id === prev)) sel.value = prev;
+  });
+}
+async function loadBalance() {
+  const r = await txOp("BALANCE");
+  if (!r.ok) { opStatus(r.data.error || "Bakiye alınamadı", false); return false; }
+  accounts = r.data.accounts || [];
+  const body = $("bal-body");
+  body.innerHTML = "";
+  if (!accounts.length) body.innerHTML = '<tr><td colspan="3" class="muted">Hesap bulunamadı</td></tr>';
+  accounts.forEach((a) => {
+    const tr = document.createElement("tr");
+    tr.append(cell(a.id), cell(a.type), cell(fmtTRY(a.balance), "num"));
+    body.appendChild(tr);
+  });
+  fillAccountSelects();
+  opStatus("Bakiye güncellendi", true);
+  return true;
+}
+async function loadHistory() {
+  const acc = $("h-acc").value;
+  if (!acc) { opStatus("Hesap bulunamadı; önce Bakiye'ye basın", false); return; }
+  const r = await txOp("HISTORY", { account: acc, limit: 20 });
+  const body = $("h-body");
+  body.innerHTML = "";
+  if (!r.ok) { opStatus(r.data.error || "Hareketler alınamadı", false); return; }
+  const rows = r.data.transactions || [];
+  if (!rows.length) body.innerHTML = '<tr><td colspan="5" class="muted">Hareket yok</td></tr>';
+  rows.forEach((t) => {
+    const credit = t.direction === "CREDIT";
+    const tr = document.createElement("tr");
+    tr.append(
+      cell(new Date(t.at).toLocaleString("tr-TR")),
+      cell(t.description),
+      cell(t.counterpart),
+      cell((credit ? "+" : "−") + fmtTRY(t.amount), "num " + (credit ? "ok" : "bad")),
+      cell(fmtTRY(t.balanceAfter), "num"),
+    );
+    body.appendChild(tr);
+  });
+  opStatus(rows.length + " hareket listelendi", true);
+}
+function parseAmount(v) {
+  let s = String(v).trim();
+  if (s.includes(",")) s = s.replace(/\./g, "").replace(",", ".");  // 1.250,50 biçimi
+  if (!/^\d+(\.\d{1,2})?$/.test(s)) return null;
+  return Number(s) > 0 ? s : null;
+}
+function resetTransferForm() {
+  $("t-receipt").classList.add("hidden");
+  $("t-confirm").classList.add("hidden");
+  $("t-form").classList.remove("hidden");
+  $("t-to").value = ""; $("t-amt").value = ""; $("t-desc").value = "";
+  pendingTransfer = null;
+}
 
-(async () => {
-  const channels = await (await apiFetch('/api/channels')).json();
-  setupPage(channels);
-  await refreshState();
-  if (location.hash === '#logout') $('btn-logout').scrollIntoView();
-})();
+$("op-balance").onclick = () => { showPane("balance"); loadBalance(); };
+$("op-history").onclick = async () => {
+  showPane("history");
+  if (!accounts.length && !(await loadBalance())) return;
+  loadHistory();
+};
+$("op-transfer").onclick = async () => {
+  showPane("transfer");
+  resetTransferForm();
+  if (!accounts.length) await loadBalance();
+};
+$("h-go").onclick = loadHistory;
+
+$("t-review").onclick = () => {
+  const from = $("t-from").value;
+  const to = $("t-to").value.trim().toUpperCase();
+  const amt = parseAmount($("t-amt").value);
+  const desc = $("t-desc").value.trim() || "Havale";
+  if (!from) return opStatus("Gönderen hesabı seçin", false);
+  if (!to) return opStatus("Alıcı hesap no girin", false);
+  if (to === from) return opStatus("Gönderen ve alıcı hesap aynı olamaz", false);
+  if (!amt) return opStatus("Tutarı kontrol edin (örn. 150 veya 150,50)", false);
+  pendingTransfer = { fromAccount: from, toAccount: to, amount: amt, description: desc };
+  fillSummary("t-sum", [["Gönderen", from], ["Alıcı", to], ["Tutar", fmtTRY(amt)], ["Açıklama", desc]]);
+  $("t-form").classList.add("hidden");
+  $("t-confirm").classList.remove("hidden");
+  opStatus("Bilgileri onaylayın", true);
+};
+$("t-back").onclick = () => {
+  $("t-confirm").classList.add("hidden");
+  $("t-form").classList.remove("hidden");
+  opStatus("", true);
+};
+$("t-send").onclick = async () => {
+  if (!pendingTransfer) return;
+  const btn = $("t-send");
+  btn.disabled = true; btn.textContent = "Gönderiliyor…";
+  const r = await txOp("TRANSFER", pendingTransfer);
+  const tid = r.tid;
+  btn.disabled = false; btn.textContent = "Onayla ve gönder";
+  if (!r.ok) { opStatus(r.data.error || "Havale yapılamadı", false); return; }
+  pendingTransfer = null;
+  $("t-confirm").classList.add("hidden");
+  $("t-receipt").classList.remove("hidden");
+  $("t-ok").textContent = "Havale tamamlandı. Referans: " + r.data.reference;
+  fillSummary("t-rec", [
+    ["Tutar", fmtTRY(r.data.amount)],
+    ["Alıcı", r.data.toAccount],
+    ["Kalan bakiye", fmtTRY(r.data.balanceAfter)],
+    ["Alıcı bu bankada", r.data.internal ? "Evet" : "Hayır (dış hesap)"],
+  ]);
+  opStatus("", true);
+  await loadBalance();
+  setTrace("op-trace", tid, "Havale"); // bakiye yenilemesi izi ezmesin diye havalenin izini yeniden yaz
+};
+$("t-new").onclick = () => { resetTransferForm(); opStatus("", true); };
+onEnter("t-amt", "t-review");
+onEnter("t-to", "t-review");
+
+$("btn-logout").onclick = async () => {
+  await api("/api/logout", { channel });
+  accounts = []; pendingTransfer = null;
+  $("bal-body").innerHTML = '<tr><td colspan="3" class="muted">Bakiyeleri görmek için "Bakiye"ye basın.</td></tr>';
+  $("h-body").innerHTML = "";
+  $("result").textContent = "";
+  showPane("balance");
+  opStatus("", true);
+  await refresh();
+};
+
+updateSteps(1);
+refresh();
 </script>
 </body>
 </html>

@@ -10,23 +10,23 @@ get() { # get <context> <ns> <secret> <key>
 
 echo "==================== LAB ARAÇLARI ===================="
 echo
-echo "Grafana     http://127.0.0.1:3000"
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+GRAFANA_PW=$(grep -E '^GRAFANA_ADMIN_PASSWORD=' "$ROOT/platform/.env" 2>/dev/null | cut -d= -f2-)
+
+echo "Grafana     http://127.0.0.1:3000   (platform compose)"
 echo "  kullanıcı : admin"
-echo "  parola    : $(get kind-mgmt observability grafana-admin password)"
+echo "  parola    : ${GRAFANA_PW:-<platform/.env yok; bash platform/scripts/up.sh>}"
 echo
-echo "Kimlik (IdP) https://id.bank.lab.local/realms/bank   (yerel: tools-forward 18080, https)"
+echo "Kimlik (IdP) https://id.bank.lab.local/realms/bank   (yerel: tools-forward 18443, https)"
 echo "  kullanıcı : alice"
-echo "  parola    : $(get kind-identity idp idp-secrets ALICE_PASSWORD)"
+echo "  parola    : $(get kind-bank-prod auth auth-secrets ALICE_PASSWORD)"
 echo
-echo "Prometheus  http://127.0.0.1:9090   (kimlik gerekmez)"
+echo "Prometheus  http://127.0.0.1:9090   (platform compose; kimlik gerekmez)"
 echo
-echo "Vault       http://127.0.0.1:8200"
+echo "Vault       http://127.0.0.1:18200   (tools-forward start)"
 echo "  yöntem    : Token"
-echo "  root token: $(get kind-mgmt secrets vault-bootstrap root_token)"
+echo "  root token: $(get kind-bank-prod secrets vault-bootstrap root_token)"
 echo "  (lab için; prod'da root token kapatılır)"
-echo
-echo "Şube UI     http://127.0.0.1:9100   (kimlik: teller; parola identity'de)"
-echo "  teller    : $(get kind-identity idp idp-secrets TELLER_PASSWORD)"
 echo
 echo "Konsol      http://127.0.0.1:9000   (bash console/start.sh ile açılır)"
 echo "====================================================="

@@ -1,244 +1,111 @@
-# Servisler, İçerikler ve Durum
+# Servisler, cluster'lar ve durum
 
-Bu doküman lab'daki her bileşenin **ne yaptığını, nerede çalıştığını, nasıl yapılandırıldığını ve son doğrulama durumunu** özetler.
-Hedef mimari için `design.md`; tüm görseller tek dosyada: `docs/dmz-lab.drawio` (tab'lar: genel mimari, I/O ve araçlar, cluster ve pod görünümleri, şube cluster'ı, sequence diyagramları).
+Bu dosya mevcut lab düzenini anlatır. Düzen: edge (docker compose) + 5 kind cluster (`codevo-dmz`, `bank-dmz-prod`, `bank-prod`, `mgmt`, `legacy-demo`).
 
-Son güncelleme: 2026-11-11.
+Durum etiketleri: **Test edildi** (bu düzende uçtan uca çalıştırıldı), **Kuruldu** (manifest uygulandı, çalışıyor, uçtan uca test edilmedi), **Planlandı** (henüz yok).
 
-"Durum" sütunu iki değerden birini taşır:
-- **Doğrulandı**: ilgili test son çalıştırmada geçti (test adı ve sayısı verildi).
-- **Doğrulama bekliyor**: kod ve yapılandırma yazıldı ya da değişti, henüz uçtan uca test edilmedi.
+## 1. Cluster ve edge özeti
 
----
-
-## 0. Bileşen adları (ürün isimleri)
-
-Bileşenler aşağıdaki adlarla anılır. Kod dizinleri ve servis adları (`spring-idp`, `bff`, ...) lab'da olduğu gibi kalır; eşleme aşağıda.
-
-| Ad | Rol | Çalıştığı yer | Lab karşılığı |
+| Ortam | Ne çalışır | Dizin | Durum |
 |---|---|---|---|
-| **Seal SDK** | Mobil uygulamanın içine gömülü SDK: login, işlem ve belge imzası, backend ile TLS haberleşmesi | Cihaz (mobil uygulama) | `mobile-app` istemcisi, PKCE (konsol mobil kanalı) |
-| **Octopus** | Cihazda çalışan güvenlik tarayıcısı: kötü amaçlı yazılım tespiti, uygulama koruma (shielding), cihaz parmak izi | Cihaz (Seal SDK ile birlikte) | Lab'da yok; sinyali Seal Mobile alır (device-trust kaldırıldı) |
-| **Seal Mobile** | SDK'ya hizmet veren mobil backend; kimlik doğrulama ve imza işlemlerini yönetir (orkestrasyon) | DMZ'de internete açık kısım + iç orkestrasyon | DMZ: `gw-mobile`, `ext-authz`; iç: `bff` (mobil kanal), `spring-idp` |
-| **Seal Intranet** | Ayrı servis: backend-to-backend API (`/seal/v1/...`). Çağıran backend'in IdP `seal-b2b` token'ı (aud=seal-intranet) JWKS ile doğrulanır | Internal cluster, ns `seal-intranet`; `internal-cluster/seal-intranet/`, `manifests/seal-intranet.yaml`, `scripts/load-seal-intranet.sh`; gw-internal `/seal/` HTTPRoute | Doğrulandı (yerel): 9/9. Kümede kurulum bekliyor (internal cluster kapalı) |
+| **edge** (docker compose) | HAProxy: `seal.lab.local` TLS passthrough (SNI), `web.lab.local` ve `mobile-api.lab.local` TLS sonlandırma → Janus. Host portu `127.0.0.1:8443`, stats `8404` | `edge/` | Test edildi |
+| **platform** (host, docker compose, ağ `lab-platform`) | LegacyDB (PostgreSQL 16, 30432 köprüsü), Fortuna monolit (mTLS), merkezi Prometheus (remote_write alıcısı), Loki, Tempo, Grafana (127.0.0.1:3000). Köprüler: IdP, Seal Intranet, monolit girişi (kind ağına yayın) | `platform/` (`scripts/up.sh`, `docker-compose.yml`) | Test edildi |
+| **codevo-dmz** | Seal Mobile (cihaz mTLS, NodePort 30456), Seal Intranet (yalnız akış uçları, NodePort 30643) | `codevo-dmz-cluster/` | Test edildi |
+| **bank-dmz-prod** | Janus web (NodePort 30802) ve Janus mobil (NodePort 30801). Janus kimlik üretir: splash, client token, server token | `bank-dmz-prod-cluster/` | Test edildi |
+| **bank-prod** | auth-server (Spring Authorization Server, ns `auth`, NodePort 30543 HTTPS, 30582 iç), Fortuna zinciri (`channel`: FortunaUsersCGW, FortunaUserAPI, FortunaUserACL, SmsOtpCGW mock), channel-gateway (NodePort 30990), Vault (ns `secrets`) | `bank-prod-cluster/` | Test edildi (auth, Fortuna, channel-gateway); Vault kuruldu |
 
-Akış (özet): Seal SDK + Octopus (cihaz) → TLS / cihaz mTLS → Seal Mobile (DMZ edge) → Seal Mobile orkestrasyonu (iç) → IdP, cihaz güven servisi ve Seal Intranet API'leri.
+Node IP'leri `docker inspect` ile okunur (`kind` ağı). Cluster'lar arası çağrılar NodePort + `hostAliases` ile yapılır; yer tutucular (`__BANKPROD_NODE_IP__` vb.) loader betiklerinde `sed` ile doldurulur.
 
-Notlar:
-- Octopus'un sinyali **karar değildir**; sunucuda doğrulanır (üçüncü parti attestation). Lab'da bu doğrulama henüz yok.
-- Seal Intranet'e erişim yalnızca iç gateway ve mTLS ile olur; internete açık değildir.
-- İmza işlemleri için anahtarlar HSM'de tutulmalı; Seal Mobile anahtar tutmaz (tasarım gereği).
+## 2. Akış servisleri
 
-## 0. Kurulum ve kaldırma
+### 2.1 Janus (bank-dmz-prod, ns `janus`)
 
-| Betik | Görev |
+Kanal başına iki deployment: `janus-web` (`CHANNEL=web`) ve `janus-mobile` (`CHANNEL=mobile`). Python stdlib, HS256 imza, anahtarlar `janus-keys` secret'ında (loader üretir, repoda yok).
+
+| Uç nokta | Ne yapar | Durum |
+|---|---|---|
+| `/janus/health` | Sağlık | Test edildi |
+| `/janus/splash` | Splash token (typ `splash`, 15 dk) ve splashCode | Test edildi |
+| `/janus/secure-login` | Seal yetkisini Fortuna üzerinden doğrular (mobil) | Test edildi |
+| `/janus/otp/request` | SMS OTP isteği (SmsOtpCGW mock, lab: kod yanıtta) | Test edildi |
+| `/janus/login-user` | Müşteri no + parola + captcha (Fortuna) + OTP. Başarılıysa **client token** (typ `client`) | Test edildi |
+| `/janus/mobile-login` | Cihaz ACTIVE ise client token üretir | Test edildi |
+| `/janus/activation/token`, `/janus/activation/complete` | Yeni cihaz aktivasyonu (PENDING → ACTIVE) | Test edildi (konsol yeni cihaz akışı) |
+| `/janus/transaction` | Client token'ı doğrular, **server token** (typ `server`, `aud=channel-gateway`, 60 sn) üretip channel-gateway'e iletir | Test edildi |
+
+Akış tokenları: dışarı giden token **client token**; içeri giden **server token**. Splash token'ı tüm akış uçlarında `X-Splash-Token` ile gönderilir.
+
+Bilinen sınırlar: Janus ve channel-gateway'den gelen tüm çağrılar mTLS (kanal başına istemci sertifikası; sunucular CN kontrolü yapar). Fortuna iç zinciri (CGW → API → ACL) da mTLS. Bekleyen OTP durumu bellekte (tek replika).
+
+### 2.2 channel-gateway (bank-prod, ns `channel`)
+
+Janus server token'ını doğrular (imza, `typ=server`, `aud=channel-gateway`, süre). Lab'da Janus HS256 anahtarlarını bir secret'tan alır; prod'da Janus açık anahtarı (JWKS) kullanılmalı. İşlem: `BALANCE` → Fortuna monolith `/fortuna/accounts`. Diğer işlemler `400` döner.
+
+Test: geçerli server token → 200 ve bakiye; yanlış imza, yanlış `typ` → 401. Janus üzerinden (client → server → channel-gateway) 200.
+
+### 2.3 Seal (codevo-dmz)
+
+| Servis | Görev | Durum |
+|---|---|---|
+| **Seal Mobile** (`seal-mobile`, NodePort 30456, SNI `seal.lab.local`) | Cihaz mTLS (`CERT_REQUIRED`, device CA), PIN (Fortuna monolitindeki `/seal-pm/*` uçlarıyla), cihaz imzası (PKCS1v15 SHA-256, nonce). Mobil IdP token'ını introspection ile doğrular | Test edildi |
+| **Seal Intranet** (`seal-intranet`, NodePort 30643) | Yalnız akış uçları: login-status, timestamp, activation token/status, update-device (lab mock). B2B bearer (RS256, IdP JWKS) | Test edildi |
+
+Seal cihaz kaydı ve durumunun tek kaynağıdır (`update-device` yazar, `get-device` okur). PIN doğrulaması Fortuna monolitindedir. Vendor doğrulaması bekliyor (aşağıda açık konular).
+
+### 2.4 Kimlik sağlayıcı (bank-prod, ns `auth`)
+
+Kaynak: `bank-prod-cluster/spring-idp/` (imaj `dmz-lab/auth-server:0.1.0`, yükleyici `bank-prod-cluster/scripts/load-auth-server.sh`). Ayrı bir identity cluster'ı yoktur; `auth-server` bu kodun bank-prod'daki çalışan hâlidir.
+
+Spring Authorization Server (Java 21, Spring Boot 4.1.2, Spring Security 7). Realm yolu `/realms/bank/...`. Mobil istemci `mobile-app`: public, PKCE zorunlu, `com.bank.app:/callback`. Web ve diğer istemciler bu dokümanın kapsamı dışında. Discovery ve JWKS 200 döner.
+
+Kullanıcı girişi yalnız kimlik doğrulama için kullanılır; müşteri parolası Fortuna'da doğrulanır (`fortuna_users`). DPoP kaldırıldı; token exchange grant tipi kodda duruyor, bu akışta kullanılmıyor.
+
+### 2.5 Fortuna (bank-prod `channel` ve legacy-demo)
+
+| Servis | Görev |
 |---|---|
-| `bash up.sh --check` | Yalnız ön kontroller: araçlar, Docker, repo dosyaları, kind ağı (172.18.0.0/16), portlar, internet, sertifikalar. FAIL varsa kurulum yapılmaz |
-| `bash up.sh` | Ön kontroller, sonra sırayla: sertifikalar ve imajlar → mgmt (Vault) → edge → identity (IdP, realm) → internal → DMZ (gateway'ler, F1, iç backend, ext-authz) → **şube cluster'ı** (F10) |
-| `bash down.sh` | Ters sırada kaldırır: port-forward'lar → kind cluster'ları (branch, dmz, internal, identity, mgmt) → edge. `--purge` ile sertifika ve imajlar da silinir. Onay ister, `--yes` ile atlanır |
+| FortunaUsersCGW (`:30880`) | Captcha (lab değeri `lab-captcha`) kontrolü, API'ye iletir |
+| FortunaUserAPI | Parola doğrulama zinciri |
+| FortunaUserACL | `fortuna_users` tablosunda parola, `customers` tablosunda ad ve durum; pasif müşteri reddedilir |
+| SmsOtpCGW (`:30881`, mock) | OTP üretir/doğrular; lab'da SMS gönderilmez |
+| Fortuna monolith (legacy-demo, `fortuna-mock`) | Hesaplar (`/fortuna/accounts`), cihaz durumu, secure-login ve mobile-login uçları |
 
-Ortam durumu: son kontrolde kind cluster'ları ve edge container'ları yoktu (sertifikalar ve repo yerinde). Sıfırdan `up.sh` çalıştırıldı. **Durum: identity adımında durdu (EXIT 2).** Hata: `load-vault.sh` içinde Vault unseal, `'key' must be a valid hex or base64 string` ile reddedildi. Vault başlatılmış (`Initialized: true`) ve mühürlü. Olası neden: `vault-bootstrap` secret'ındaki unseal anahtarının init çıktısından yanlış ayrıştırılması. Doğrulanmadı. Mgmt cluster ve `vault-bootstrap` yeniden oluşturulmadan düzeltilemez. Kalan adımlar (identity, internal, DMZ, şube) çalıştırılmadı.
+Müşteri verisi, cihaz kayıtları ve denetim kaydı LegacyDB'de (mgmt, PostgreSQL 16): `customers`, `accounts`, `fortuna_users`, `customer_devices` (PENDING / ACTIVE / LOCKED / REVOKED), `device_events`. Seed: `C000000001`, `Alice Demo`, hesap `TR000000000001`, bakiye 12500.00.
 
----
+## 3. Konsol (`console/`)
 
-## 1. Edge (docker compose, `edge/`)
+`console/app.py`, `127.0.0.1:9000`. Web ve mobil kanal için tarayıcı arayüzü (`console/channel.html`). Kimlik bilgileri tarayıcıya gitmez; alice parolası bank-prod `auth-secrets`'tan bellekte okunur.
 
-| Bileşen | Görev | Yapılandırma | Durum |
-|---|---|---|---|
-| **HAProxy 3.0** | Tek dış giriş (443). SNI'ye göre **TCP passthrough**: yalnız `partner-api.lab.local`. Diğer host'lar TLS sonlandırır, (demo'da mock) WAF'tan geçer, DMZ gateway'lerine re-encrypt eder. L4 ve L7 IP başına hız sınırı. Aktif sağlık kontrolü: `GET /public/branches` (200). **Şube (`teller.lab.local`) HAProxy'den geçmez** | `edge/haproxy/haproxy.cfg` (WAF yok, mock) | Doğrulandı: edge 25/25 (önceki çalıştırma). Şube kuralının kaldırılması: doğrulama bekliyor |
-| **WAF (demo: mock)** | Yok. Coraza ve OWASP CRS lab'dan kaldırıldı. SQLi, XSS ve path traversal engellenmez | Yok | Gerçek WAF kararı güvenlik ekibinde |
+- **Web**: splash → OTP → login-user → client token → `BALANCE`. Test edildi.
+- **Mobil**: splash → IdP (PKCE, `mobile-app`) → Seal (PIN, cihaz imzası) → secure-login → mobile-login → `BALANCE`. Test edildi.
+- **Mobil yeni cihaz**: Seal (NEW_DEVICE, PIN_AUTHORIZED) → OTP + parola (login-user) → activation/token → activation/complete (ACTIVATED) → PIN kaydı → normal mobil giriş → `BALANCE`. Test edildi.
 
-Edge testleri (`edge/tests/run-all.sh`): smoke, lb (failover dahil), waf, ddos → **25 kontrol**.
+Başlatma: `bash console/start.sh` (edge, bank-prod, bank-dmz-prod, codevo-dmz context'lerini kontrol eder). Ayrıntılı kullanım: `console/README.md`.
 
-**Not:** HAProxy OpenTelemetry desteği olmadan derlenmiş (`-OT`); edge span üretmez. Edge, `x-request-id` ile korele edilir.
+Bilinen sınırlar: mobil giriş için Seal'de ACTIVE cihaz gerekir (Seal yeniden başlarsa cihazlar yeniden aktive edilmeli). Lab cihaz kayıtları (`devtest-*`, `mob-*`) temizlendi; yeni cihaz akışı her çalıştırmada yeni bir cihaz kimliği aktive eder ve kayıt LegacyDB'de kalır (lab). Eski `devtest-d` ile yapılan testler artık çalışmaz.
 
----
+## 4. Yüklemeler
 
-## 2. DMZ Cluster (kind-dmz, `dmz-cluster/`)
-
-### 2.1 Kanal gateway'leri (kgateway v2.5.0 / Envoy)
-
-| Gateway | Kanal | Giriş | Özel kurallar |
-|---|---|---|---|
-| `gw-web` | Web | `web.lab.local` (HAProxy → NodePort 30446) | PKCE token → ext-authz (Bearer) |
-| `gw-mobile` | Mobil | `mobile-api.lab.local` (HAProxy → 30447) | PKCE → ext-authz |
-| `gw-partner` | Partner | `partner-api.lab.local` (HAProxy passthrough → 30448) | Frontend mTLS (`partner-ca`) |
-| `gw-branch` | Şube | **Şube cluster'ından doğrudan**, WAN benzeri bağlantı (NodePort 30449, HAProxy yok) | Frontend mTLS (`branch-ca`, cihaz sertifikası), F10 ile sınırlı |
-
-Her gateway'de: `/bff/*` ve `/partner/*` ext-authz'den geçer; `/public/*` (yalnız GET) ve `/realms/*` ext-authz'siz **iç gateway'e** gider (`internal-gw`, mTLS). Tanımsız yollar 404 (default deny). Şube gateway'inde yalnız `/bff/*` ve `/realms/*` vardır.
-
-Tracing: her gateway `ListenerPolicy` ile OTLP/gRPC span gönderir (Tempo, 30317). `traceparent` ve `x-request-id` ext-authz'e iletilir.
-
-### 2.2 Güvenlik duvarları (host iptables, DMZ node'ları)
-
-| Kural | Kapsam | Durum |
-|---|---|---|
-| **F1** | NodePort 30446–30448: yalnız edge HAProxy IP'si ve DMZ node IP'leri. Diğerleri DROP | Doğrulandı: `dmz-cluster/tests/firewall.sh` 4/4 (önceki çalıştırma) |
-| **F10** | NodePort 30449 (gw-branch): yalnız şube cluster'ının node IP'leri. Diğerleri DROP. Zincir `F10-BRANCH` | Doğrulama bekliyor (şube cluster'ı kurulduktan sonra) |
-
-`host-firewall.sh` her çalıştırmada zincirleri sıfırdan kurar. Şube cluster'ı yoksa F10 kapalı kalır ve uyarı verir.
-
-### 2.3 Kimlik doğrulama: ext-authz (ns `auth`)
-
-| Bileşen | Görev | Durum |
-|---|---|---|
-| **ext-authz** (Python, stdlib) | Dış token: RS256 (IdP JWKS), iss, aud, kanal, exp. Ardından kanal sertifikasıyla **token exchange** (mTLS, `dmz-exchange-<kanal>`) → iç JWT. Kanal profilleri: web, mobile, partner, branch | Doğrulandı: `extauth.sh` 29/29 (önceki çalıştırma). Branch profili: doğrulama bekliyor |
-| Hata gövdesi | 4xx/5xx JSON: `error`, `error_description`, `layer: dmz-ext-authz`, `status`; 401'de `WWW-Authenticate` | Doğrulandı |
-| Tracing | Karar ve token exchange span'leri (Tempo) | Doğrulandı |
-| Metrikler | `authz_decisions_total{channel,decision,status}`, `authz_exchange_total`, `authz_decision_duration_seconds` (port 9100, NodePort 30903) | Doğrulandı |
-| Replika | 1 | Lab sınırı |
-
-### 2.4 Route sınıfları ve iç backend
-Login ve public route'ları gerçek servislere gider (stub yok). `partner-login` yolu `/realms/`.
-
-**DMZ test suite'leri (önceki çalıştırma):** `smoke.sh` 4/4, `route-classes.sh` 10/10, `extauth.sh` 29/29, `internal-path.sh` 8/8, `firewall.sh` (F1) 4/4. `branch.sh` (şube, uçtan uca) **yeniden yazıldı, doğrulama bekliyor**.
-
----
-
-## 3. İç Cluster (kind-internal, `internal-cluster/`)
-
-| Bileşen | Görev | Yapılandırma | Durum |
-|---|---|---|---|
-| **kgateway gw-internal** | DMZ kimliğini mTLS ile doğrular (`dmz-client-ca`), iç JWT doğrular, kanal RBAC, default deny | `manifests/gateway.yaml`, `internal-authz.yaml`, `listener-client-cert.yaml`; tracing `ListenerPolicy`; `scripts/up.sh` kurar | Doğrulandı: `authz.sh` 16/16 (önceki çalıştırma) |
-| **Kanala özel iç endpoint'ler** | `/bff/web/*`, `/bff/mobile/*`, `/bff/branch/*`: her biri yalnız kendi kanalının `x-channel` değerini kabul eder | `internal-authz.yaml` | Doğrulandı |
-| **BFF** (`app-bff`) | Kanalı token'dan doğrular; yanıtı kanala göre şekillendirir (mobil sadeleşir, şube `view: teller`); core'a iç token ile iletir | `services/svc.py` (ConfigMap `svc-code`), `manifests/services.yaml` | Doğrulandı |
-| **Core** (`app-core`) | Dummy iş API'si: `/api/v1/accounts`, `/api/v1/accounts/{id}`, `/api/v1/accounts/{id}/transactions`, `POST /api/v1/transfers`. `/partner/*` ve `/public/*` | Hesap ve işlemler `sub` değerine göre deterministik, bellekte (restart'ta sıfır) | Doğrulandı: `api.sh` 16/16 |
-| Transfer kuralları | `Idempotency-Key` zorunlu; kanal başına işlem limiti (`CHANNEL_LIMITS`, kuruş); bakiye kontrolü; partner salt okunur | `svc.py` | Doğrulandı: `api.sh` |
-| Servis doğrulaması | Her servis iç JWT'yi kendisi doğrular (iss, aud, exp, kanal); hata gövdesi JSON (`layer: internal-service:<ad>`) | `svc.py` | Doğrulandı: `service-verify.sh` 9/9 |
-| Metrikler | `svc_requests_total`, `svc_request_duration_seconds` (BFF ve core, NodePort 30901/30902); `core_transfers_total`, `core_transfer_amount_cents_total` | `shared/metrics.py` | Prometheus'a scrape ediliyor |
-| **kube-state-metrics** | Cluster durum metrikleri. Secret okumaz, sınırlı RBAC | `manifests/metrics.yaml` (NodePort 30904) | Doğrulandı |
-
-Tracing: BFF ve core span üretir (`bff → core` alt span'i dahil).
-
----
-
-## 4. Şube Cluster'ı (kind-branch, `branch-cluster/`) ve Şube Zone
-
-Şube trafiği HAProxy'den **geçmez**. Şube iş istasyonu WAN üzerinden, cihaz sertifikasıyla gw-branch'e (DMZ NodePort 30449) doğrudan bağlanır. Token exchange auth servisinde (ext-authz) yapılır. Lab'da WAN, kind ağı ile simüle edilir.
-
-| Bileşen | Görev | Yapılandırma | Durum |
-|---|---|---|---|
-| **kind-branch cluster** | Şube UI pod'unun çalıştığı cluster. Tek node. Host'ta `127.0.0.1:9100` | `branch-cluster/kind-config.yaml` (extraPortMappings 30900 → 9100) | Doğrulama bekliyor (`up.sh` adım 6) |
-| **Şube UI pod'u** (`branch-ui`, ns `branch`) | Veznedar arayüzü: PKCE girişi (`branch-app`), hesap sorgusu, güvenlik kontrolleri, çıkış. Python stdlib, `python:3.12-alpine` | `branch-cluster/manifests/branch-ui.yaml`, kod `branch/server.py` + `branch/index.html` (ConfigMap `branch-code`) | Doğrulama bekliyor |
-| **Şube sondası** (`branch/probe.py`) | Test için: şube pod'undan gw-branch'e tek HTTPS isteği. Cihaz sertifikasız denemeyi de yapar | ConfigMap `branch-code` içinde | Doğrulama bekliyor (`branch.sh`) |
-| **Şube cihaz sertifikası** | `branch-device` (CN=branch-ws-01), `branch-ca` ile imzalı. Secret `branch-device-tls` | `edge/scripts/gen-branch-certs.sh` | Üretildi |
-| **Şube secret'ları** | `branch-app` client secret ve `teller` parolası: identity'den kopyalanır, repo'da yok | Secret `branch-app-secrets` (`up.sh` kopyalar) | Doğrulama bekliyor |
-| **gw-branch** | Cihaz mTLS, `/bff/*` (ext-authz), `/realms/*` (login) | `dmz-cluster/manifests/branch.yaml`, `scripts/load-branch.sh` | Doğrulandı (önceki çalıştırma: 9/9) |
-| **F10** | gw-branch NodePort'una yalnız şube node IP'lerinden erişim | `dmz-cluster/scripts/host-firewall.sh` | Doğrulama bekliyor |
-
-**Şube UI ortam değişkenleri:** `BRANCH_GW_HOST` (DMZ node IP, `up.sh` ayarlar), `BRANCH_GW_PORT` (30449), `BRANCH_CERT_DIR`, `BRANCH_LISTEN` (pod'da 0.0.0.0), `BRANCH_APP_SECRET` ve `TELLER_PASSWORD` (pod'da secret'tan).
-
-**Şube testi:** `dmz-cluster/tests/branch.sh`, 9 kontrol: cihaz sertifikasız TLS reddi, cihaz sertifikasıyla `/realms` 200, token yok 401, branch token 200 (`channel=branch`, `auth_method=branch_cert`), web token 403 (audience), `/partner` 404, `/public` 404. Test istekleri şube pod'undan `kubectl exec` ile gider.
-
-**Önceki sürüm:** Şube UI host'ta çalışıyor ve `teller.lab.local` üzerinden HAProxy passthrough kullanıyordu. Bu sürüm kaldırıldı.
-
-**Lab sınırları:** cihaz sertifikası tek iş istasyonu için (`branch-ws-01`); çalışan kimliği yerel `teller` kullanıcısı; şube CA özel anahtarı `edge/certs/` içinde (git'e girmez).
-
----
-
-## 5. Identity Cluster (kind-identity, `identity-cluster/`)
-
-| Bileşen | Görev | Yapılandırma | Durum |
-|---|---|---|---|
-| **Spring IdP** (Spring Authorization Server 7.1.2) | Login (Authorization Code + PKCE, CSRF'li login formu), client_credentials, token exchange (RFC 8693, mTLS `tls_client_auth`), realm yolları `/realms/bank/...`, claim'ler (`channel`, `auth_method`, `partner_id`, `aud`) | `identity-cluster/spring-idp/` (Java), imaj `dmz-lab/spring-idp:0.1.0`, `identity-cluster/manifests/spring-idp.yaml` (ns `idp`), NodePort 30443 (HTTPS), 30081 (iç HTTP) | Doğrulandı: tüm test süitleri (97 kontrol) |
-| **PostgreSQL 16** | IdP veritabanı | PVC `postgres-idp-data` (1Gi, local-path; lab tek replika) | Doğrulandı |
-| **F8 host firewall** | IdP'ye yalnız iç node'lardan ve pod ağından erişim | `identity-cluster/scripts/host-firewall.sh` | Doğrulandı: 3/3 |
-
-**Realm `bank` client'ları:**
-
-| Client | Akış | Not |
-|---|---|---|
-| `web-app` | PKCE, confidential | Bearer, exchange kabul eder |
-| `mobile-app` | PKCE, public | Bearer; `directAccessGrants` kapalı |
-| `branch-app` | PKCE, confidential | Şube çalışanı girişi (`teller`); redirect `https://teller.lab.local/*` |
-| `partner-acme` | Client credentials | mTLS ile birlikte |
-| `dmz-exchange-{web,mobile,partner,branch}` | client-x509 | Token exchange istemcileri (kanal başına) |
-| `bff`, `core-svc`, `kgateway-internal` | Servis | Hedef audience |
-
-Kullanıcılar (lab): `alice` (web/mobil test), `teller` (şube). Test token'ları PKCE ile alınır (`identity-cluster/tests/lib/pkce.sh`).
-
-Admin konsolu: `http://127.0.0.1:18080/admin/` (port-forward gerekir). Admin parolası cluster secret'ında, repo'da yok. Admin konsolunda "3rd party check iframe" zaman aşımı uyarısı açık konudur (bölüm 10).
-
-Cilium denemesi (WSL2 kernel'de `xt_socket` eksik) başarısız oldu ve kaldırıldı; F8 host iptables ile çözüldü.
-
----
-
-## 6. Management / Gözlemlenebilirlik (kind-mgmt, `mgmt-cluster/`)
-
-| Bileşen | Görev | Yapılandırma | Durum |
-|---|---|---|---|
-| **Vault 1.18** (ns `secrets`) | KV v2 (`secret/`), identity secret'ları, IdP parolaları | `manifests/vault.yaml`, NodePort 30200, `identity-cluster/scripts/load-vault.sh` (init, unseal, secret türetme). F9 host firewall: yalnız identity ve internal node'lar | Doğrulandı (önceki çalıştırma) |
-| **Grafana 11.3** (ns `observability`) | Dashboard ve iz sorgusu. Veri kaynakları: Prometheus (uid `prometheus`), Tempo (uid `tempo`) | `manifests/grafana.yaml`, NodePort 30300, admin parolası `grafana-admin` secret'ında | Çalışıyor |
-| Dashboard: **DMZ Lab – Genel Bakış** | İstek hızı, gecikme, yetkilendirme kararları, transfer sonuçları | `lab-overview.json` | Çalışıyor |
-| Dashboard: **DMZ Lab – Dağıtık İzleme** | Servis bazlı son izler, hata izleri (TraceQL), iz kimliğiyle arama | `lab-tracing.json` | Çalışıyor |
-| **Grafana Tempo 2.6.1** | Trace depolama ve sorgu. OTLP HTTP NodePort 30318, gRPC 30317 (Jaeger'ın yerini aldı) | `manifests/tempo.yaml`; emptyDir, `block_retention` 48 saat | Çalışıyor |
-| **Prometheus 2.55** | Metrik toplama: bff, core, ext-authz, kube-state-metrics. Her hedefe `cluster` ve `namespace` etiketi | `manifests/prometheus.yaml`, NodePort 30090 | Beş scrape hedefi tanımlı |
-
-Trace ve metrik kalıcılığı lab'da emptyDir'dir; yeniden başlatmada veri gider.
-
----
-
-## 7. Operasyon Konsolu (`console/`)
-
-| Bileşen | Görev | Durum |
-|---|---|---|
-| **`console/app.py`** (port 9000) | Organizer ve kanal sayfaları (`organizer.html`, `channel.html`). Giriş ve çıkış her zaman görünür. Her çağrı kök bir console span'i ve Tempo izi üretir | Doğrulandı (önceki çalıştırma) |
-| **Şube kanalı** | `app.py` hâlâ şube kanalını `teller.lab.local` üzerinden edge'e gönderiyor. Bu yol artık çalışmaz (bölüm 10) | **Güncellenmedi, açık** |
-| **Operasyon tablosu** (`console/ops.js`) | Kanal bazında işlem matrisi: yapılabilen (✓) ve yapılamayan (✗) işlemler | Tek kaynak tablo |
-| Port-forward'lar | Identity IdP `18081`, Tempo OTLP `14318`, Grafana `3000` | `app.py` içinde `kubectl port-forward` |
-
-Ayrıntılı kullanım: `console/README.md`.
-
----
-
-## 8. Ortak Araçlar ve Diyagramlar
-
-| Dosya | Kullanım |
+| Betik | Ne kurar |
 |---|---|
-| `shared/tracing.py` | Stdlib W3C traceparent ve OTLP/HTTP JSON span üretimi; servisler ConfigMap ile `/app/tracing.py` olarak alır |
-| `shared/metrics.py` | Stdlib Prometheus metin formatı (counter, histogram); ayrı port 9100 |
-| `docs/drawio/palette.js` | Diyagramlar için ortak renk paleti ve stiller |
-| `docs/drawio/builder.js` | Sayfa üretici: kutu, zone, namespace, pod, bağlı ok |
-| `docs/drawio/pages-overview.js` | 1 Genel mimari, 2 I/O ve araçlar, 3 Tüm cluster'lar ve namespace'ler |
-| `docs/drawio/pages-clusters.js` | 4 DMZ, 4b Şube, 5 İç, 6 Identity, 7 Mgmt cluster içi; 8 Pod içi detay |
-| `docs/drawio/gen-sequence.js` + `sequence-defs.js` + `sequence-defs-branch.js` | Sequence sayfaları (7 adet) |
-| `docs/drawio/gen-all.js` | Hepsini `docs/dmz-lab.drawio` dosyasında tab olarak üretir: `node docs/drawio/gen-all.js` |
+| `edge/scripts/render-haproxy.sh` | `haproxy.cfg` (node IP'leri ile) |
+| `edge/scripts/gen-certs.sh`, `gen-internal-certs.sh`, `gen-device-certs.sh`, `gen-seal-certs.sh` | Sertifikalar (`edge/certs`, gitignored) |
+| `codevo-dmz-cluster/scripts/load-seal-mobile.sh`, `load-seal-intranet.sh` | Seal servisleri |
+| `bank-dmz-prod-cluster/scripts/load-janus.sh` | Janus (web, mobil) |
+| `bank-prod-cluster/scripts/load-auth-server.sh`, `load-fortuna.sh`, `load-channel-gateway.sh` | auth-server, Fortuna zinciri, channel-gateway |
+| `legacy-demo-cluster/scripts/load-legacy.sh` | Fortuna monolith mock; LegacyDB şeması ve demo verisi (`legacy-demo-cluster/db/schema.sql`, `seed.sql`, idempotent) |
 
----
+Repoda sır yoktur; sırlar loader betikleri tarafından üretilir veya kopyalanır.
 
-## 9. Test Özeti
+## 5. Açık konular
 
-Tam koşu: `bash run-all.sh` (kök dizin), 11 süit. Son tam koşu Tempo ve IdP izleme değişikliklerinden önce yapıldı. Şube cluster'ı ve F10 eklendiğinden beri tam koşu yapılmadı.
-
-| Süit | Kontrol | Durum |
-|---|---|---|
-| `identity-cluster/tests/firewall.sh` (F8) | 3 | Önceki çalıştırma geçti |
-| `dmz-cluster/tests/smoke.sh` | 4 | Önceki çalıştırma geçti |
-| `dmz-cluster/tests/route-classes.sh` | 10 | Önceki çalıştırma geçti |
-| `dmz-cluster/tests/extauth.sh` | 29 | Önceki çalıştırma geçti |
-| `dmz-cluster/tests/internal-path.sh` | 8 | Önceki çalıştırma geçti |
-| `dmz-cluster/tests/firewall.sh` (F1) | 4 | Önceki çalıştırma geçti. F10 eklendi, yeniden çalıştırılmalı |
-| `dmz-cluster/tests/branch.sh` | 9 | **9/9 geçti** (token alımı web gateway'in `/realms` route'u üzerinden https ile) |
-| `internal-cluster/tests/authz.sh` | 16 | Önceki çalıştırma geçti |
-| `internal-cluster/tests/service-verify.sh` | 9 | Önceki çalıştırma geçti |
-| `internal-cluster/tests/api.sh` | 16 | Önceki çalıştırma geçti |
-| `edge/tests/run-all.sh` | 25 | Önceki çalıştırma geçti. Şube kuralı kaldırıldı, yeniden çalıştırılmalı |
-
----
-
-## 10. Açık Konular
-
-- **Sabit node IP'leri:** Çözüldü. IP'ler kurulumda okunuyor (`scripts/lab-ips.sh`, `render`); HAProxy yapılandırması `edge/scripts/render-haproxy.sh` ile üretiliyor. Gateway NodePort'ları ve public/login route'ları artık kurulumda uygulanıyor.
-
-- **Konsol şube kanalı:** `console/app.py` şube kanalını `teller.lab.local` (HAProxy) üzerinden çağırıyor. Şube artık HAProxy'den geçmediği için bu kanal çalışmaz. Düzeltme: şube kanalını şube cluster'ındaki pod üzerinden (`kubectl exec` ya da port-forward) çağırmak.
-- **Şube kurulumunun doğrulanması:** `up.sh` adım 6, `branch.sh` 9 kontrol ve F10 henüz uçtan uca çalıştırılmadı.
-- **Şube UI tarayıcı testi:** `branch/` arayüzü tarayıcıda ayrıca doğrulanmalı.
-- **HAProxy span'leri:** OTel'li HAProxy imajı gerekiyor (onay bekliyor).
-- **Kalıcılık:** Trace, metrik, PostgreSQL ve dummy veriler lab'da emptyDir/bellek.
-- **Vault PKI ve ESO:** Exchange, DMZ, partner ve şube sertifikaları henüz Vault'tan değil; identity secret'ları bootstrap betiğiyle.
-- **Argo CD ve Kyverno:** kurulmadı (planlı).
-- **D-12 (realm imzalama anahtarları):** IdP DB, HSM/KMS veya Vault Transit kararı bekleniyor.
-- **Partner CRL/OCSP:** kgateway v2.5 desteklemiyor; kısa ömürlü sertifika ile sınırlanacak.
-- **ext-authz replika > 1:** Paylaşılan replay store gerekiyor.
-- **Lab kullanıcıları:** `alice` ve `teller` test kullanıcıları; prod öncesi kaldırılacak.
-- **Admin konsolu iframe uyarısı:** IdP admin konsolunda "3rd party check iframe" zaman aşımı; hosts dosyası ve HTTPS çözümü onay bekliyor.
+- **Seal vendor doğrulaması:** Cihaz kaydı Seal'de (D-13). Lab'da Seal Intranet `update-device` (durum yazar) ve `get-device` (durum okur) uçlarını mock olarak sunuyor; bellekte, yeniden başlatmada kayıtlar silinir. Vendor'ın bu uçları ve kalıcılığı teyit etmesi gerekir.
+- **Channel-gateway anahtarı:** Lab'da secret; prod'da JWKS.
+- **Janus ↔ alt servis mTLS:** Janus → channel-gateway, Janus → Fortuna CGW/SMS/monolit ve channel-gateway → monolit uygulandı ve test edildi. Fortuna iç zinciri (CGW → API → ACL) da mTLS ile korunuyor. Kalan: sertifika yenileme (prod).
+- **web-ui-gateway:** Planlandı, henüz yok.
+- **İzleme ve loglama (sonraki adımlar):** Yığın kuruldu (Tempo, Prometheus, Loki, Grafana). Loglar Alloy ile beş cluster'dan Loki'ye gidiyor. Metrikler: Janus, channel-gateway, Fortuna (CGW, SMS, legacy) `/metrics` sunuyor (`http_requests_total`, yol ve koda göre). Ayrıca auth-server (Spring Actuator, `/actuator/prometheus`, NodePort 30583), Seal Mobile (NodePort 30457) ve Seal Intranet (NodePort 30644) metrik sunuyor; bu üçü düz HTTP ayrı bir metrik portunda. ACL/API iç servisleri kazınmıyor (NodePort yok). Alloy'lar `loki.write` için açık yeniden deneme ayarı aldı (`max_backoff_period = "30s"`). Loki yeniden başlatıldığında beş cluster'ın akışı bir buçuk dakika içinde döndü (ölçüldü). Ölçüm (Loki yeniden başlatıldı, ~42 sn kesinti, 1 sn/satır test pod'u): 240/240 satır Loki'ye ulaştı, kayıp yok. Ölçülmemiş uzun kesintiler için yeniden deneme üst sınırı (100 deneme, en fazla 30 sn aralık) geçerli; bu süre aşılırsa kayıp olur.
+- **Redis:** Mgmt'te çalışıyor, hiçbir servis kullanmıyor. Kaldırılsın mı, yoksa bir kullanım mı planlanıyor?
+- **Kullanılmayan kod:** IdP'deki restricted-claim kodu ve `AuthStateRepository` kaldırıldı (hiçbir yerden çağrılmıyordu; `markPending` hiç çalışmadığı için dal ölüydü).
+- **Eski dosyalar:** Beş-cluster kalıntıları (`internal-cluster`, `dmz-cluster`, `branch`, `branch-cluster`, `identity-cluster`, `edge/tests`, `up.sh`, `down.sh`, `run-all.sh`) silindi. Kaynaklar yeni yerlerine taşındı: Seal Mobile `codevo-dmz-cluster/seal-mobile`, Seal Intranet `codevo-dmz-cluster/seal-intranet`, Password Manager `mgmt-cluster/password-manager`, IdP `bank-prod-cluster/spring-idp`, Vault yükleyicisi ve manifesti `bank-prod-cluster/scripts/load-vault.sh` ve `bank-prod-cluster/manifests/vault.yaml`.
+- **Taşınan yükleyicilerin yeniden deploy testi:** Yol kontrolü ve sözdizimi geçti, gerçek yeniden deploy yapılmadı. Çalışan sistem sağlıklı (Vault açık, IdP discovery 200, uçtan uca mobil test geçti).
+- **Eski dokümanlar:** `design.md` ve `docs/*.drawio` eski akışı anlatıyor; silinmedi, güncellenmedi. Karar bekliyor (silinsin mi, yeniden yazılsın mı).

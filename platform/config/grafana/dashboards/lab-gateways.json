@@ -1,0 +1,61 @@
+{
+  "uid": "dmz-lab-gateways",
+  "title": "DMZ Lab – Gateway İzleri (DMZ ve şube)",
+  "tags": [
+    "dmz-lab",
+    "tracing",
+    "gateway"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": {
+    "from": "now-3h",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "traceId",
+        "label": "İz kimliği (trace id) — sadece id yazın",
+        "type": "textbox",
+        "query": "",
+        "current": {
+          "text": "",
+          "value": ""
+        },
+        "hide": 0
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 2,
+      "type": "traces",
+      "title": "Trace id ile iz (tüm span'ler)",
+      "gridPos": {
+        "x": 0,
+        "y": 1,
+        "h": 18,
+        "w": 24
+      },
+      "datasource": {
+        "type": "tempo",
+        "uid": "tempo"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "tempo",
+            "uid": "tempo"
+          },
+          "queryType": "traceql",
+          "query": "$traceId"
+        }
+      ],
+      "options": {}
+    }
+  ]
+}

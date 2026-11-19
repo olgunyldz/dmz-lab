@@ -34,19 +34,12 @@ docker compose up -d
 Demo edge'de WAF **mock**'tur: Coraza (coraza-spoa) ve OWASP CRS kaldırıldı. HAProxy trafiği yalnızca yönlendirir, TLS sonlandırır ve L4/L7 hız sınırı uygular; SQLi, XSS veya path traversal engellemez.
 
 Sonuç:
-- `edge/tests/waf.sh` yalnızca normal isteği kontrol eder. Saldırı testleri `SKIP` olarak işaretlenir; `PASS` sayılmaz.
 - Mock çıktısı güvenlik kanıtı değildir. Prod'da kullanılmaz; gerçek WAF kararı güvenlik ekibindedir.
 - Uygulama katmanı koruması bu lab'da yoktur. Gerçek bir WAF eklenecekse design.md'deki WAF kararı ve güvenlik ekibinin onayı gerekir.
 
 ## Testler
 
-```bash
-bash edge/tests/run-all.sh          # hepsi
-bash edge/tests/smoke.sh            # TLS, yönlendirme, LB, L7 rate limit, partner mTLS
-bash edge/tests/lb.sh               # gw-web-2 düşünce failover ve geri dönüş
-bash edge/tests/waf.sh              # WAF (mock): normal 200; saldırı testleri SKIP
-bash edge/tests/ddos.sh             # L4 bağlantı hızı, slowloris
-```
+Eski edge testleri (`edge/tests/`: partner mTLS, gw-web-2 failover, WAF mock, DDoS) eski yönlendirmeye ait olduğu için kaldırıldı. Yeni yönlendirme (`web.lab.local`, `mobile-api.lab.local`, `seal.lab.local`) için test henüz yazılmadı. Bu yönlendirme dolaylı olarak konsol ve Janus/Seal uçtan uca testlerinde doğrulanıyor.
 
 Testler `curl --resolve` ile çalışır, `hosts` dosyasına dokunmaz. Lab portu `8443`'tür.
 

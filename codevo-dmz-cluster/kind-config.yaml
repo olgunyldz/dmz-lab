@@ -1,0 +1,12 @@
+# codevo-dmz (kind): Seal Mobile (NodePort 30456) ve Seal Intranet (30643, 30644).
+# Edge (HAProxy) yalnızca 127.0.0.1 üzerinden erişir; kind ağına bağlı değildir.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: codevo-dmz
+nodes:
+  - role: control-plane
+    extraPortMappings:
+      - containerPort: 30456   # Seal Mobile (seal.lab.local passthrough)
+        hostPort: 30456
+        listenAddress: "127.0.0.1"
+        protocol: TCP

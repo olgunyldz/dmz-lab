@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>Lab SMS Kutusu</title>
+<style>
+  :root { --bg:#f6f7f9; --fg:#1d2330; --muted:#5b6474; --card:#fff; --line:#d9dde5; --accent:#2157d4; --accent-fg:#fff; --soft:#eef3ff; --ok:#117a3d; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --bg:#12151b; --fg:#e6e9ef; --muted:#a3acbb; --card:#1b2029; --line:#2d3441; --accent:#7aa2ff; --accent-fg:#0b1020; --soft:#202a40; --ok:#5fd38d; }
+  }
+  :root[data-theme="dark"] { --bg:#12151b; --fg:#e6e9ef; --muted:#a3acbb; --card:#1b2029; --line:#2d3441; --accent:#7aa2ff; --accent-fg:#0b1020; --soft:#202a40; --ok:#5fd38d; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width:560px; margin:0 auto; padding:16px; }
+  h1 { font-size:20px; margin:8px 4px 4px; }
+  .sub { color:var(--muted); font-size:14px; margin:0 4px 16px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:14px; }
+  .head { display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:10px; }
+  .head h2 { font-size:16px; margin:0; }
+  .time { color:var(--muted); font-size:13px; }
+  .msg { background:var(--soft); border-radius:10px; padding:12px; }
+  .msg .from { font-size:13px; color:var(--muted); margin-bottom:4px; }
+  .code { font-family:ui-monospace, Menlo, Consolas, monospace; font-size:30px; font-weight:700; letter-spacing:.2em; color:var(--accent); }
+  .text { font-size:14px; margin-top:6px; }
+  .empty { color:var(--muted); font-size:14px; }
+  button { font:inherit; min-height:44px; padding:10px 16px; border-radius:10px; border:1px solid var(--accent); background:var(--accent); color:var(--accent-fg); font-weight:600; cursor:pointer; margin-top:10px; width:100%; }
+  button:focus-visible { outline:3px solid var(--soft); }
+  .copied { color:var(--ok); font-size:13px; min-height:18px; margin-top:6px; }
+  .note { color:var(--muted); font-size:13px; margin-top:16px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Lab SMS kutusu</h1>
+  <p class="sub">Yalnız lab. Her kanalın en son gönderilen tek seferlik kodu burada görünür.</p>
+
+  <section class="card" id="card-web">
+    <div class="head"><h2>Web girişi</h2><span class="time" id="time-web"></span></div>
+    <div id="body-web" class="empty">Henüz kod gönderilmedi.</div>
+  </section>
+
+  <section class="card" id="card-mobile">
+    <div class="head"><h2>Mobil giriş</h2><span class="time" id="time-mobile"></span></div>
+    <div id="body-mobile" class="empty">Henüz kod gönderilmedi.</div>
+  </section>
+
+  <p class="note">Sayfa her 2 saniyede bir yenilenir. Kodu kopyalayıp ilgili giriş ekranına yazın.</p>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+function render(id, entry) {
+  const body = $("body-" + id);
+  const key = entry && entry.demoOtp ? entry.demoOtp + "|" + entry.at : "";
+  if (body.dataset.key === key) return; // değişmediyse yeniden çizme (kopyalama mesajı kalsın)
+  body.dataset.key = key;
+  body.innerHTML = "";
+  if (!entry || !entry.demoOtp) {
+    body.className = "empty";
+    body.textContent = "Henüz kod gönderilmedi.";
+    $("time-" + id).textContent = "";
+    return;
+  }
+  body.className = "";
+  $("time-" + id).textContent = entry.at || "";
+  const msg = document.createElement("div");
+  msg.className = "msg";
+  msg.innerHTML = '<div class="from">DMZ Lab · SMS</div>';
+  const code = document.createElement("div");
+  code.className = "code";
+  code.textContent = entry.demoOtp;
+  const text = document.createElement("div");
+  text.className = "text";
+  text.textContent = "Tek seferlik giriş kodunuz: " + entry.demoOtp;
+  msg.appendChild(code);
+  msg.appendChild(text);
+  body.appendChild(msg);
+
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.textContent = "Kodu kopyala";
+  const note = document.createElement("div");
+  note.className = "copied";
+  btn.onclick = async () => {
+    try {
+      await navigator.clipboard.writeText(entry.demoOtp);
+      note.textContent = "Kopyalandı";
+    } catch (e) {
+      note.textContent = "Kopyalanamadı; kodu elle seçin";
+    }
+  };
+  body.appendChild(btn);
+  body.appendChild(note);
+}
+
+async function poll() {
+  try {
+    const r = await fetch("/api/sms", { cache: "no-store", credentials: "same-origin" });
+    if (r.ok) {
+      const d = await r.json();
+      render("web", d.web);
+      render("mobile", d.mobile);
+    }
+  } catch (e) { /* ağ hatasında bir sonraki turda tekrar dene */ }
+}
+poll();
+setInterval(poll, 2000);
+</script>
+</body>
+</html>

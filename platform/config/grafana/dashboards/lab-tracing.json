@@ -1,0 +1,917 @@
+{
+  "uid": "dmz-lab-tracing",
+  "title": "DMZ Lab – Dağıtık İzleme",
+  "tags": [
+    "dmz-lab",
+    "tracing"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "traceId",
+        "label": "İz kimliği",
+        "type": "textbox",
+        "query": "",
+        "current": {
+          "text": "",
+          "value": ""
+        },
+        "hide": 0
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 100,
+      "type": "row",
+      "title": "Servis bazlı son izler (Tempo)",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 1,
+      "type": "table",
+      "title": "console (başlangıç noktası)",
+      "gridPos": {
+        "x": 0,
+        "y": 1,
+        "w": 8,
+        "h": 9
+      },
+      "datasource": {
+        "type": "tempo",
+        "uid": "tempo"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "tempo",
+            "uid": "tempo"
+          },
+          "queryType": "traceqlSearch",
+          "query": "{ resource.service.name = \"console\" }",
+          "limit": 20,
+          "filters": [
+            {
+              "id": "svc",
+              "tag": "service.name",
+              "operator": "=",
+              "scope": "resource",
+              "value": [
+                "console"
+              ],
+              "valueType": "string"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "table",
+      "title": "gw-web (Envoy)",
+      "gridPos": {
+        "x": 8,
+        "y": 1,
+        "w": 8,
+        "h": 9
+      },
+      "datasource": {
+        "type": "tempo",
+        "uid": "tempo"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "tempo",
+            "uid": "tempo"
+          },
+          "queryType": "traceqlSearch",
+          "query": "{ resource.service.name = \"gw-web\" }",
+          "limit": 20,
+          "filters": [
+            {
+              "id": "svc",
+              "tag": "service.name",
+              "operator": "=",
+              "scope": "resource",
+              "value": [
+                "gw-web"
+              ],
+              "valueType": "string"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "table",
+      "title": "ext-authz (karar ve exchange)",
+      "gridPos": {
+        "x": 16,
+        "y": 1,
+        "w": 8,
+        "h": 9
+      },
+      "datasource": {
+        "type": "tempo",
+        "uid": "tempo"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "tempo",
+            "uid": "tempo"
+          },
+          "queryType": "traceqlSearch",
+          "query": "{ resource.service.name = \"ext-authz\" }",
+          "limit": 20,
+          "filters": [
+            {
+              "id": "svc",
+              "tag": "service.name",
+              "operator": "=",
+              "scope": "resource",
+              "value": [
+                "ext-authz"
+              ],
+              "valueType": "string"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "table",
+      "title": "bff",
+      "gridPos": {
+        "x": 0,
+        "y": 10,
+        "w": 8,
+        "h": 9
+      },
+      "datasource": {
+        "type": "tempo",
+        "uid": "tempo"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "tempo",
+            "uid": "tempo"
+          },
+          "queryType": "traceqlSearch",
+          "query": "{ resource.service.name = \"bff\" }",
+          "limit": 20,
+          "filters": [
+            {
+              "id": "svc",
+              "tag": "service.name",
+              "operator": "=",
+              "scope": "resource",
+              "value": [
+                "bff"
+              ],
+              "valueType": "string"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "table",
+      "title": "core",
+      "gridPos": {
+        "x": 8,
+        "y": 10,
+        "w": 8,
+        "h": 9
+      },
+      "datasource": {
+        "type": "tempo",
+        "uid": "tempo"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "tempo",
+            "uid": "tempo"
+          },
+          "queryType": "traceqlSearch",
+          "query": "{ resource.service.name = \"core\" }",
+          "limit": 20,
+          "filters": [
+            {
+              "id": "svc",
+              "tag": "service.name",
+              "operator": "=",
+              "scope": "resource",
+              "value": [
+                "core"
+              ],
+              "valueType": "string"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "table",
+      "title": "IdP (token exchange)",
+      "gridPos": {
+        "x": 16,
+        "y": 10,
+        "w": 8,
+        "h": 9
+      },
+      "datasource": {
+        "type": "tempo",
+        "uid": "tempo"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "tempo",
+            "uid": "tempo"
+          },
+          "queryType": "traceqlSearch",
+          "query": "{ resource.service.name = \"spring-idp\" }",
+          "limit": 20,
+          "filters": [
+            {
+              "id": "svc",
+              "tag": "service.name",
+              "operator": "=",
+              "scope": "resource",
+              "value": [
+                "spring-idp"
+              ],
+              "valueType": "string"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 200,
+      "type": "row",
+      "title": "Hata ve reddetme izleri",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 19,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 7,
+      "type": "table",
+      "title": "ext-authz: reddedilen istekler (403)",
+      "gridPos": {
+        "x": 0,
+        "y": 20,
+        "w": 8,
+        "h": 9
+      },
+      "datasource": {
+        "type": "tempo",
+        "uid": "tempo"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "tempo",
+            "uid": "tempo"
+          },
+          "queryType": "traceqlSearch",
+          "query": "{ resource.service.name = \"ext-authz\" && span.decision = \"deny:403\" }",
+          "limit": 20,
+          "filters": [
+            {
+              "id": "svc",
+              "tag": "service.name",
+              "operator": "=",
+              "scope": "resource",
+              "value": [
+                "ext-authz"
+              ],
+              "valueType": "string"
+            },
+            {
+              "id": "tag1",
+              "tag": "decision",
+              "operator": "=",
+              "scope": "span",
+              "value": [
+                "deny:403"
+              ],
+              "valueType": "string"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "table",
+      "title": "bff: sunucu hataları (5xx)",
+      "gridPos": {
+        "x": 8,
+        "y": 20,
+        "w": 8,
+        "h": 9
+      },
+      "datasource": {
+        "type": "tempo",
+        "uid": "tempo"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "tempo",
+            "uid": "tempo"
+          },
+          "queryType": "traceqlSearch",
+          "query": "{ resource.service.name = \"bff\" && span.http.status_code = \"500\" }",
+          "limit": 20,
+          "filters": [
+            {
+              "id": "svc",
+              "tag": "service.name",
+              "operator": "=",
+              "scope": "resource",
+              "value": [
+                "bff"
+              ],
+              "valueType": "string"
+            },
+            {
+              "id": "tag1",
+              "tag": "http.status_code",
+              "operator": "=",
+              "scope": "span",
+              "value": [
+                "500"
+              ],
+              "valueType": "string"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "type": "table",
+      "title": "core: iş kuralı reddi (422: limit, bakiye)",
+      "gridPos": {
+        "x": 16,
+        "y": 20,
+        "w": 8,
+        "h": 9
+      },
+      "datasource": {
+        "type": "tempo",
+        "uid": "tempo"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "tempo",
+            "uid": "tempo"
+          },
+          "queryType": "traceqlSearch",
+          "query": "{ resource.service.name = \"core\" && span.http.status_code = \"422\" }",
+          "limit": 20,
+          "filters": [
+            {
+              "id": "svc",
+              "tag": "service.name",
+              "operator": "=",
+              "scope": "resource",
+              "value": [
+                "core"
+              ],
+              "valueType": "string"
+            },
+            {
+              "id": "tag1",
+              "tag": "http.status_code",
+              "operator": "=",
+              "scope": "span",
+              "value": [
+                "422"
+              ],
+              "valueType": "string"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 300,
+      "type": "row",
+      "title": "İz kimliği ile ara",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 29,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 10,
+      "type": "table",
+      "title": "Seçilen iz (üstteki 'İz kimliği' alanına yazın)",
+      "gridPos": {
+        "x": 0,
+        "y": 30,
+        "w": 24,
+        "h": 12
+      },
+      "datasource": {
+        "type": "tempo",
+        "uid": "tempo"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "tempo",
+            "uid": "tempo"
+          },
+          "queryType": "traceql",
+          "query": "$traceId"
+        }
+      ]
+    },
+    {
+      "id": 400,
+      "type": "row",
+      "title": "İzlerle ilişkili metrikler (Prometheus)",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 42,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "5xx oranı (servis bazlı)",
+      "gridPos": {
+        "x": 0,
+        "y": 43,
+        "w": 8,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (service) (rate(svc_requests_total{status=~\"5..\"}[5m])) / sum by (service) (rate(svc_requests_total[5m])) or vector(0)",
+          "legendFormat": "{{service}}"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Gecikme p50 / p99 (servis bazlı, s)",
+      "gridPos": {
+        "x": 8,
+        "y": 43,
+        "w": 8,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.5, sum by (le, service) (rate(svc_request_duration_seconds_bucket[5m])))",
+          "legendFormat": "p50 {{service}}"
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.99, sum by (le, service) (rate(svc_request_duration_seconds_bucket[5m])))",
+          "legendFormat": "p99 {{service}}"
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "ext-authz karar süresi p95 (kanal bazlı, s)",
+      "gridPos": {
+        "x": 16,
+        "y": 43,
+        "w": 8,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le, channel) (rate(authz_decision_duration_seconds_bucket[5m])))",
+          "legendFormat": "{{channel}}"
+        }
+      ]
+    },
+    {
+      "id": 300,
+      "type": "row",
+      "title": "Kanal bazlı izler (span.channel)",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 51,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 301,
+      "type": "table",
+      "title": "Kanal: web",
+      "gridPos": {
+        "x": 0,
+        "y": 52,
+        "w": 12,
+        "h": 9
+      },
+      "datasource": {
+        "type": "tempo",
+        "uid": "tempo"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "tempo",
+            "uid": "tempo"
+          },
+          "queryType": "traceqlSearch",
+          "query": "{ span.channel = \"web\" }",
+          "limit": 20,
+          "filters": [
+            {
+              "id": "ch-web",
+              "tag": "channel",
+              "operator": "=",
+              "scope": "span",
+              "value": [
+                "web"
+              ],
+              "valueType": "string"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 302,
+      "type": "table",
+      "title": "Kanal: mobile",
+      "gridPos": {
+        "x": 12,
+        "y": 52,
+        "w": 12,
+        "h": 9
+      },
+      "datasource": {
+        "type": "tempo",
+        "uid": "tempo"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "tempo",
+            "uid": "tempo"
+          },
+          "queryType": "traceqlSearch",
+          "query": "{ span.channel = \"mobile\" }",
+          "limit": 20,
+          "filters": [
+            {
+              "id": "ch-mobile",
+              "tag": "channel",
+              "operator": "=",
+              "scope": "span",
+              "value": [
+                "mobile"
+              ],
+              "valueType": "string"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 303,
+      "type": "table",
+      "title": "Kanal: partner",
+      "gridPos": {
+        "x": 0,
+        "y": 61,
+        "w": 12,
+        "h": 9
+      },
+      "datasource": {
+        "type": "tempo",
+        "uid": "tempo"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "tempo",
+            "uid": "tempo"
+          },
+          "queryType": "traceqlSearch",
+          "query": "{ span.channel = \"partner\" }",
+          "limit": 20,
+          "filters": [
+            {
+              "id": "ch-partner",
+              "tag": "channel",
+              "operator": "=",
+              "scope": "span",
+              "value": [
+                "partner"
+              ],
+              "valueType": "string"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 304,
+      "type": "table",
+      "title": "Kanal: branch",
+      "gridPos": {
+        "x": 12,
+        "y": 61,
+        "w": 12,
+        "h": 9
+      },
+      "datasource": {
+        "type": "tempo",
+        "uid": "tempo"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "tempo",
+            "uid": "tempo"
+          },
+          "queryType": "traceqlSearch",
+          "query": "{ span.channel = \"branch\" }",
+          "limit": 20,
+          "filters": [
+            {
+              "id": "ch-branch",
+              "tag": "channel",
+              "operator": "=",
+              "scope": "span",
+              "value": [
+                "branch"
+              ],
+              "valueType": "string"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 400,
+      "type": "row",
+      "title": "DMZ ve şube gateway izleri (Envoy)",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 70,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 401,
+      "type": "table",
+      "title": "DMZ gw-web",
+      "gridPos": {
+        "x": 0,
+        "y": 71,
+        "w": 12,
+        "h": 9
+      },
+      "datasource": {
+        "type": "tempo",
+        "uid": "tempo"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "tempo",
+            "uid": "tempo"
+          },
+          "queryType": "traceqlSearch",
+          "query": "{ resource.service.name = \"gw-web\" }",
+          "limit": 20,
+          "filters": [
+            {
+              "id": "gw-gw-web",
+              "tag": "service.name",
+              "operator": "=",
+              "scope": "resource",
+              "value": [
+                "gw-web"
+              ],
+              "valueType": "string"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 402,
+      "type": "table",
+      "title": "DMZ gw-mobile",
+      "gridPos": {
+        "x": 12,
+        "y": 71,
+        "w": 12,
+        "h": 9
+      },
+      "datasource": {
+        "type": "tempo",
+        "uid": "tempo"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "tempo",
+            "uid": "tempo"
+          },
+          "queryType": "traceqlSearch",
+          "query": "{ resource.service.name = \"gw-mobile\" }",
+          "limit": 20,
+          "filters": [
+            {
+              "id": "gw-gw-mobile",
+              "tag": "service.name",
+              "operator": "=",
+              "scope": "resource",
+              "value": [
+                "gw-mobile"
+              ],
+              "valueType": "string"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 403,
+      "type": "table",
+      "title": "DMZ gw-partner",
+      "gridPos": {
+        "x": 0,
+        "y": 80,
+        "w": 12,
+        "h": 9
+      },
+      "datasource": {
+        "type": "tempo",
+        "uid": "tempo"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "tempo",
+            "uid": "tempo"
+          },
+          "queryType": "traceqlSearch",
+          "query": "{ resource.service.name = \"gw-partner\" }",
+          "limit": 20,
+          "filters": [
+            {
+              "id": "gw-gw-partner",
+              "tag": "service.name",
+              "operator": "=",
+              "scope": "resource",
+              "value": [
+                "gw-partner"
+              ],
+              "valueType": "string"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 404,
+      "type": "table",
+      "title": "Şube gw-branch",
+      "gridPos": {
+        "x": 12,
+        "y": 80,
+        "w": 12,
+        "h": 9
+      },
+      "datasource": {
+        "type": "tempo",
+        "uid": "tempo"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "tempo",
+            "uid": "tempo"
+          },
+          "queryType": "traceqlSearch",
+          "query": "{ resource.service.name = \"gw-branch\" }",
+          "limit": 20,
+          "filters": [
+            {
+              "id": "gw-gw-branch",
+              "tag": "service.name",
+              "operator": "=",
+              "scope": "resource",
+              "value": [
+                "gw-branch"
+              ],
+              "valueType": "string"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "links": [
+    {
+      "title": "Organizer",
+      "type": "link",
+      "url": "http://127.0.0.1:9000",
+      "targetBlank": true,
+      "icon": "external link"
+    },
+    {
+      "title": "IdP (port-forward 18080, https)",
+      "type": "link",
+      "url": "http://127.0.0.1:18080/admin/",
+      "targetBlank": true,
+      "icon": "external link"
+    }
+  ]
+}

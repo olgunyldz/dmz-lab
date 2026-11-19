@@ -1,26 +1,21 @@
 #!/usr/bin/env bash
-# Yönetim araçlarına host'tan DOĞRUDAN erişim (HAProxy yok): Grafana, Prometheus, Vault.
-# Yöntem: kubectl port-forward (kind node port eşlemesi yok; mgmt cluster'ı yeniden kurmadan çalışır).
-#   http://127.0.0.1:3000  Grafana      (kullanıcı admin; parola: grafana-admin secret'ı)
-#   http://127.0.0.1:9090  Prometheus
-#   http://127.0.0.1:8200  Vault        (sealed olabilir; UI yine açılır)
-#   https://127.0.0.1:18080        Spring IdP (identity cluster, svc/spring-idp; sertifika lab CA ile imzalı)
+# Kind cluster'larındaki araçlara host'tan kubectl port-forward ile erişim.
+# Grafana, Prometheus, Loki ve Tempo artık host'ta docker compose (platform) ile 127.0.0.1'e yayımlı; burada yok.
+#   http://127.0.0.1:18200 Vault        (bank-prod; sealed olabilir; UI yine açılır; 8200 Windows'ta ayrılmış: 8185-8284)
+#   https://127.0.0.1:18443        auth-server (bank-prod, ns auth; sertifika lab CA ile imzalı)
+#   Grafana: http://127.0.0.1:3000 (platform compose)
 #
 # Kullanım (repo kökünden):
 #   bash mgmt-cluster/scripts/tools-forward.sh start   arka planda başlat
 #   bash mgmt-cluster/scripts/tools-forward.sh stop    durdur
 #   bash mgmt-cluster/scripts/tools-forward.sh status  durum
-# Kalıcı çözüm (sonraki adım): mgmt kind-config.yaml'a extraPortMappings (BRANCH'teki gibi); bu cluster'ın
-# yeniden oluşturulmasını gerektirir (Vault verisi gider).
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 PIDDIR="$ROOT/.tools-forward"
 TOOLS=(
-    "grafana|kind-mgmt|observability|svc/grafana|3000:3000"
-    "prometheus|kind-mgmt|observability|svc/prometheus|9090:9090"
-    "vault|kind-mgmt|secrets|svc/vault-nodeport|8200:8200"
-    "spring-idp|kind-identity|idp|svc/spring-idp|18080:8443"
+    "vault|kind-bank-prod|secrets|svc/vault|18200:8200"
+    "auth-server|kind-bank-prod|auth|svc/auth-server|18443:8443"
 )
 
 start() {

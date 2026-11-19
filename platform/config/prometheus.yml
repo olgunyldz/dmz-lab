@@ -1,0 +1,17 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    monitor: dmz-lab
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+        labels: { cluster: platform, namespace: lab-platform }
+  - job_name: fortuna-mock
+    scheme: https
+    tls_config:
+      insecure_skip_verify: true   # lab: iç CA doğrulaması kazıma için atlanır
+    static_configs:
+      - targets: ["fortuna-mock:8443"]
+        labels: { cluster: platform, namespace: fortuna }

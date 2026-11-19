@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # Seal v3 servisleri için sunucu sertifikaları (iç CA ile imzalı). Lab sertifikaları; çıktı edge/certs/seal (gitignored).
 #   seal-intranet    : seal-intranet.seal-intranet.svc (iç HTTPS)
-#   password-manager : password-manager.seal-pm.svc (gw-internal BackendTLSPolicy doğrulaması)
 #   bank-backend     : bank-backend.bank-auth.svc
 #   seal-mobile      : seal-mobile.seal-mobile.svc + seal.lab.local (cihaz yüzü, passthrough; SNI seal.lab.local)
 # Mevcut dmz-client (gw-internal istemci sertifikası) ve internal-ca kullanılır; yeniden üretilmez.
@@ -24,7 +23,6 @@ issue() { # <name> <CN> <SAN>
 }
 
 issue seal-intranet "seal-intranet" "DNS:seal-intranet.seal-intranet.svc,DNS:seal-intranet"
-issue password-manager "password-manager" "DNS:password-manager.seal-pm.svc"
 issue bank-backend "bank-backend" "DNS:bank-backend.bank-auth.svc"
 issue seal-mobile "seal-mobile" "DNS:seal-mobile.seal-mobile.svc,DNS:seal.lab.local"
 cp "$CA_DIR/internal-ca.crt" "$OUT/internal-ca.crt"

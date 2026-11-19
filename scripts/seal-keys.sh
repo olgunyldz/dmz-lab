@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Seal v3 paylaşılan anahtarları: SEAL_PM_KEY (seal-mobile -> password-manager) ve SEAL_MOCK_KEY
+# Seal v3 paylaşılan anahtarları: SEAL_PM_KEY (seal-mobile -> Fortuna monolit PIN uçları) ve SEAL_MOCK_KEY
 # (seal-mobile -> seal-intranet mock yazma uçları). Kaynak: Vault secret/seal/v3 (mgmt). Yoksa üretilip yazılır.
 # Kullanım (source): source scripts/seal-keys.sh  ->  SEAL_PM_KEY, SEAL_MOCK_KEY ortam değişkenlerini ayarlar.
 set -euo pipefail
 
 _SEAL_REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-_SEAL_MGMT="kubectl --context kind-mgmt"
+_SEAL_MGMT="kubectl --context ${VAULT_CTX:-kind-bank-prod}"
 _SEAL_PATH="secret/seal/v3"
 
 _seal_vault() { $_SEAL_MGMT -n secrets exec deploy/vault -- env VAULT_TOKEN="$_SEAL_ROOT" "$@"; }

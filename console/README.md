@@ -1,46 +1,48 @@
-# DMZ lab test konsolu
+# DMZ lab konsolu (web ve mobil)
 
-Web, mobil, partner ve public senaryolarını tarayıcıdan çalıştırıp beklenen ve gerçek HTTP kodlarını karşılaştırmak için yerel bir test arayüzü. **Yalnız lab.**
+Web ve mobil kanal akışlarını tarayıcıdan çalıştırmak için yerel bir arayüz. **Yalnız lab.**
 
 ## Çalıştırma
 
-Ön koşullar: edge ayakta (`cd edge && docker compose up -d`), DMZ / iç / identity / mgmt cluster'ları kurulu, `kubectl` erişimi var, `openssl` PATH'te.
+Ön koşullar: edge ayakta (`cd edge && docker compose up -d`), bank-prod (auth-server, Fortuna, channel-gateway), bank-dmz-prod (Janus), codevo-dmz (Seal Mobile) kurulu, `kubectl` erişimi, `openssl` PATH'te.
+
+Repo kökünden:
 
 ```
-python console/server.py     # PYTHONIOENCODING=utf-8 önerilir (Windows konsolu)
+bash console/start.sh
 ```
 
 Sonra tarayıcıda: http://127.0.0.1:9000
 
 Sunucu başlarken iki şey yapar:
-1. `kubectl` ile `idp-secrets` secret'ını okur (client secret'ları ve lab test parolası yalnız bellekte).
-2. Identity IdP'ye `kubectl port-forward` açar (127.0.0.1:18080), kapanışta sonlandırır.
+1. `kubectl` ile bank-prod `auth-secrets` secret'ından alice parolasını okur. Yalnız bellekte tutulur, tarayıcıya gönderilmez.
+2. bank-prod `auth-server` için `kubectl port-forward` açar (127.0.0.1:18443). Kapanışta sonlandırılır.
 
-## Senaryolar
+Kanal uçları edge üzerinden (`127.0.0.1:8443`, SNI/Host): Janus `web.lab.local` ve `mobile-api.lab.local`, Seal `seal.lab.local`.
 
-| Kanal | Akış | Beklenen |
+## Akışlar
+
+| Kanal | Adımlar | Sonuç |
 |---|---|---|
-| Web | Giriş (PKCE, Bearer) → `/bff/accounts` | 200 |
-| Web | Web token'ı `/partner/payments` üzerinde | 403 (audience) |
-| Web | Çıkış | IdP 204 |
-| Mobil | Giriş (PKCE) → `/bff/accounts` | 200 |
-| Partner | Token (client credentials, mTLS) → `/partner/payments` | 200 |
-| Partner | Token yok | 401 |
-| Public | `GET /public/*` (web, mobil) | 200 |
-| Public | `POST /public/*` | 404 |
-| Public | `/bff/*` token yok | 401 |
+| Web | Müşteri no + parola → OTP iste (lab: kod ekranda) → SMS kodu → giriş → bakiye | Client token; `BALANCE` 200 |
+| Mobil | PIN → IdP (`mobile-app`, PKCE) → Seal PIN ve cihaz imzası → secure-login → mobile-login → bakiye | Client token; `BALANCE` 200 |
+| Mobil (yeni cihaz) | Yeni cihaz kimliği → Seal PIN + imza → OTP + parola (login-user) → aktivasyon (ACTIVE) → PIN kaydı → normal mobil giriş → bakiye | Client token; `BALANCE` 200 |
 
-Her düğme bir satır log yazar: istek, kullanılan auth, beklenen kod, gerçek kod, PASS/FAIL ve yanıtın kısa hali.
+Web'de Seal yoktur. Mobilde cihaz sertifikası her girişte geçici dizinde device CA ile üretilir ve silinir. Cihaz kimliği tarayıcı oturumunda tutulur: yeni cihazla aktive edilen cihaz, çıkıştan sonra da aynı oturumda "Yeni cihaz" kutusu işaretlenmeden kullanılabilir. Oturumda cihaz yoksa (yeni tarayıcı) önce yeni cihazla aktive edilmelidir. "İlk kez kurulum" kutusu PIN'i cihaza yeniden tanımlar (lab).
 
-## Bilinçli sınırlar (lab)
+İşlem (`BALANCE`) her zaman client token ile `/janus/transaction` üzerinden gider. Janus içeri giderken server token üretir ve channel-gateway'e iletir.
 
-- **Mobil login edge üzerinden** (DMZ `/realms` route'u), web ile aynı yol. Servis çağrıları (`/bff`, `/partner`, `/public`) da edge üzerinden geçer.
-- **Web login edge üzerinden** (DMZ `/realms` route'u).
-- **Parola:** Parola alanı boşsa lab test kullanıcısının (`alice`) parolası kullanılır. Hiçbir parola diske yazılmaz.
-- **Token gösterimi:** Ham token tarayıcıya gönderilmez; yalnız claim özeti (iss, aud, azp, channel, cnf varlığı, exp) gösterilir. İmza bu konsolda doğrulanmaz.
-- **Logout ve eski access token (ölçüldü):** Çıkıştan sonra eski access token ile `/bff/accounts` çağrısı **403** döner. ext-authz her istekte token exchange yaptığı için IdP, kapanmış kullanıcı oturumuna ait token'ı exchange'de reddeder. Yani dış token çıkışla fiilen geçersiz olur. İç token (exchange ile üretilmiş) ise kendi `exp`'ine kadar geçerlidir; bu süre design.md'deki iç token TTL'iyle sınırlıdır.
-- **Mobil çıkış:** Konsol refresh token'ı `/revoke` ucu ile iptal eder (RFC 7009, 200).
+## Bilinen sınırlar (lab)
+
+- Yeni cihaz her seferinde yeni bir cihaz kimliğiyle (`mob-…`) aktive edilir ve LegacyDB'de kalır (lab).
+- Client token (15 dk) ve splash (15 dk) dolunca konsol yenileme token'ı ile (8 saat, tek kullanımlık, her yenilemede döner) otomatik yeniler. Yenileme token'ı da geçersizse "oturum süresi doldu" mesajıyla yeniden giriş gerekir.
+- Mobil yenilemede cihaz durumu kontrol edilir: iptal edilmiş ya da kilitli cihaz yenileme yapamaz. Müşteri durumu yenilemede kontrol edilmez (lab sınırı).
+- PIN durumları Türkçe mesajla gösterilir: hatalı, kilitli, süresi dolmuş (`PIN_MESSAGES`). Yalnız "hatalı" durumu canlı test edildi; kilit ve süre dolumu eşleme olarak tanımlı, uçtan uca denenmedi.
+- OTP lab'da SMS ile gönderilmez; kod yanıtta döner (demo).
+- Captcha değeri `lab-captcha` sabittir.
+- Token'lar tarayıcıya gönderilmez. İşlem yanıtları Janus ve channel-gateway'den gelen JSON'dur.
+- Her mobil girişte IdP'de yeni bir oturum açılır.
 
 ## Güvenlik notu
 
-Sunucu yalnız `127.0.0.1:9000`'e bağlanır. Cookie `HttpOnly; SameSite=Strict`. Bu konsol prod'da kullanılmaz; test kullanıcısı ve client secret'ları yalnız lab içindir.
+Sunucu yalnız `127.0.0.1:9000`'e bağlanır. Oturum çerezi `HttpOnly; SameSite=Strict`. Parola ve token'lar diske yazılmaz. Cihaz sertifikası yalnız geçici dizinde üretilir ve giriş bitince silinir. Bu konsol prod'da kullanılmaz.

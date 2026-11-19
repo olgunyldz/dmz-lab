@@ -1,0 +1,172 @@
+# Platform (host, docker compose): LegacyDB, merkezi Prometheus, Loki, Tempo, Grafana.
+# Ağ: lab-platform (ayrı). Cluster'lar bu servislere kind ağının ağ geçidi (172.18.0.1) üzerinden,
+# yayınlanmış portlardan erişir; yerel arayüzler 127.0.0.1'e bağlıdır. Parolalar platform/.env (repoda yok).
+name: lab-platform
+
+services:
+  legacydb:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ibdb_fortuna
+      POSTGRES_USER: fortuna
+      POSTGRES_PASSWORD: ${LEGACYDB_PASSWORD}
+    ports:
+      - "127.0.0.1:30432:5432"   # cluster'lardan (Fortuna ACL, monolit) erişim
+    volumes:
+      - legacydb-data:/var/lib/postgresql/data
+    networks: [lab-platform]
+
+  prometheus:
+    image: prom/prometheus:v3.7.3
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+      - --web.enable-lifecycle
+      - --web.enable-remote-write-receiver
+    ports:
+      - "127.0.0.1:30090:9090"   # cluster agent'larının remote_write hedefi
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    networks: [lab-platform]
+
+  loki:
+    image: grafana/loki:3.5.7
+    restart: unless-stopped
+    command: ["-config.file=/etc/loki/loki.yml"]
+    ports:
+      - "127.0.0.1:30100:3100"   # Alloy log gönderimi
+      - "127.0.0.1:13100:3100"    # konsol ve yerel sorgular
+    volumes:
+      - ./config/loki.yml:/etc/loki/loki.yml:ro
+      - loki-data:/loki
+    networks: [lab-platform]
+
+  tempo:
+    image: grafana/tempo:2.10.2
+    restart: unless-stopped
+    command: ["-config.file=/etc/tempo/tempo.yml"]
+    ports:
+      - "127.0.0.1:30318:4318"   # OTLP (cluster'lar)
+      - "127.0.0.1:14318:4318"    # OTLP (konsol)
+      - "127.0.0.1:3200:3200"     # sorgu API
+    volumes:
+      - ./config/tempo.yml:/etc/tempo/tempo.yml:ro
+      - tempo-data:/var/tempo
+    networks: [lab-platform]
+
+  grafana:
+    image: grafana/grafana:11.6.10
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - ./config/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./config/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    networks: [lab-platform]
+
+  # ---- Fortuna monolit (eski legacy-demo cluster'ından taşındı) ----
+  fortuna-mock:
+    image: python:3.12-alpine
+    restart: unless-stopped
+    command: ["sh", "-c", "pip install -q --no-cache-dir --target /tmp/pylib psycopg[binary]==3.2.3 && PYTHONPATH=/tmp/pylib python /app/server.py"]
+    environment:
+      PORT: "8443"
+      TLS_CERT: /tls/fortuna-mock.crt
+      TLS_KEY: /tls/fortuna-mock.key
+      TLS_CA: /tls/ca.crt
+      ALLOWED_CLIENTS: "janus-web,janus-mobile,channel-gateway,seal-mobile"
+      PM_KEY: ${PM_KEY}
+      LEGACY_SYSTEM: fortuna
+      CA_FILE: /certs/ca.crt
+      SI_HOST: seal-intranet.seal-intranet.svc
+      SI_PORT: "30643"
+      IDP_HOST: id.bank.lab.local
+      IDP_PORT: "30543"
+      DB_DSN: "host=legacydb port=5432 dbname=ibdb_fortuna user=fortuna"
+      PGPASSWORD: ${LEGACYDB_PASSWORD}
+      SEAL_B2B_SECRET: ${SEAL_B2B_SECRET}
+    volumes:
+      - ../legacy-demo-cluster/app:/app:ro
+      - ../edge/certs/mtls:/tls:ro
+      - ../edge/certs/internal-ca.crt:/certs/ca.crt:ro
+    networks: [lab-platform]
+    depends_on: [legacydb]
+
+  # ---- Köprüler: cluster'lara ve cluster'lardan giden trafik (yalnızca bu servisler kind ağında) ----
+  idp-bridge:            # monolit -> IdP (bank-prod node:30543); takma ad id.bank.lab.local
+    image: alpine/socat:1.8.0.0
+    container_name: platform-idp-bridge
+    restart: unless-stopped
+    command: ["TCP-LISTEN:30543,fork,reuseaddr", "TCP:${BANKPROD_NODE_IP}:30543"]
+    networks:
+      lab-platform:
+        aliases: [id.bank.lab.local]
+      kind: {}
+
+  si-bridge:             # monolit -> Seal Intranet (codevo node:30643); takma ad seal-intranet.seal-intranet.svc
+    image: alpine/socat:1.8.0.0
+    container_name: platform-si-bridge
+    restart: unless-stopped
+    command: ["TCP-LISTEN:30643,fork,reuseaddr", "TCP:${CODEVO_NODE_IP}:30643"]
+    networks:
+      lab-platform:
+        aliases: [seal-intranet.seal-intranet.svc]
+      kind: {}
+
+  fortuna-bridge:        # cluster'lar -> monolit (kind tarafında :30890, monolit :8443)
+    image: alpine/socat:1.8.0.0
+    container_name: platform-fortuna-bridge
+    restart: unless-stopped
+    command: ["TCP-LISTEN:30890,fork,reuseaddr", "TCP:fortuna-mock:8443"]
+    networks: [lab-platform, kind]
+
+  # ---- Kind tarafı köprüleri: cluster'lar bu adreslere kind ağından ulaşır, host.docker.internal'a yönlenir ----
+  legacydb-kbridge:
+    image: alpine/socat:1.8.0.0
+    container_name: platform-legacydb
+    restart: unless-stopped
+    command: ["TCP-LISTEN:30432,fork,reuseaddr", "TCP:host.docker.internal:30432"]
+    networks: [kind]
+  prometheus-kbridge:
+    image: alpine/socat:1.8.0.0
+    container_name: platform-prometheus
+    restart: unless-stopped
+    command: ["TCP-LISTEN:30090,fork,reuseaddr", "TCP:host.docker.internal:30090"]
+    networks: [kind]
+  loki-kbridge:
+    image: alpine/socat:1.8.0.0
+    container_name: platform-loki
+    restart: unless-stopped
+    command: ["TCP-LISTEN:30100,fork,reuseaddr", "TCP:host.docker.internal:30100"]
+    networks: [kind]
+  tempo-kbridge:
+    image: alpine/socat:1.8.0.0
+    container_name: platform-tempo
+    restart: unless-stopped
+    command: ["TCP-LISTEN:30318,fork,reuseaddr", "TCP:host.docker.internal:30318"]
+    networks: [kind]
+
+networks:
+  lab-platform:
+    name: lab-platform
+  kind:
+    external: true
+    name: kind
+
+
+volumes:
+  legacydb-data:
+  prometheus-data:
+  loki-data:
+  tempo-data:
+  grafana-data:

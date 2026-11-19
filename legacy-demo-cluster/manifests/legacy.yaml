@@ -1,0 +1,100 @@
+# Fortuna monolith mock (lab): legacy-demo cluster'ında, ns fortuna. Kod ConfigMap'i fortuna-code, CA fortuna-ca,
+# seal-b2b sırrı fortuna-b2b (scripts/load-legacy.sh üretir/kopyalar). Repoda sır yok.
+# Seal Intranet (codevo-dmz, NodePort 30643) ve IdP (bank-prod, NodePort 30543) hostAliases ile eşlenir.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: fortuna
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fortuna-mock
+  namespace: fortuna
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: fortuna-mock}
+  template:
+    metadata:
+      labels: {app: fortuna-mock}
+    spec:
+      automountServiceAccountToken: false
+      hostAliases:
+        - ip: "__MGMT_NODE_IP__"
+          hostnames: ["legacydb.data.svc"]
+        - ip: "__CODEVO_NODE_IP__"
+          hostnames: ["seal-intranet.seal-intranet.svc"]
+        - ip: "__BANKPROD_NODE_IP__"
+          hostnames: ["id.bank.lab.local"]
+      containers:
+        - name: fortuna-mock
+          image: python:3.12-alpine
+          command: ["sh", "-c", "pip install -q --no-cache-dir --target /tmp/pylib psycopg[binary]==3.2.3 && PYTHONPATH=/tmp/pylib python /app/server.py"]
+          env:
+            - {name: PORT, value: "8443"}
+            - {name: TLS_CERT, value: /tls/server.crt}
+            - {name: TLS_KEY, value: /tls/server.key}
+            - {name: TLS_CA, value: /tls/ca.crt}
+            - {name: ALLOWED_CLIENTS, value: "janus-web,janus-mobile,channel-gateway,seal-mobile"}
+            - name: PM_KEY
+              valueFrom: {secretKeyRef: {name: fortuna-pm, key: PM_KEY}}
+            - {name: LEGACY_SYSTEM, value: fortuna}
+            - {name: CA_FILE, value: /certs/ca.crt}
+            - {name: SI_HOST, value: seal-intranet.seal-intranet.svc}
+            - {name: SI_PORT, value: "30643"}
+            - {name: IDP_HOST, value: id.bank.lab.local}
+            - {name: IDP_PORT, value: "30543"}
+            - {name: DB_DSN, value: "host=legacydb.data.svc port=30432 dbname=ibdb_fortuna user=fortuna"}
+            - name: PGPASSWORD
+              valueFrom: {secretKeyRef: {name: fortuna-db, key: POSTGRES_PASSWORD}}
+            - name: SEAL_B2B_SECRET
+              valueFrom: {secretKeyRef: {name: fortuna-b2b, key: SEAL_B2B_SECRET}}
+          ports:
+            - containerPort: 8443
+          readinessProbe:
+            httpGet: {path: /fortuna/health, port: 8443, scheme: HTTPS}
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65534
+            capabilities: {drop: ["ALL"]}
+          volumeMounts:
+            - {name: app, mountPath: /app, readOnly: true}
+            - {name: ca, mountPath: /certs, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+            - {name: tls, mountPath: /tls, readOnly: true}
+      volumes:
+        - name: app
+          configMap: {name: fortuna-code}
+        - name: ca
+          configMap: {name: fortuna-ca}
+        - name: tmp
+          emptyDir: {}
+        - name: tls
+          secret: {secretName: fortuna-mock-tls}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fortuna-mock
+  namespace: fortuna
+spec:
+  selector: {app: fortuna-mock}
+  ports:
+    - {name: https, port: 8443, targetPort: 8443}
+---
+# Janus (bank-dmz-prod) erişimi için NodePort
+apiVersion: v1
+kind: Service
+metadata:
+  name: fortuna-mock-nodeport
+  namespace: fortuna
+spec:
+  type: NodePort
+  selector: {app: fortuna-mock}
+  ports:
+    - {name: https, port: 8443, targetPort: 8443, nodePort: 30890}

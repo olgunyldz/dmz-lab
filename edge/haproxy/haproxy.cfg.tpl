@@ -1,17 +1,10 @@
-# ŞABLON: kurulum sırasında edge/scripts/render-haproxy.sh __DMZ_NODE_IP__ ve __DMZ_WORKER2_IP__ yerine
-# DMZ node IP'lerini yazar ve haproxy.cfg üretir. Doğrudan düzenlemeyin; haproxy.cfg üretilen dosyadır.
-# DMZ Edge — HAProxy (lab)
-#
-# Akış:
-#   Client :443 -> fe_public (L4)
-#       - IP başına bağlantı hızı / eşzamanlı bağlantı sınırı (DDoS, L4)
-#       - SNI = partner-api.lab.local  -> be_partner_pt (passthrough, mTLS gw-partner'da)
-#       - diğer                        -> be_edge_tls -> fe_https (127.0.0.1:8444, PROXY protocol)
-#   fe_https (L7)
-#       - TLS sonlandırma (public sertifika)
-#       - IP başına istek hızı sınırı (DDoS/kötüye kullanım, L7)
-#       - WAF: MOCK (demo; uygulama katmanı saldırı engelleme yok)
-#       - Host bazlı yönlendirme, re-encrypt -> be_gw_web / be_gw_mobile (sağlık kontrollü)
+# DMZ cluster'ları NodePort'larını 127.0.0.1'e yayınlar (kind extraPortMappings); edge onlara host.docker.internal üzerinden gider.
+# Edge kind ağına bağlı değildir. haproxy.cfg bu şablondan üretilir (edge/scripts/render-haproxy.sh).
+# DMZ Edge — HAProxy (lab), yeni cluster yapısı:
+#   seal.lab.local      -> codevo-dmz Seal Mobile (NodePort 30456), TLS passthrough (cihaz mTLS pod'da)
+#   web.lab.local       -> bank-dmz-prod janus-web (NodePort 30802), TLS edge'de sonlanır
+#   mobile-api.lab.local-> bank-dmz-prod janus-mobile (NodePort 30801), TLS edge'de sonlanır
+# Bilinen sınır: Janus'a bağlantı düz HTTP (zone kuralındaki mTLS henüz uygulanmadı).
 
 global
     log stdout format raw local0
@@ -24,20 +17,16 @@ defaults
     timeout connect 5s
     timeout client 30s
     timeout server 60s
-    timeout http-request 10s     # Yavaş istemci (slowloris) koruması
+    timeout http-request 10s
     timeout queue 10s
     retries 2
     option redispatch
 
-# ---------------------------------------------------------------------------
-# L4: public giriş (F1). TLS açılmaz, SNI'ye göre yönlendirilir.
-# ---------------------------------------------------------------------------
 frontend fe_public
     mode tcp
     bind *:443
     option tcplog
 
-    # L4 DDoS koruması: IP başına bağlantı hızı ve eşzamanlı bağlantı
     stick-table type ip size 1m expire 60s store conn_rate(10s),conn_cur
     tcp-request connection track-sc0 src
     tcp-request connection reject if { sc_conn_rate(0) gt 200 }
@@ -46,31 +35,17 @@ frontend fe_public
     tcp-request inspect-delay 5s
     tcp-request content accept if { req.ssl_hello_type 1 }
 
-    use_backend be_partner_pt if { req.ssl_sni -i partner-api.lab.local }
-    # Seal Mobile (SDK, cihaz mTLS): passthrough; TLS seal-mobile pod'unda sonlanır
     use_backend be_seal_pt if { req.ssl_sni -i seal.lab.local }
-    # Şube (teller.lab.local) HAProxy'den GEÇMEZ: şube cluster'ı gw-branch'e doğrudan (WAN, F10) bağlanır.
     default_backend be_edge_tls
 
 backend be_edge_tls
     mode tcp
     server fe_https 127.0.0.1:8444 send-proxy-v2
 
-backend be_partner_pt
-    mode tcp
-    # DMZ gw-partner NodePort (dmz-worker, dmz-worker2). TLS passthrough: mTLS gateway'de doğrulanır.
-    server dmz-worker __DMZ_NODE_IP__:30448 check
-    server dmz-worker2 __DMZ_WORKER2_IP__:30448 check
-
 backend be_seal_pt
     mode tcp
-    # DMZ gw-seal NodePort (30456). TLS passthrough: cihaz mTLS'i seal-mobile'da doğrulanır.
-    server dmz-worker __DMZ_NODE_IP__:30456 check
-    server dmz-worker2 __DMZ_WORKER2_IP__:30456 check
+    server codevo-worker host.docker.internal:30456 check
 
-# ---------------------------------------------------------------------------
-# L7: TLS sonlandırma, DDoS/rate limit, WAF, host yönlendirme, re-encrypt
-# ---------------------------------------------------------------------------
 frontend fe_https
     mode http
     bind 127.0.0.1:8444 accept-proxy ssl crt /certs/edge.pem
@@ -79,17 +54,13 @@ frontend fe_https
     unique-id-format %{+X}o\ %ci:%cp_%fi:%fp_%Ts_%rt:%pid
     unique-id-header X-Request-ID
 
-    # L7 DDoS / kötüye kullanım: IP başına istek hızı (10 sn pencere)
     stick-table type ip size 1m expire 10m store http_req_rate(10s)
     http-request track-sc0 src
     http-request deny deny_status 429 if { sc_http_req_rate(0) gt 50 }
 
-    # Tanımsız host'lar
     acl host_web hdr(host) -i web.lab.local
     acl host_mobile hdr(host) -i mobile-api.lab.local
     http-request return status 404 content-type text/plain string "not found" unless host_web || host_mobile
-
-    # MOCK WAF: güvenlik kontrolü YOK (demo). Coraza kaldırıldı; bu edge'de uygulama katmanı saldırı engelleme yoktur.
 
     http-request set-header X-Edge-Zone dmz-edge
     http-request set-header X-Forwarded-Proto https
@@ -98,35 +69,25 @@ frontend fe_https
     http-response set-header X-Content-Type-Options nosniff
     http-response del-header Server
 
-    use_backend be_gw_web if host_web
-    use_backend be_gw_mobile if host_mobile
+    use_backend be_janus_web if host_web
+    use_backend be_janus_mobile if host_mobile
 
-# DMZ gateway'leri NodePort üzerinden (dmz-worker, dmz-worker2).
-# Aktif sağlık kontrolü: GET /public/branches, 200 beklenir. Bu, DMZ -> iç gateway -> core zincirinin tamamını
-# doğrular; yalnız TLS el sıkışmasından daha anlamlı. Kontrol HAProxy'den gelir, frontend L7 limitine tabi değildir.
-backend be_gw_web
+backend be_janus_web
     mode http
     balance roundrobin
-    default-server inter 2s fall 2 rise 2 ssl verify required ca-file /certs/internal-ca.crt sni str(gw-web) check check-ssl check-sni gw-web
     option httpchk
-    http-check send meth GET uri /public/branches ver HTTP/1.1 hdr host web.lab.local
+    http-check send meth GET uri /janus/health ver HTTP/1.1 hdr host web.lab.local
     http-check expect status 200
-    server dmz-worker __DMZ_NODE_IP__:30446
-    server dmz-worker2 __DMZ_WORKER2_IP__:30446
+    server janus-web host.docker.internal:30802 check inter 2s fall 2 rise 2
 
-backend be_gw_mobile
+backend be_janus_mobile
     mode http
     balance roundrobin
-    default-server inter 2s fall 2 rise 2 ssl verify required ca-file /certs/internal-ca.crt sni str(gw-mobile) check check-ssl check-sni gw-mobile
     option httpchk
-    http-check send meth GET uri /public/branches ver HTTP/1.1 hdr host mobile-api.lab.local
+    http-check send meth GET uri /janus/health ver HTTP/1.1 hdr host mobile-api.lab.local
     http-check expect status 200
-    server dmz-worker __DMZ_NODE_IP__:30447
-    server dmz-worker2 __DMZ_WORKER2_IP__:30447
+    server janus-mobile host.docker.internal:30801 check inter 2s fall 2 rise 2
 
-# ---------------------------------------------------------------------------
-# İzleme (yalnız lab, host'ta 127.0.0.1'e bağlı)
-# ---------------------------------------------------------------------------
 frontend fe_stats
     mode http
     bind *:8404

@@ -2,8 +2,8 @@
 #
 # Katmanlar:
 #   - edge ağı : haproxy (LB, TLS, DDoS, host yönlendirme). WAF yok (mock; demo).
-#   - kind ağı : DMZ cluster'ı (kind-dmz). haproxy, DMZ gateway'lerine NodePort üzerinden bu ağdan bağlanır.
-#                Gateway'ler artık bu compose'da değil, DMZ cluster'ında (dmz-cluster/).
+#   - DMZ cluster'ları host'a yayınlanmış NodePort'lar üzerinden (host.docker.internal) erişilir; edge kind ağına bağlı değildir.
+#                Kanal servisleri (Janus, Seal) bu compose'da değil, cluster'larda (bank-dmz-prod-cluster/, codevo-dmz-cluster/).
 # Not: Lab'da gerçek firewall yoktur. Ayrımı docker ağları ve NetworkPolicy/firewall kuralları sağlar.
 
 name: dmz-edge-lab
@@ -20,11 +20,7 @@ services:
       - ./certs:/certs:ro
     networks:
       - edge
-      - kind                       # DMZ cluster NodePort'larına erişim (172.18.0.0/16)
 
 networks:
   edge:
     name: dmz-edge-lab-edge
-  kind:
-    external: true                 # kind-dmz cluster'ının docker ağı
-    name: kind
